@@ -1,45 +1,86 @@
 import * as THREE from 'three';
-import { Client, Callbacks } from '@colyseus/sdk';
-import { VERSION } from '@kula/shared';
+import type { Level } from '@kula/shared';
+import { setupInput } from './input.ts';
+import { connect, serverUrl, type Net } from './net.ts';
+import { CameraRig, type CameraMode } from './render/camera.ts';
+import { ItemsView } from './render/items.ts';
+import { buildLevel, findLevel, levelBounds } from './render/level.ts';
+import { PlayersView } from './render/players.ts';
+import { createScene } from './render/scene.ts';
+import { createDebug } from './ui/debug.ts';
+import { createHud } from './ui/hud.ts';
 
-const params = new URLSearchParams(location.search);
-const name = params.get('name') ?? `P-${Math.floor(1000 + Math.random() * 9000)}`;
-const serverUrl = params.get('server') ?? `ws://${location.hostname}:2567`;
-const hud = document.getElementById('hud')!;
+/** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
+const INTERP_TICKS = 2;
+const ACTIVE = new Set(['countdown', 'playing', 'results']);
 
-// Scene
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-document.body.appendChild(renderer.domElement);
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
-camera.position.set(2, 2, 3);
-camera.lookAt(0, 0, 0);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x333344, 2));
-const cube = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: 0x44aa88 }));
-scene.add(cube);
+const view = createScene();
+const hud = createHud();
+const debug = createDebug();
+const players = new PlayersView(view.scene);
+const items = new ItemsView(view.scene);
+const rig = new CameraRig(view.camera);
+players.onLocalMotion = debug.motion;
 
-function resize() {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
+let net: Net;
+try {
+  net = await connect();
+} catch (e) {
+  hud.error(`connection failed: ${serverUrl}`);
+  throw e;
 }
-addEventListener('resize', resize);
-resize();
-renderer.setAnimationLoop((t) => {
-  cube.rotation.set(t / 1000, t / 1500, 0);
-  renderer.render(scene, camera);
+net.room.onLeave(() => hud.error('disconnected'));
+
+let screenshot = false;
+let frozen = false;
+setupInput(net, {
+  onPress: debug.press,
+  onDebug: debug.toggle,
+  onScreenshot: () => { screenshot = true; },
+  onFreeze: () => { frozen = !frozen; },
 });
 
-// Network
-try {
-  const room = await new Client(serverUrl).joinOrCreate('race', { name });
-  const cb = Callbacks.get(room);
-  const update = () => { hud.textContent = `${name} · connected / ${room.state.players.size} players · v${VERSION}`; };
-  cb.onAdd('players', update);
-  cb.onRemove('players', update);
-  room.onMessage('event', () => {}); // sim events: FX/sounds in phase 04+
-  room.onLeave(() => { hud.textContent = 'disconnected'; });
-} catch (e) {
-  hud.textContent = `connection failed: ${serverUrl}`;
-  console.error(e);
-}
+if (import.meta.env.DEV) Object.assign(window, { kula: { net, players } }); // console/automation access
+
+let level: Level | null = null;
+let levelGroup: THREE.Group | null = null;
+let bounds = { center: new THREE.Vector3(), radius: 5 };
+let last = performance.now();
+
+view.renderer.setAnimationLoop((now: number) => {
+  const dtMs = Math.min(now - last, 100);
+  last = now;
+  if (frozen) return;
+  net.update(now, dtMs);
+  const s = net.state;
+  const me = net.sessionId;
+
+  if (s.levelId && level?.id !== s.levelId) {
+    level = findLevel(s.levelId);
+    if (levelGroup) view.scene.remove(levelGroup);
+    levelGroup = level ? buildLevel(level) : null;
+    if (level && levelGroup) { view.scene.add(levelGroup); bounds = levelBounds(level); }
+  }
+
+  const renderTick = net.estServerTick - INTERP_TICKS;
+  const active = ACTIVE.has(s.phase);
+  players.update(s, renderTick, me);
+  const mine = s.players.get(me);
+  items.update(s, active, !!level && !!mine && mine.keys >= level.keysRequired, now / 1000);
+
+  const pose = players.localPose(me);
+  const mode: CameraMode = !active || !mine || mine.spectating ? 'orbit' : pose ? 'follow' : 'hold';
+  rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
+
+  hud.update(s, me);
+  view.render();
+  debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me));
+
+  if (screenshot) {
+    screenshot = false;
+    const a = document.createElement('a');
+    a.href = view.renderer.domElement.toDataURL('image/png'); // same frame as render, so the buffer is intact
+    a.download = `kula-${s.phase}-${Date.now()}.png`;
+    a.click();
+  }
+});

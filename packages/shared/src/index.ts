@@ -11,3 +11,4 @@ export * from './sim/world.ts';
 export * from './sim/actions.ts';
 export * from './sim/keyRace.ts';
 export * from './sim/tick.ts';
+export * from './pose.ts';
