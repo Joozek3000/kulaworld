@@ -1,10 +1,11 @@
 import { defineServer, defineRoom } from 'colyseus';
 import { VERSION } from '@kula/shared';
-import { RaceRoom } from './rooms/RaceRoom.ts';
+import { config } from './config.ts';
+import { loadLevelFile, RaceRoom } from './rooms/RaceRoom.ts';
 
-try { process.loadEnvFile(new URL('../../../.env', import.meta.url)); } catch { /* no .env */ }
+loadLevelFile(config.level); // fail fast on an invalid level
 
-const port = Number(process.env.PORT ?? 2567);
 const server = defineServer({ rooms: { race: defineRoom(RaceRoom) } });
-server.listen(port);
-console.log(`kulaworld server v${VERSION} on :${port}`);
+if (config.latencyMs) server.simulateLatency(config.latencyMs);
+await server.listen(config.port);
+console.log(`kulaworld server v${VERSION} on :${config.port}, level ${config.level}, min players ${config.minPlayers}, latency ${config.latencyMs} ms`);

@@ -20,3 +20,9 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
 - 2026-09-24, phase 02: The time limit counts from world creation (tick 0), so the server should create the world when `playing` starts.
 - 2026-09-24, phase 02: The level check for "no duplicate item cells" also covers spawns (spawn/key/exit must all be distinct).
 - 2026-09-24, phase 02: Added dev dependency `@vitest/coverage-v8` (required by the phase's coverage check).
+- 2026-09-24, phase 03: `GameState.tick` is a round clock. It runs from -60 to 0 during the countdown, equals `world.tick` while playing (so action start/end ticks share its timeline), and keeps counting through results. `phaseEndTick` is on the same clock, so the client can show any phase's remaining time as `(phaseEndTick - tick) / 20`.
+- 2026-09-24, phase 03: The room uses Colyseus `setFixedTimestep(step, 20)` (fixed-step accumulator with capped catch-up) for the 50 ms simulation. Patch rate stays at the default 50 ms.
+- 2026-09-24, phase 03: Room settings (level, MIN_PLAYERS) come only from the server config module, never from client join options, so clients can't pick the level or bypass the player minimum. Tests override the exported `config` object.
+- 2026-09-24, phase 03: `LATENCY_MS` is passed to Colyseus `server.simulateLatency()`, which treats it as round-trip ms. It's ignored when NODE_ENV=production. `.env` is still loaded with `process.loadEnvFile`, and real env vars take precedence.
+- 2026-09-24, phase 03: Leaving during countdown/playing removes the player from the world. If no players remain in the world, the room returns to the lobby. A player who leaves during the lobby can make the remaining players "all ready", which starts the countdown.
+- 2026-09-24, phase 03: The integration test uses an in-process `defineServer` on port 2598 plus `@colyseus/sdk`, not `@colyseus/testing`, so there's no extra dependency.

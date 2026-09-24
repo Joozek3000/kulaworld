@@ -37,6 +37,7 @@ try {
   const update = () => { hud.textContent = `${name} · connected / ${room.state.players.size} players · v${VERSION}`; };
   cb.onAdd('players', update);
   cb.onRemove('players', update);
+  room.onMessage('event', () => {}); // sim events: FX/sounds in phase 04+
   room.onLeave(() => { hud.textContent = 'disconnected'; });
 } catch (e) {
   hud.textContent = `connection failed: ${serverUrl}`;
