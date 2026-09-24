@@ -1,0 +1,16 @@
+{
+  "name": "@kula/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@kula/shared": "*",
+    "colyseus": "^0.18.8",
+    "@colyseus/schema": "^5.0.34"
+  }
+}

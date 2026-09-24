@@ -1,0 +1,240 @@
+# Architecture: Kulaworld MVP
+
+## 1. Scope of the MVP
+
+- 1–8 players in a browser, server-authoritative, one mode: **Key Race**.
+- Grid movement: roll, turn, jump, edge-flip (gravity change), fall, death/respawn.
+- Players block each other (no bumping yet).
+- Placeholder visuals.
+- Out of scope for the MVP: bumping/knockback, pickups, client-side prediction, other modes, level editor, art.
+
+## 2. Repo layout
+
+```
+kulaworld/
+  CLAUDE.md
+  package.json            (workspaces, root scripts)
+  tsconfig.base.json
+  levels/                 test-flat.json, test-cube.json, ...
+  packages/
+    shared/src/
+      dir.ts vec.ts rng.ts constants.ts
+      level/   types.ts load.ts validate.ts
+      sim/     world.ts actions.ts tick.ts keyRace.ts
+      pose.ts  (float render interpolation, used by client + bots)
+      index.ts
+    server/src/
+      index.ts            (Colyseus server, env config)
+      rooms/RaceRoom.ts
+      schema/State.ts     (Colyseus schema mirror of sim state)
+    client/src/
+      main.ts net.ts input.ts
+      render/ scene.ts level.ts players.ts items.ts camera.ts
+      ui/     hud.ts debug.ts
+  tools/bots/src/index.ts
+  docs/ ARCHITECTURE.md DECISIONS.md prompts/ reports/
+```
+
+The layout is a suggestion. The rule that all game rules live in shared is not.
+
+## 3. Coordinates and directions
+
+- World is an integer grid. `Vec3 = { x, y, z }` (ints). A **block** fills a cell. Empty cells are air.
+- `Dir` enum: `PX=0, NX=1, PY=2, NY=3, PZ=4, NZ=5`. JSON uses strings `"+X" "-X" "+Y" "-Y" "+Z" "-Z"`.
+- Helpers: `dirVec(d)`, `opposite(d)`, `cross(a, b)` (returns a Dir; asserts perpendicular), `add`, `sub`, `scale`, `cellKey(v)` → `"x,y,z"`.
+- Three.js is right-handed, and so is this grid (same axes).
+
+## 4. Player sim state
+
+A ball occupies one **empty cell**. `up` is its gravity (the face normal of the block it stands on). `fwd` is perpendicular to `up`.
+
+```
+cell: Vec3        // the air cell the ball is in
+up:   Dir         // ball stands on block at cell - up
+fwd:  Dir         // perpendicular to up
+action: Idle | Roll | Turn | Flip | Jump | Fall | Dead
+from: {cell, up, fwd}   to: {cell, up, fwd}
+startTick, endTick
+keys: number
+```
+
+When an action starts, `from` is the current state and `to` is the result. When `tick === endTick` the player's state becomes `to` and the action becomes `Idle` (or chains, see §6).
+
+## 5. Movement rules
+
+Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is at v, `free(v)` = not solid and not reserved by another player (§7).
+
+**Forward (Roll / Flip)**, from Idle:
+1. `A = C + F`. If `solid(A)`, the move is **blocked** (wall) and nothing happens.
+2. If `solid(A − U)`, **Roll**: `to.cell = A`, same up/fwd. Requires `free(A)`.
+3. Otherwise, **Flip** over the edge of the block the ball stands on: `to.cell = C − U + F`, `to.up = F`, `to.fwd = −U`. Requires `free(A)` and `free(C − U + F)`.
+
+**Turn** (left/right pulse): the cell is unchanged.
+- `left: to.fwd = cross(U, F)`
+- `right: to.fwd = cross(F, U)`
+- Check: with U=+Y and F=+Z, right is −X. This matches a Three.js camera behind the ball looking along F. Unit-test it.
+
+**Jump** (pulse), up to 2 cells along F through the air:
+1. `A1 = C + F`, `A2 = C + 2F`. If `solid(A1)` or `!free(A1)`, the jump is blocked.
+2. If `solid(A2)` or `!free(A2)`, it becomes a short jump with landing cell `L = A1`. Otherwise `L = A2`.
+3. Jump action: `to.cell = L`, same up/fwd, duration `JUMP_TICKS` (short jumps also use it).
+4. On landing, if `solid(L − U)` the player goes Idle. Otherwise a **Fall** starts immediately.
+
+**Fall**, one cell per `FALL_TICKS_PER_CELL` along −U:
+- Before each step: if `solid(C − U)`, land and go Idle.
+- Otherwise step to `C − U`.
+- If the cell leaves the level AABB expanded by `KILL_MARGIN` on all sides, the player goes **Dead**.
+- MVP simplification: falls ignore other players. Overlap is allowed until one of them moves.
+
+**Dead**: after `RESPAWN_TICKS`, respawn at the first free spawn point. Keys are kept (death costs time only). Log this in DECISIONS.md if you change it.
+
+## 6. Timing and input
+
+Server tick is 20 Hz (50 ms). Constants live in `shared/constants.ts`:
+
+| Constant | Ticks |
+|---|---|
+| ROLL_TICKS | 5 |
+| TURN_TICKS | 3 |
+| FLIP_TICKS | 6 |
+| JUMP_TICKS | 10 |
+| FALL_TICKS_PER_CELL | 2 |
+| RESPAWN_TICKS | 40 |
+| INPUT_BUFFER_TICKS | 6 |
+| KILL_MARGIN (cells) | 6 |
+
+- The client sends an `input` message when input changes: `{ seq, fwdHeld: boolean, turn: -1|0|1, jump: boolean }`. `turn` and `jump` are pulses.
+- The server stores `fwdHeld` plus **one buffered pulse** (the latest wins). A pulse expires after `INPUT_BUFFER_TICKS`.
+- When a player is Idle on a tick (including the tick its previous action ended), it picks the next action in priority order: **buffered jump > buffered turn > fwdHeld**. So holding forward rolls continuously, and turning mid-roll takes effect the moment the roll ends.
+- Actions can't be cancelled.
+
+## 7. Tick order and reservations
+
+Each tick, `step(world, inputs)` in shared runs:
+1. Apply inputs received since the last tick.
+2. **Finish actions** where `endTick === tick`: apply `to`, run pickups/exit checks (§8), and continue falls.
+3. **Start actions** for Idle players. Iterate players in join order, rotated by `tick % playerCount` for fairness.
+4. Run mode logic (§8): win check and timer.
+
+**Reservations**: a map `cellKey → playerId` containing each player's current cell plus the target cell(s) of their in-progress action. `free(v)` = not solid and (not reserved, or reserved by self). The sim must be deterministic, and replaying the same inputs must give the same state (test this).
+
+## 8. Key Race mode
+
+- The level defines `keys[]`, an `exit`, `keysRequired` and `timeLimitSec`.
+- A key is collected when a player's action **finishes** in its cell (roll, flip, jump landing or fall landing, not mid-air). A collected key is removed for everyone.
+- The exit is locked for a player until they hold `keysRequired` keys. The first player to finish an action in the exit cell while unlocked wins.
+- Timeout: most keys wins. A tie is a draw.
+- Room phases: `lobby → countdown (3 s) → playing → results (5 s) → lobby`.
+  - Lobby: players toggle ready (R). Start when everyone is ready and players ≥ `MIN_PLAYERS` (env, default 1 in dev, 2 in prod).
+  - Each round reloads the level (keys reset, players at spawns).
+
+## 9. Level format (`levels/*.json`)
+
+```json
+{
+  "id": "test-cube",
+  "name": "Test Cube",
+  "version": 1,
+  "blocks": [[0,0,0], [1,0,0]],
+  "boxes": [{ "min": [0,0,0], "max": [4,4,4], "hollow": false }],
+  "spawns": [{ "cell": [2,5,2], "up": "+Y", "fwd": "+Z" }],
+  "keys":   [{ "cell": [2,-1,2], "up": "-Y" }],
+  "exit":   { "cell": [5,2,2], "up": "+X" },
+  "keysRequired": 3,
+  "timeLimitSec": 120
+}
+```
+
+- `blocks` and `boxes` are merged. The loader expands boxes into a `Set<cellKey>`.
+- `validateLevel()` returns a list of errors. It checks that:
+  - spawn, key and exit cells are empty and `solid(cell − up)`
+  - each spawn's `fwd` is perpendicular to its `up`
+  - there are ≥ 4 spawns
+  - there are no duplicate item cells
+  - `keys.length ≥ keysRequired`
+- The server refuses to load an invalid level. A Vitest suite validates every file in `levels/`.
+
+Required test levels:
+- `test-flat`: a 9×1×9 platform with a 1-wide gap (jumpable), a 2-wide gap (not jumpable), a wall block and an edge to flip over. 4 spawns, 3 keys, keysRequired 2.
+- `test-cube`: a solid 5×5×5 cube. Spawns on the top face. Keys spread over the other 5 faces. Exit on the bottom face. keysRequired 3. This exercises flips on every face.
+
+## 10. Networking (Colyseus)
+
+- Room name `race`, `maxClients 8`, join options `{ name }`.
+- Schema `GameState`:
+  - `phase`, `tick`, `phaseEndTick`, `levelId`, `winnerId`
+  - `players: MapSchema<PlayerS>`, `items: MapSchema<ItemS>`
+- `PlayerS`: `id`, `name`, `color`, `action`, `from*` / `to*` (cell xyz as int16, up, fwd), `startTick`, `endTick`, `keys`, `ready`.
+- The server owns a plain sim `World` and copies it into the schema after each step. Don't make the schema the sim state.
+- Messages: client → server `input` and `ready`. Server → client `event` (`{type:'key'|'win'|'death', ...}`) for sounds/FX later.
+- Env (read from `.env`): `PORT` (2567), `MIN_PLAYERS`, `LEVEL` (default `test-cube`), `LATENCY_MS` (use Colyseus `simulateLatency` if available, otherwise log in DECISIONS.md what you used).
+
+**Client time and rendering**: the client doesn't simulate. It keeps `estServerTick` (a float), updated from each patch's `tick` plus the local elapsed time, and smoothed so it never jumps backwards. It renders at `renderTick = estServerTick − INTERP_TICKS` (2). For each player, `pose.ts` computes the position/orientation from `(action, from, to, progress)`:
+- Roll: lerp the position and rotate the ball around the axis `cross(U, F)`.
+- Turn: slerp the orientation around U.
+- Flip: the ball's centre sweeps a semicircle around the edge line `E = (C − U) + 0.5·U + 0.5·F`. The offset `(C − E)` rotates by 0→π about the axis `cross(U, F)`. Meanwhile the up vector rotates 90° from U to F (the camera follows the up vector, not the position arc). Unit-test the start, mid and end points.
+- Jump: lerp plus a parabola along U (peak 1.2 cells).
+- Fall: linear along −U.
+- Dead: hidden.
+
+`pose.ts` is float math used only for display. It never feeds back into the sim.
+
+## 11. Client
+
+- Controls:
+  - W/↑: forward (hold)
+  - A/D or ←/→: turn (pulse)
+  - Space: jump
+  - R: ready
+  - F3: debug overlay
+- Level: `InstancedMesh` of unit boxes with thin edge lines.
+- Ball: a sphere (r = 0.4) with two coloured hemispheres so rolling is visible.
+- Keys: yellow spinning octahedrons. Exit: a torus, grey when locked and green when unlocked for the local player.
+- Other players get CSS2D name labels.
+- Camera: follow cam at `ball − F·4 + U·2.5` looking at `ball + F·1.5`, with `camera.up = U`. The position and quaternion are damped (not snapped) so flips and turns rotate smoothly.
+- HUD (HTML overlay): phase/countdown, timer, keys x/required, player list with ready state and keys, and a results banner.
+- Debug overlay: estServerTick, ping, local player action/cell/up/fwd, patch rate.
+- URL params: `?name=Bob` and `?server=ws://host:2567`. Vite runs with `--host` for LAN tests.
+
+## 12. Solo multiplayer testing
+
+1. **Unit tests**: the sim is where the bugs are. Test every rule in §5–§8 with tiny hand-built worlds. Include a determinism replay test.
+2. **Multiple tabs**: each tab is a player (`?name=A`, `?name=B`).
+3. **Bots** (`npm run bots -- --count N --behaviour wander|seek`): headless Colyseus clients.
+   - `wander`: random inputs.
+   - `seek`: BFS over `(cell, up, fwd)` states using the shared move rules to reach the nearest key, then the exit.
+4. **Latency**: set `LATENCY_MS=150` in `.env`, run `npm run dev`, then check that motion is still smooth.
+5. **LAN**: join from a phone or a second PC.
+
+## 13. Roadmap after the MVP (not now)
+
+Bump/knockback, pickups (speed, heavy, gravity lock, crumble trap), client prediction using the shared sim, paint/tag/arena modes, a level editor, a visual style pass, audio.
+
+## 14. PvP (planned for phase 06+, not in the MVP)
+
+Design this now so phase 02 doesn't make it hard to add later.
+
+**Push** (the core PvP action):
+- Trigger: player P starts a Roll into cell `A` occupied by victim V, where V is Idle or Turning and `V.up === P.up`. Players on different gravity faces can't push each other.
+- If `A + F` is free (not solid, not reserved), V gets a `Knocked` action: it moves to `A + F` over `KNOCK_TICKS` (4). P's roll into `A` proceeds normally.
+  - After the knock, if `solid(A + F − U)` V lands. Otherwise V **falls** along −U. At the edge of the map this means death.
+  - V is then `Stunned` for `STUN_TICKS` (8): no actions, but it can still be pushed.
+- If `A + F` is blocked, the push fails: P bounces back into its own cell and is stunned for `STUN_TICKS`. V is unaffected. This means pinning someone against a wall doesn't work.
+- Head-on: if two players start moves into each other's cell (or the same cell) on the same tick, both bounce and both are stunned. Nobody wins through tick order.
+- Pushing a moving player: blocked as in the MVP. A push only lands on a player who is standing still.
+
+**Death with PvP**: a death drops 1 key, which goes back to its original spot. (This replaces the MVP rule that keys are kept.) If the victim was knocked within the last 60 ticks, the pusher gets a `knockout` event for credit.
+
+**Modes using it**:
+- **Key Race + push**: the default once PvP lands. Knocking the leader off steals their progress.
+- **Knockout**: a small arena, no keys, 3 lives. Last ball rolling wins. After 60 s the outer ring of tiles starts crumbling inward every 10 s.
+
+**Later options (don't build yet)**:
+- Charged ram: hold fwd for 1 s to push 2 cells.
+- Heavy pickup: can't be pushed.
+- Jump-stomp: landing on a player stuns them.
+
+**Sim implications (respect these in phase 02)**:
+- Keep move resolution in one function that sees all players' intended actions for the tick. Don't use per-player "if blocked, return" early exits scattered around.
+- Action and state enums must be easy to extend (`Knocked`, `Stunned`).
+- The fall start must be a reusable function, not inlined in Jump.
