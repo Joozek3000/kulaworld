@@ -66,7 +66,12 @@ describe('turn', () => {
 });
 
 describe('jump', () => {
-  const jump = (w: ReturnType<typeof makeWorld>) => { setInput(w, 'p0', input({ jump: true })); step(w); };
+  /** Jump pulse with fwd held for the first tick only: a forward jump that doesn't chain into rolls. */
+  const jump = (w: ReturnType<typeof makeWorld>) => {
+    setInput(w, 'p0', input({ fwdHeld: true, jump: true }));
+    step(w);
+    setInput(w, 'p0', input({}));
+  };
 
   test('full 2-cell landing', () => {
     const w = makeWorld(row(0, 4), [onRow()]);
@@ -92,10 +97,11 @@ describe('jump', () => {
     expect(player(w).to.cell).toEqual(vec(1, 1, 0));
   });
 
-  test('blocked when A1 is solid', () => {
+  test('forward jump into a wall (A1 solid) hops instead', () => {
     const w = makeWorld([...row(0, 4), [1, 1, 0]], [onRow()]);
     jump(w);
-    expect(player(w).action).toBe(Action.Idle);
+    expect(player(w).action).toBe(Action.Hop);
+    expect(player(w).to.cell).toEqual(vec(0, 1, 0));
   });
 
   test('over a gap into air, then falls onto a lower block', () => {
@@ -126,7 +132,9 @@ describe('fall and death', () => {
     const w = makeWorld([[0, 0, 0], [5, 0, 0]], [onRow(), [[5, 1, 0], '+Y', '+X']]);
     const p0 = player(w), p1 = player(w, 'p1');
     p0.keys = 2;
-    setInput(w, 'p0', input({ jump: true }));
+    setInput(w, 'p0', input({ fwdHeld: true, jump: true }));
+    step(w);
+    setInput(w, 'p0', input({}));
     let deathTick = -1, respawnTick = -1;
     for (let i = 0; i < 200 && respawnTick < 0; i++) {
       for (const e of step(w)) {
@@ -223,8 +231,8 @@ describe('input', () => {
   test.each([
     ['turn beats held fwd', [{ fwdHeld: true, turn: 1 }], Action.Turn],
     ['jump beats held fwd', [{ fwdHeld: true, jump: true }], Action.Jump],
-    ['jump beats turn in one message', [{ turn: 1, jump: true }], Action.Jump],
-    ['latest pulse wins (jump)', [{ turn: -1 }, { jump: true }], Action.Jump],
+    ['jump (as hop) beats turn in one message', [{ turn: 1, jump: true }], Action.Hop],
+    ['latest pulse wins (jump → hop)', [{ turn: -1 }, { jump: true }], Action.Hop],
     ['latest pulse wins (turn)', [{ jump: true }, { turn: 1 }], Action.Turn],
   ] as const)('priority: %s', (_, inputs, expected) => {
     const w = makeWorld(row(0, 5), [onRow()]);
@@ -246,5 +254,55 @@ describe('input', () => {
     run(w, age);
     expect(p.action).toBe(expected);
     expect(p.pulse).toBe(null);
+  });
+});
+
+describe('hop', () => {
+  test('jump pulse without fwd hops in place for JUMP_TICKS', () => {
+    const w = makeWorld(row(0, 4), [onRow()]);
+    const p = player(w);
+    setInput(w, 'p0', input({ jump: true }));
+    step(w);
+    expect(p.action).toBe(Action.Hop);
+    expect(p.to).toEqual(p.pose);
+    expect(p.endTick - p.startTick).toBe(JUMP_TICKS);
+    run(w, JUMP_TICKS);
+    expect(p.action).toBe(Action.Idle);
+    expect(p.pose.cell).toEqual(vec(0, 1, 0));
+  });
+
+  test('hop under a ceiling is blocked and the pulse is spent', () => {
+    const w = makeWorld([...row(0, 4), [0, 2, 0]], [onRow()]);
+    const p = player(w);
+    setInput(w, 'p0', input({ jump: true }));
+    step(w);
+    expect(p.action).toBe(Action.Idle);
+    expect(p.pulse).toBe(null);
+  });
+
+  test.each([
+    ['W held → forward jump chains at the roll end', true, Action.Jump, vec(3, 1, 0)],
+    ['W released before the roll ends → hop', false, Action.Hop, vec(1, 1, 0)],
+  ] as const)('jump pressed mid-roll, %s', (_, held, expected, target) => {
+    const w = makeWorld(row(0, 5), [onRow()]);
+    const p = player(w);
+    setInput(w, 'p0', input({ fwdHeld: true }));
+    step(w); // roll 0 → 1, ends at tick 1 + ROLL_TICKS
+    run(w, 2);
+    setInput(w, 'p0', input({ fwdHeld: held, jump: true }));
+    run(w, 1 + ROLL_TICKS - w.tick);
+    expect(p.action).toBe(expected);
+    expect(p.startTick).toBe(1 + ROLL_TICKS);
+    expect(p.to.cell).toEqual(target);
+  });
+
+  test("a player can't roll into a hopping player's cell", () => {
+    const w = makeWorld(row(0, 3), [onRow(), [[1, 1, 0], '+Y', '+X']]);
+    setInput(w, 'p1', input({ jump: true }));
+    step(w);
+    expect(player(w, 'p1').action).toBe(Action.Hop);
+    setInput(w, 'p0', input({ fwdHeld: true }));
+    run(w, 3);
+    expect(player(w).action).toBe(Action.Idle);
   });
 });

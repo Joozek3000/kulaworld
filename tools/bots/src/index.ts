@@ -19,7 +19,7 @@ if (values.behaviour !== 'wander') throw new Error(`unknown --behaviour ${values
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const between = (a: number, b: number) => a + Math.random() * (b - a);
 
-interface Stats { rounds: number; wins: number; keys: number; deaths: number }
+interface Stats { rounds: number; wins: number; keys: number; deaths: number; hops: number }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
 async function connect(client: Client, name: string): Promise<Room> {
@@ -34,10 +34,10 @@ async function connect(client: Client, name: string): Promise<Room> {
   }
 }
 
-/** wander: ready up in the lobby; while playing hold forward and send a random turn/jump pulse every 300-1200 ms. */
+/** wander: ready up in the lobby; while playing hold forward and send a random turn/jump/hop pulse every 300-1200 ms. */
 async function runBot(client: Client, name: string): Promise<Stats> {
   const room = await connect(client, name);
-  const stats: Stats = { rounds: 0, wins: 0, keys: 0, deaths: 0 };
+  const stats: Stats = { rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0 };
   const me = () => room.state.players?.get(room.sessionId);
   let seq = 0;
   let nextPulseAt = 0;
@@ -64,10 +64,13 @@ async function runBot(client: Client, name: string): Promise<Stats> {
     }
     const playing = phase === 'playing' && !p.spectating;
     if (playing && (!wasPlaying || Date.now() >= nextPulseAt)) {
-      const r = Math.random();
-      const pulse = wasPlaying ? { turn: r < 0.35 ? -1 : r < 0.7 ? 1 : 0, jump: r >= 0.7 } : { turn: 0, jump: false };
-      room.send('input', { seq: ++seq, fwdHeld: true, ...pulse });
-      nextPulseAt = Date.now() + between(300, 1200);
+      // 10% hop (jump with fwd released for this message), 30% left, 30% right, 20% forward jump, 10% just roll.
+      const r = wasPlaying ? Math.random() : 1;
+      const hop = r < 0.1;
+      const pulse = { turn: r < 0.1 ? 0 : r < 0.4 ? -1 : r < 0.7 ? 1 : 0, jump: hop || (r >= 0.7 && r < 0.9) } as const;
+      room.send('input', { seq: ++seq, fwdHeld: !hop, ...pulse });
+      if (hop) stats.hops++;
+      nextPulseAt = Date.now() + (hop ? 600 : between(300, 1200)); // after a hop, resume holding fwd soon
     }
     wasPlaying = playing;
   }, 100);
@@ -89,6 +92,6 @@ const results = await Promise.allSettled(names.map((n) => runBot(client, n)));
 console.log('\nsummary');
 results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
-  else console.log(`  ${names[i]}: rounds ${r.value.rounds}, wins ${r.value.wins}, keys ${r.value.keys}, deaths ${r.value.deaths}`);
+  else console.log(`  ${names[i]}: rounds ${r.value.rounds}, wins ${r.value.wins}, keys ${r.value.keys}, deaths ${r.value.deaths}, hops sent ${r.value.hops}`);
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

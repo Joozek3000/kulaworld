@@ -31,3 +31,12 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
 - 2026-09-24, phase 04: The follow camera is `frameQuat × Q0`, where Q0 is a constant local look-down orientation. Its position is `ball + frame·(0, 2.5, −4)`. There is no world-space `lookAt`, so a 90° change of up can't gimbal-flip it. Both are damped with `1 − exp(−10·dt)`.
 - 2026-09-24, phase 04: The key light is attached to the camera, since there is no fixed sky when gravity can point along any axis.
 - 2026-09-24, phase 04: Dev helpers: F8 freezes the rendered frame (for screenshots), F9 downloads a canvas PNG, and `window.kula` (DEV builds only) exposes net/players for automation.
+- 2026-09-24, phase 04b: Jump like the original. `Action.Hop = 7` is appended, and `Cmd` gains `'hop'`. When a jump pulse is used, `commands()` produces `['jump', 'hop']` if fwd is held on that tick, otherwise `['hop']`. So a blocked forward jump falls back to a hop, and the pulse is spent once. A hop reserves only its own cell and is blocked by a block at C+U.
+- 2026-09-24, phase 04b: Latency experiment, local ball at `estServerTick − 1` (others stay at −2). Measured input→motion, 6 single-tile taps each:
+  - LATENCY_MS=0: 196 → 139 ms.
+  - LATENCY_MS=150: 354 → 290 ms.
+  - Late-segment snaps: 0 in all four runs, each including 8 s of chained rolls/flips.
+  - **Kept −1.** It can be overridden with `?localInterp=2`. The F3 "late segs" counter watches for snaps on real networks with jitter; `simulateLatency` has none.
+- 2026-09-24, phase 04b: `RenderPose.lift` (the jump/hop height) is added, and the follow camera tracks `position − up·lift`. If the camera follows the hop height, the ground moves instead of the ball, and a hop barely reads.
+- 2026-09-24, phase 04b: The client calls `room.leave()` on `pagehide`. Navigating to a new URL put the old page in the back/forward cache, where it kept its seat, so the next join became a spectator.
+- 2026-09-24, phase 04b: Ball contact (`−U·0.1` along the pose's `up`) was already in place from phase 04. It was verified visually on a side face.

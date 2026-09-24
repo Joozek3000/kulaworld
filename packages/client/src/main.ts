@@ -12,6 +12,8 @@ import { createHud } from './ui/hud.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
 const INTERP_TICKS = 2;
+/** The local ball may render closer to the server (less input delay). Overridable with ?localInterp= for experiments. */
+const LOCAL_INTERP_TICKS = Number(new URLSearchParams(location.search).get('localInterp') ?? 1);
 const ACTIVE = new Set(['countdown', 'playing', 'results']);
 
 const view = createScene();
@@ -64,7 +66,7 @@ view.renderer.setAnimationLoop((now: number) => {
 
   const renderTick = net.estServerTick - INTERP_TICKS;
   const active = ACTIVE.has(s.phase);
-  players.update(s, renderTick, me);
+  players.update(s, renderTick, me, net.estServerTick - LOCAL_INTERP_TICKS);
   const mine = s.players.get(me);
   items.update(s, active, !!level && !!mine && mine.keys >= level.keysRequired, now / 1000);
 
@@ -74,7 +76,7 @@ view.renderer.setAnimationLoop((now: number) => {
 
   hud.update(s, me);
   view.render();
-  debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me));
+  debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me), players.localLate(me), LOCAL_INTERP_TICKS);
 
   if (screenshot) {
     screenshot = false;

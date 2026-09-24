@@ -42,3 +42,11 @@ describe('follow camera', () => {
     expect(1 - (1 - half) * (1 - half)).toBeCloseTo(one, 12);
   });
 });
+
+test('camera ignores hop/jump height', () => {
+  const p: Pose = { cell: vec(0, 1, 0), up: 2, fwd: 4 };
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), q = new THREE.Quaternion();
+  followTarget(poseAt(Action.Hop, p, p, 0), a, q);
+  followTarget(poseAt(Action.Hop, p, p, 0.5), b, q);
+  expect(a.distanceTo(b)).toBeLessThan(1e-9);
+});

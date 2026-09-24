@@ -10,12 +10,13 @@ const DAMP_PER_SEC = 10;
 const ORBIT_SPEED = 0.15; // rad/s
 
 const frame = new THREE.Quaternion(), m = new THREE.Matrix4(), Y = new THREE.Vector3(0, 1, 0);
-const goalPos = new THREE.Vector3(), goalQuat = new THREE.Quaternion(), ball = new THREE.Vector3();
+const goalPos = new THREE.Vector3(), goalQuat = new THREE.Quaternion(), ball = new THREE.Vector3(), up = new THREE.Vector3();
 
-/** Desired follow-camera transform for a ball pose. */
+/** Desired follow-camera transform for a ball pose. Ignores jump/hop height so the camera stays steady and the jump reads. */
 export function followTarget(pose: RenderPose, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
   frame.fromArray(pose.quat);
-  outPos.copy(OFFSET).applyQuaternion(frame).add(ball.fromArray(pose.position));
+  ball.fromArray(pose.position).addScaledVector(up.fromArray(pose.up), -pose.lift);
+  outPos.copy(OFFSET).applyQuaternion(frame).add(ball);
   outQuat.copy(frame).multiply(Q0);
 }
 

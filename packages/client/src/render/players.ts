@@ -36,6 +36,10 @@ class PlayerView {
   private renderedSerial = -1;
   private renderedAction: number = Action.Idle;
   private spinBase = 0;
+  private lastRenderTick = -Infinity;
+  /** Snap metric: moving segments that arrived after renderTick had passed their start, and the worst lateness (ticks). */
+  lateCount = 0;
+  lateMax = 0;
   readonly pose: RenderPose = newRenderPose();
   readonly ball = new THREE.Group();
   readonly label: CSS2DObject | null;
@@ -76,6 +80,12 @@ class PlayerView {
     setPose(n.from, p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd);
     setPose(n.to, p.toX, p.toY, p.toZ, p.toUp, p.toFwd);
     this.count = Math.min(this.count + 1, HISTORY);
+    // A moving segment that starts before what's already on screen arrived late: the ball has to jump into it.
+    const late = this.lastRenderTick - effStart(n);
+    if (late > 0.05 && n.action !== Action.Idle && n.action !== Action.Dead) {
+      this.lateCount++;
+      this.lateMax = Math.max(this.lateMax, late);
+    }
   }
 
   clear(): void { this.count = 0; }
@@ -90,6 +100,7 @@ class PlayerView {
 
   /** Returns true when the rendered segment changed. */
   update(renderTick: number, show: boolean): boolean {
+    this.lastRenderTick = renderTick;
     const s = this.select(renderTick);
     const changed = s.serial !== this.renderedSerial;
     if (changed) {
@@ -136,7 +147,8 @@ export class PlayersView {
 
   constructor(private scene: THREE.Scene) {}
 
-  update(state: GameState, renderTick: number, localId: string): void {
+  /** The local ball renders at localRenderTick (it may run closer to the server than the others). */
+  update(state: GameState, renderTick: number, localId: string, localRenderTick = renderTick): void {
     const newRound = state.phase === 'countdown' && this.lastPhase !== 'countdown';
     this.lastPhase = state.phase;
     const active = ACTIVE.has(state.phase);
@@ -146,7 +158,7 @@ export class PlayersView {
       if (!v) this.views.set(id, (v = new PlayerView(p, id === localId, this.scene)));
       if (newRound) v.clear(); // last round's segments would otherwise sort before the new spawn
       v.track(p);
-      const changed = v.update(renderTick, active && !p.spectating);
+      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
     });
     for (const [id, v] of this.views) {
@@ -158,6 +170,11 @@ export class PlayersView {
   localPose(localId: string): RenderPose | null {
     const v = this.views.get(localId);
     return v?.shown ? v.pose : null;
+  }
+
+  localLate(localId: string): { count: number; max: number } {
+    const v = this.views.get(localId);
+    return { count: v?.lateCount ?? 0, max: v?.lateMax ?? 0 };
   }
 
   localAction(localId: string): number | null {

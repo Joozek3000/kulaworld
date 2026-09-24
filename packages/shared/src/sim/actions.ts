@@ -42,6 +42,9 @@ export function previewAction(
       const A2 = add(A1, F);
       return { action: Action.Jump, to: { cell: free(A2) ? A2 : A1, up, fwd }, ticks: JUMP_TICKS };
     }
+    case 'hop':
+      if (isSolid(world.level, add(C, U))) return null; // low ceiling
+      return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: JUMP_TICKS };
   }
 }
 

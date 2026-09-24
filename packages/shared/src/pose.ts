@@ -15,13 +15,16 @@ export interface RenderPose {
   up: V3;
   /** Rolling angle (rad) about local X during this action; positive rolls the top forward. */
   spin: number;
+  /** Jump/hop height along up included in position (the camera follows position − up·lift). */
+  lift: number;
 }
 
 export const BALL_RADIUS = 0.4;
 export const SPIN_PER_CELL = 1 / BALL_RADIUS;
 export const JUMP_HEIGHT = 1.2;
+export const HOP_HEIGHT = 1.0;
 
-export const newRenderPose = (): RenderPose => ({ position: [0, 0, 0], quat: [0, 0, 0, 1], up: [0, 1, 0], spin: 0 });
+export const newRenderPose = (): RenderPose => ({ position: [0, 0, 0], quat: [0, 0, 0, 1], up: [0, 1, 0], spin: 0, lift: 0 });
 
 export function quatFromBasis(x: Vec3, y: Vec3, z: Vec3, out: Quat): Quat {
   // Rotation matrix with columns x, y, z → quaternion (same algorithm as three.js).
@@ -96,6 +99,7 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
   pos[0] = C.x; pos[1] = C.y; pos[2] = C.z;
   frameQuat(from.up, from.fwd, out.quat);
   out.spin = 0;
+  out.lift = 0;
   const lerp = () => { pos[0] += (T.x - C.x) * p; pos[1] += (T.y - C.y) * p; pos[2] += (T.z - C.z) * p; };
 
   switch (action) {
@@ -118,10 +122,12 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
       out.spin = p * SPIN_PER_CELL;
       break;
     }
-    case Action.Jump: {
-      lerp();
-      const h = 4 * JUMP_HEIGHT * p * (1 - p);
+    case Action.Jump:
+    case Action.Hop: {
+      lerp(); // a hop has to = from, so this is a no-op
+      const h = 4 * (action === Action.Hop ? HOP_HEIGHT : JUMP_HEIGHT) * p * (1 - p);
       pos[0] += U.x * h; pos[1] += U.y * h; pos[2] += U.z * h;
+      out.lift = h;
       break;
     }
     case Action.Fall:

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   Action, ALL_DIRS, cross, Dir, dirVec, frameQuat, JUMP_HEIGHT, opposite, perpendicular, poseAt, rotate,
-  SPIN_PER_CELL, vec, type Pose, type Quat, type V3,
+  HOP_HEIGHT, SPIN_PER_CELL, vec, type Pose, type Quat, type V3,
 } from '../src/index.ts';
 
 const pose = (x: number, y: number, z: number, up: Dir, fwd: Dir): Pose => ({ cell: vec(x, y, z), up, fwd });
@@ -93,4 +93,16 @@ describe('poseAt', () => {
     expect(out.spin).toBe(0);
     close(poseAt(Action.Dead, pose(3, -7, 0, Dir.PY, Dir.PZ), C, 0.5).position, [3, -7, 0]);
   });
+});
+
+test('hop: parabola along up with peak HOP_HEIGHT, no lateral move, no spin', () => {
+  const c = pose(2, 1, 3, Dir.PY, Dir.PZ);
+  close(poseAt(Action.Hop, c, c, 0).position, [2, 1, 3]);
+  const mid = poseAt(Action.Hop, c, c, 0.5);
+  close(mid.position, [2, 1 + HOP_HEIGHT, 3]);
+  expect(mid.lift).toBeCloseTo(HOP_HEIGHT);
+  expect(mid.spin).toBe(0);
+  close(poseAt(Action.Hop, c, c, 1).position, [2, 1, 3]);
+  const side = pose(5, 2, 2, Dir.PX, Dir.PY); // on a +X face
+  close(poseAt(Action.Hop, side, side, 0.5).position, [5 + HOP_HEIGHT, 2, 2]);
 });

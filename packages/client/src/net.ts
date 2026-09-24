@@ -43,6 +43,8 @@ export class Net {
       this.patches++;
     });
     room.onMessage('event', () => {}); // sim events: FX/sounds later
+    // Leave promptly on navigation; a page kept in the back/forward cache would otherwise hold its seat.
+    addEventListener('pagehide', () => { void room.leave(); });
     const ping = () => room.ping((ms) => { this.ping = ms; });
     ping();
     setInterval(ping, 2000);

@@ -5,11 +5,12 @@ import type { Level, Pose } from '../level/types.ts';
 import { add, cellKey, type Vec3 } from '../vec.ts';
 
 /** Extend by appending (e.g. Knocked, Stunned for PvP); values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
-export type Cmd = 'fwd' | 'left' | 'right' | 'jump';
-export type Pulse = Exclude<Cmd, 'fwd'>;
+/** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */
+export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop';
+export type Pulse = 'left' | 'right' | 'jump';
 
 /** Client → server input message (ARCHITECTURE §6). `turn` and `jump` are pulses. */
 export interface Input { seq: number; fwdHeld: boolean; turn: -1 | 0 | 1; jump: boolean }
@@ -105,7 +106,7 @@ export function occupiedCells(p: PlayerState): Vec3[] {
   const { cell, fwd } = p.pose;
   switch (p.action) {
     case Action.Dead: return [];
-    case Action.Idle: case Action.Turn: return [cell];
+    case Action.Idle: case Action.Turn: case Action.Hop: return [cell];
     case Action.Flip: case Action.Jump: return [cell, add(cell, dirVec(fwd)), p.to.cell];
     default: return [cell, p.to.cell];
   }

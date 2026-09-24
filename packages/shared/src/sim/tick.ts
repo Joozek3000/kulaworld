@@ -25,11 +25,15 @@ function fairOrder(players: PlayerState[], tick: number): PlayerState[] {
   return [...players.slice(k), ...players.slice(0, k)];
 }
 
-/** Candidate commands in priority order: the buffered pulse (jump beats turn at input time), then held forward. */
+/**
+ * Candidate commands in priority order: the buffered pulse (jump beats turn at input time), then held forward.
+ * A jump pulse jumps forward if fwd is held on this tick, otherwise hops in place; a blocked forward jump hops.
+ */
 function commands(p: PlayerState, tick: number): Cmd[] {
   if (p.pulse && tick - p.pulseTick > INPUT_BUFFER_TICKS) p.pulse = null;
   const cmds: Cmd[] = [];
-  if (p.pulse) cmds.push(p.pulse);
+  if (p.pulse === 'jump') cmds.push(...(p.fwdHeld ? ['jump', 'hop'] as const : ['hop'] as const));
+  else if (p.pulse) cmds.push(p.pulse);
   if (p.fwdHeld) cmds.push('fwd');
   return cmds;
 }
