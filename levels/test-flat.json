@@ -1,0 +1,27 @@
+{
+  "id": "test-flat",
+  "name": "Test Flat",
+  "version": 1,
+  "blocks": [[4, 1, 4]],
+  "boxes": [
+    { "min": [0, 0, 0], "max": [8, 0, 2] },
+    { "min": [4, 0, 3], "max": [8, 0, 3] },
+    { "min": [0, 0, 4], "max": [8, 0, 4] },
+    { "min": [0, 0, 5], "max": [4, 0, 6] },
+    { "min": [0, 0, 7], "max": [8, 0, 8] }
+  ],
+  "spawns": [
+    { "cell": [1, 1, 1], "up": "+Y", "fwd": "+Z" },
+    { "cell": [3, 1, 1], "up": "+Y", "fwd": "+Z" },
+    { "cell": [5, 1, 1], "up": "+Y", "fwd": "+Z" },
+    { "cell": [7, 1, 1], "up": "+Y", "fwd": "+Z" }
+  ],
+  "keys": [
+    { "cell": [1, 1, 4], "up": "+Y" },
+    { "cell": [7, 1, 8], "up": "+Y" },
+    { "cell": [4, -1, 4], "up": "-Y" }
+  ],
+  "exit": { "cell": [4, 1, 8], "up": "+Y" },
+  "keysRequired": 2,
+  "timeLimitSec": 120
+}

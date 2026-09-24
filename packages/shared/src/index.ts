@@ -1,6 +1,13 @@
-export const VERSION = '0.0.1';
+export const VERSION = '0.0.2';
 
-/** Grid cell key, e.g. "1,2,3". */
-export function cellKey(v: { x: number; y: number; z: number }): string {
-  return `${v.x},${v.y},${v.z}`;
-}
+export * from './vec.ts';
+export * from './dir.ts';
+export * from './rng.ts';
+export * from './constants.ts';
+export * from './level/types.ts';
+export * from './level/load.ts';
+export * from './level/validate.ts';
+export * from './sim/world.ts';
+export * from './sim/actions.ts';
+export * from './sim/keyRace.ts';
+export * from './sim/tick.ts';
