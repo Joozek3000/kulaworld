@@ -1,8 +1,9 @@
-import { INPUT_BUFFER_TICKS, KNOCK_TICKS, RESPAWN_TICKS, ROLL_TICKS, STUN_TICKS } from '../constants.ts';
+import { INPUT_BUFFER_TICKS, KNOCK_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
 import { dirVec } from '../dir.ts';
 import { add, eq } from '../vec.ts';
 import { previewAction, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
+import { loseLife, stepKnockout } from './knockout.ts';
 import {
   Action, isFree, isPushable, outOfBounds, reservations, reserve, trySpawn,
   type Cmd, type PlayerState, type Reservations, type SimEvent, type World,
@@ -26,12 +27,15 @@ export function step(world: World): SimEvent[] {
     }
   }
 
-  for (const p of order) if (p.action !== Action.Idle && p.endTick === tick) finishAction(world, p, events);
+  for (const p of order) if (p.action !== Action.Idle && p.endTick === tick && !p.eliminated) finishAction(world, p, events);
+  // Crumbled ground: an Idle player whose block is gone falls (mid-action players are checked when they finish).
+  if (world.removed.size) for (const p of order) if (p.action === Action.Idle) startFall(world, p, tick);
 
   const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(p) }));
   resolveMoves(world, intents, events);
 
-  checkTimeout(world, events);
+  if (world.mode === 'knockout') stepKnockout(world, events);
+  else checkTimeout(world, events);
   return events;
 }
 
@@ -160,6 +164,7 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
   v.lastKnockedBy = p.id;
   v.lastKnockedTick = tick;
   startAction(p, { action: Action.Roll, to: { ...p.pose, cell: A }, ticks: ROLL_TICKS }, tick);
+  if (p.protectedUntil > tick) p.protectedUntil = tick; // pushing ends your own spawn protection
   reserve(res, v);
   reserve(res, p);
   events.push({ type: 'push', pusherId: p.id, victimId: v.id });
@@ -169,27 +174,29 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
 function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   const tick = world.tick;
   if (p.action === Action.Dead) {
-    if (trySpawn(world, p)) events.push({ type: 'respawn', playerId: p.id, cell: p.pose.cell });
-    else p.endTick = tick + 1; // all spawns taken, retry next tick
+    const knockout = world.mode === 'knockout'; // random spawn + protection
+    if (trySpawn(world, p, knockout)) {
+      if (knockout) p.protectedUntil = tick + SPAWN_PROTECT_TICKS;
+      events.push({ type: 'respawn', playerId: p.id, cell: p.pose.cell });
+    } else p.endTick = tick + 1; // no free spawn with ground, retry next tick
     return;
   }
   const finished = p.action;
   p.pose = p.to;
   p.action = Action.Idle;
   p.bounce = false;
-  if (finished === Action.Turn || finished === Action.Stunned) return;
   if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
     p.action = Action.Dead;
     p.startTick = tick;
     p.endTick = tick + RESPAWN_TICKS;
     events.push({ type: 'death', playerId: p.id, cell: p.pose.cell });
-    onDeath(world, p, events);
+    const creditId = onDeath(world, p, events);
+    if (world.mode === 'knockout') loseLife(world, p, creditId, events);
     return;
   }
-  if (finished === Action.Knocked) {
-    if (startFall(world, p, tick)) return;
-    stun(p, tick, false);
-  }
-  if ((finished === Action.Jump || finished === Action.Fall) && startFall(world, p, tick)) return;
+  // Nothing below: a jump or knock into air, a fall step, or ground that crumbled during the action.
+  if (startFall(world, p, tick)) return;
+  if (finished === Action.Turn || finished === Action.Stunned) return;
+  if (finished === Action.Knocked) stun(p, tick, false); // stagger: not pushable (§14)
   onLand(world, p, events);
 }

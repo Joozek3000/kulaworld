@@ -28,7 +28,7 @@ const between = (a: number, b: number) => a + Math.random() * (b - a);
 
 interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
-  pushes: number; bounces: number; knockouts: number; keyDrops: number;
+  pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -44,15 +44,33 @@ async function connect(client: Client, name: string): Promise<Room> {
   }
 }
 
-/** Planning worlds per level id (static geometry only; the BFS ignores other players). */
+/**
+ * Planning worlds per level id: geometry only (the BFS ignores other players). In knockout, crumbled and warned
+ * bands count as gone, so plans never stand on a tile that's about to drop.
+ */
 const planWorlds = new Map<string, World>();
-function planWorld(levelId: string): World {
-  let w = planWorlds.get(levelId);
+function planWorld(state: { levelId: string; crumbled: number; warnBand: number }): World {
+  let w = planWorlds.get(state.levelId);
   if (!w) {
-    const json = JSON.parse(readFileSync(new URL(`../../../levels/${levelId}.json`, import.meta.url), 'utf8'));
-    planWorlds.set(levelId, (w = createWorld(loadLevel(json), 0)));
+    const json = JSON.parse(readFileSync(new URL(`../../../levels/${state.levelId}.json`, import.meta.url), 'utf8'));
+    planWorlds.set(state.levelId, (w = createWorld(loadLevel(json), 0)));
   }
+  if (w.knockout) w.removed = new Set(w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat());
   return w;
+}
+
+/** Empty cells next to a remaining block (any face): where a ball can stand. */
+function standable(world: World): Set<string> {
+  const cells = new Set<string>();
+  for (const k of world.level.solid) {
+    if (world.removed.has(k)) continue;
+    const [x, y, z] = k.split(',').map(Number);
+    for (const d of ALL_DIRS) {
+      const c = add({ x, y, z }, dirVec(d));
+      if (!isSolid(world, c)) cells.add(cellKey(c));
+    }
+  }
+  return cells;
 }
 
 interface Ctx { name: string; room: Room; stats: Stats; send(i: Partial<Input>): void }
@@ -86,6 +104,7 @@ const EARLY_OK = new Set<number>([Action.Roll, Action.Turn, Action.Flip]);
 const STUCK_MS = 10_000;
 const BULLY_PATIENCE_MS = 1_000;
 const BULLY_IGNORE_MS = 3_000;
+const BOUNCE_JITTER_MS = 500;
 
 type PlayerLike = {
   fromX: number; fromY: number; fromZ: number; fromUp: number; toX: number; toY: number; toZ: number;
@@ -105,8 +124,8 @@ function occupiedByOther(state: { players: { forEach(cb: (p: PlayerLike, id: str
  */
 function pushable(state: { tick: number; players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, pose: Pose, world: World, voidOnly: boolean): boolean {
   const F = dirVec(pose.fwd), A = add(pose.cell, F), dest = add(A, F);
-  if (isSolid(world.level, dest)) return false; // would bounce
-  if (voidOnly && isSolid(world.level, sub(dest, dirVec(pose.up)))) return false;
+  if (isSolid(world, dest)) return false; // would bounce
+  if (voidOnly && isSolid(world, sub(dest, dirVec(pose.up)))) return false;
   let hit = false;
   state.players.forEach((o, id) => {
     if (id === selfId || o.fromUp !== pose.up || `${o.fromX},${o.fromY},${o.fromZ}` !== cellKey(A)) return;
@@ -124,7 +143,7 @@ function besideOpponents(state: { players: { forEach(cb: (p: PlayerLike & { toUp
     for (const d of ALL_DIRS) {
       if (!perpendicular(d, o.toUp as Dir)) continue;
       const c = add({ x: o.toX, y: o.toY, z: o.toZ }, dirVec(d));
-      if (!isSolid(world.level, c) && isSolid(world.level, sub(c, U))) cells.set(cellKey(c), id);
+      if (!isSolid(world, c) && isSolid(world, sub(c, U))) cells.set(cellKey(c), id);
     }
   });
   return cells;
@@ -148,6 +167,7 @@ const samePose = (a: Pose, b: Pose) => cellKey(a.cell) === cellKey(b.cell) && a.
 /**
  * seek: BFS (shared findPath) to the nearest remaining key, or the exit once unlocked. Takes an off-path push
  * whenever an opponent ahead would be knocked into the void.
+ * In knockout, seek hunts like bully but only pushes into the void, and every BFS bot first steps off a warned tile.
  * bully: BFS to a cell beside the nearest opponent, turns to face it and pushes whenever it's pushable. An opponent
  * it can't push for BULLY_PATIENCE_MS (e.g. a wall behind it) is ignored for BULLY_IGNORE_MS.
  * Executes one step at a time: press, then release once the action has started (holding fwd would chain rolls).
@@ -165,6 +185,9 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   let facing: { id: string; since: number } | null = null; // bully: opponent it's waiting to push
   const ignored = new Map<string, number>(); // bully: opponent id → ignored until (ms)
   const skip = (id: string) => (ignored.get(id) ?? 0) > Date.now();
+  // After a bounce, wait a random moment: two bots that bounced off each other recover on the same tick and would
+  // otherwise push each other again in lockstep forever.
+  let holdUntil = 0;
 
   const replan = () => { path = []; target = ''; expected = null; };
   const randomTurn = () => ctx.send({ turn: Math.random() < 0.5 ? -1 : 1 });
@@ -206,7 +229,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     if (pending) {
       if (p.startTick !== pending.prevStart || p.action !== pending.prevAction) {
         if (pending.cmd === 'fwd' || pending.cmd === 'jump') ctx.send({});
-        if (p.action === Action.Stunned) onBlocked(); // bounced
+        if (p.action === Action.Stunned) { onBlocked(); holdUntil = Date.now() + Math.random() * BOUNCE_JITTER_MS; } // bounced
         else if (pending.offPath) replan();
         else if (EXPECTED[pending.cmd].includes(p.action)) {
           expected = path.shift()!.to;
@@ -224,18 +247,22 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     }
 
     // Decide when Idle, or in the last tick of a roll/turn/flip (a pulse or held fwd then applies at its end).
+    if (Date.now() < holdUntil) return;
     const idle = p.action === Action.Idle;
     if (!idle && !(EARLY_OK.has(p.action) && p.endTick - s.tick <= 1)) return;
     const pose = idle ? poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd) : poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd);
 
-    const world = planWorld(s.levelId);
+    const world = planWorld(s);
     const me = ctx.room.sessionId;
-    if (pushable(s, me, pose, world, !bully)) {
+    const hunter = bully || s.mode === 'knockout';
+    // Standing on a warned (or already crumbled) tile: get off it before anything else.
+    const unsafe = !!world.knockout && !isSolid(world, sub(pose.cell, dirVec(pose.up)));
+    if (!unsafe && pushable(s, me, pose, world, !bully)) {
       replan();
       facing = null;
       return press('fwd', p.startTick, p.action, s.tick, true);
     }
-    if (bully) {
+    if (hunter && !unsafe) {
       const adj = adjacentOpponent(s, me, pose, skip);
       if (adj && adj.dir !== pose.fwd) {
         replan();
@@ -249,9 +276,9 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       facing = null;
     }
     let goals = new Set<string>();
-    if (bully) {
-      goals = new Set(besideOpponents(s, me, world, skip).keys());
-    } else if (p.keys >= world.level.keysRequired) goals.add(cellKey(world.level.exit.cell));
+    if (unsafe) goals = standable(world);
+    else if (hunter) goals = new Set(besideOpponents(s, me, world, skip).keys());
+    else if (world.level.exit && p.keys >= world.level.keysRequired) goals.add(cellKey(world.level.exit.cell));
     else s.items.forEach((it: { kind: string; x: number; y: number; z: number }) => { if (it.kind === 'key') goals.add(`${it.x},${it.y},${it.z}`); });
 
     const onPlan = path.length > 0 && goals.has(target) && expected !== null && samePose(pose, expected);
@@ -278,7 +305,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
 
 async function runBot(client: Client, name: string, behaviour: Behaviour): Promise<Stats> {
   const room = await connect(client, name);
-  const stats: Stats = { rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0 };
+  const stats: Stats = { rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0, eliminated: 0 };
   let seq = 0;
   const ctx: Ctx = {
     name, room, stats,
@@ -300,6 +327,8 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (e.type === 'death') stats.deaths++;
     if (e.type === 'bounce') stats.bounces++;
     if (e.type === 'keyDrop') stats.keyDrops++;
+    if (e.type === 'lifeLost') stats.livesLost++;
+    if (e.type === 'eliminated') stats.eliminated++;
   });
 
   const timer = setInterval(() => {
@@ -329,7 +358,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

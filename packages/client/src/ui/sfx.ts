@@ -35,6 +35,8 @@ export function createSfx() {
     key: (mine: boolean) => tones(mine ? [660, 990, 1320] : [660, 880], 0.07),
     thump: () => tones([140, 90], 0.06, 'triangle', 0.12),
     buzz: () => tones([70, 70], 0.08, 'sawtooth', 0.05),
+    crumbleWarn: () => tones([196, 185, 175, 165], 0.12, 'square', 0.05),
+    eliminated: (mine: boolean) => tones(mine ? [392, 294, 196, 131] : [262, 196], 0.16, 'sawtooth', 0.05),
     death: () => tones([330, 247, 165], 0.1, 'sawtooth', 0.04),
     win: (mine: boolean) => tones(mine ? [523, 659, 784, 1047] : [392, 330, 262], 0.13, 'triangle', 0.08),
   };

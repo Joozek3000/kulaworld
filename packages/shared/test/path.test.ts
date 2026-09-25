@@ -42,7 +42,7 @@ function bruteForce(w: World, from: Pose, goal: string, maxDepth: number): numbe
 describe('findPath on test-cube', () => {
   const w = worldOf('test-cube.json');
   const spawn = w.level.spawns[0]; // (1,5,1) +Y facing +Z
-  const targets = [...w.level.keys, w.level.exit].map((k) => k.cell);
+  const targets = [...w.level.keys, w.level.exit!].map((k) => k.cell);
 
   test('two cells straight ahead is a single jump', () => {
     expect(findPath(w, spawn, new Set(['1,5,3']))!.map((s) => s.cmd)).toEqual(['jump']);
@@ -72,11 +72,11 @@ describe('findPath on test-cube', () => {
   });
 });
 
-describe('every level: all keys and the exit are reachable from every spawn', () => {
-  test.each(levelFiles())('%s', (file) => {
+describe('every race level: all keys and the exit are reachable from every spawn', () => {
+  test.each(levelFiles().filter((f) => readLevelJson(f).mode !== 'knockout'))('%s', (file) => {
     const w = worldOf(file);
     for (const s of w.level.spawns) {
-      for (const t of [...w.level.keys, w.level.exit]) {
+      for (const t of [...w.level.keys, w.level.exit!]) {
         expect(findPath(w, s, new Set([cellKey(t.cell)])), `${file}: spawn ${cellKey(s.cell)} → ${cellKey(t.cell)}`).not.toBe(null);
       }
     }

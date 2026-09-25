@@ -1,9 +1,8 @@
 import { dirVec } from '../dir.ts';
-import { isSolid } from '../level/load.ts';
 import type { Pose } from '../level/types.ts';
 import { cellKey, sub } from '../vec.ts';
 import { previewAction } from './actions.ts';
-import { Action, outOfBounds, type Cmd, type Reservations, type World } from './world.ts';
+import { Action, isSolid, outOfBounds, type Cmd, type Reservations, type World } from './world.ts';
 
 export interface PathStep { cmd: Cmd; to: Pose }
 
@@ -23,7 +22,7 @@ export function resultPose(world: World, pose: Pose, cmd: Cmd): Pose | null {
   if (plan.action !== Action.Jump) return plan.to;
   const down = dirVec(pose.up);
   let cell = plan.to.cell;
-  while (!isSolid(world.level, sub(cell, down))) {
+  while (!isSolid(world, sub(cell, down))) {
     cell = sub(cell, down);
     if (outOfBounds(world.level, cell)) return null;
   }

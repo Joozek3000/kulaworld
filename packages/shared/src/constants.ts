@@ -9,6 +9,8 @@ export const INPUT_BUFFER_TICKS = 6;
 export const KILL_MARGIN = 6; // cells
 // PvP push (ARCHITECTURE §14)
 export const KNOCK_TICKS = 4;
-export const STUN_TICKS = 8;
+export const STUN_TICKS = 6;
 export const HOP_PUSH_WINDOW = 2; // a hop is pushable this many ticks after its start and before its end
 export const KNOCKOUT_CREDIT_TICKS = 60;
+// Knockout (ARCHITECTURE §15)
+export const SPAWN_PROTECT_TICKS = 40;

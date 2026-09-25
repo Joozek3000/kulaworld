@@ -80,3 +80,40 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - Seek takes an off-path push when the opponent ahead would be knocked into air. It also shoves a pushable player standing on a jump's A1 instead of waiting.
   - A step that ends Stunned (a bounce) counts as blocked, like a move that never started, so repeated bounces lead to a replan and then a random turn.
   - `bully` BFS-es to standable cells beside opponents (not into the opponent's own cell, which led to jumping into gaps and stand-offs with seek bots). Next to an opponent, it turns to face it and pushes when `pushable`. If it can't push for 1 s, it ignores that opponent for 3 s.
+- 2026-09-25, phase 07: Line endings. Added `.gitattributes` (`* text=auto eol=lf`, jpg/png binary). The 18 CRLF files were ones phase 06 had rewritten with Python in text mode on Windows. Scripted edits now write with `newline='
+'`.
+- 2026-09-25, phase 07: Stagger (§14). `isPushable` returns `bounce` for Stunned: a victim staggered after a knock can't be pushed, while a pusher stunned by a bounce can. `STUN_TICKS` is 6. When the stagger ends, the victim is Idle on the same tick the waiting pusher tries again, so the existing escape stage gives the victim first move. It gets pushed only if it stands still.
+- 2026-09-25, phase 07: Knockout level format.
+  - `mode`, `lives` and `crumble` on the level. `keys`, `exit` and `keysRequired` are optional in JSON, and `Level.exit` is `Placement | null`.
+  - Validation: a knockout level must have no keys/exit/keysRequired, integer lives >= 1, and `startSec >= warnSec > 0` and `intervalSec > warnSec`. A race level must have an exit. Both need >= 4 spawns.
+  - The key/exit reachability test covers race levels only.
+- 2026-09-25, phase 07: Solid overlay. `isSolid(world, v)` lives in `sim/world.ts`. The level-only check is renamed `levelSolid(level, v)` and is used only by `validateLevel`, which works before any world exists.
+  - A finished action of any kind now checks for ground (`startFall`), not just Jump/Fall/Knocked. That covers ground crumbling under a Turn, Stun, Roll or Hop. Race behaviour is unchanged, because race ground never disappears.
+  - An Idle player whose ground is gone falls on the next tick.
+- 2026-09-25, phase 07: Crumble bands use integer maths. Coordinates are doubled so the AABB centre is integral. The rounded distance r is the smallest r with d² < (2r + 1)², so ties at .5 round up. `crumbleBands` is pure and shared, so the client derives the same bands; the schema syncs only `crumbled` (bands removed), `warnBand` and `nextCrumbleTick`.
+- 2026-09-25, phase 07: Crumble timing. Band k is warned at `startSec + k·intervalSec − warnSec` and removed `warnSec` later. The floor rule is checked when the warning is due: if removing the band would leave fewer than 2 × alive blocks, crumbling stops for good. Bands are removed whole, never partially.
+- 2026-09-25, phase 07: Knockout state.
+  - `world.mode` and `world.knockout` (bands, next, warn, stopped).
+  - `world.removed: Set<cellKey>`.
+  - `world.rng`: a mulberry32 state kept as an integer. `rngNext` was split out of `mulberry32`.
+  - Per player: `lives`, `eliminated`, `eliminatedTick`, `eliminatedBy`, `protectedUntil` and `knockouts`. Knockouts are counted in race too, but unused there.
+  - `createWorld` forces `push: true` for knockout levels.
+- 2026-09-25, phase 07: Respawn.
+  - A knockout respawn picks a seeded-random free spawn that still has ground.
+  - If crumbling has taken the ground from every spawn, it picks any free cell on a remaining block, facing the first perpendicular direction. Without this, a dead player with lives left waited forever once the edge bands had gone. It still counted as alive, so the round could only end by timeout (found in the first bot run).
+  - The initial spawns at round start stay the shuffled first-free order, with no protection.
+- 2026-09-25, phase 07: Knockout results.
+  - The result reasons are `lastAlive` (the winner) and `allOut` (the last players went out on the same tick: a draw).
+  - Solo (1 player): the round ends only when that player is eliminated (a draw) or by timeout.
+  - Timeout: most lives, then most knockouts among the players still in; a tie is a draw.
+  - Placement for the results screen is computed on the client: players still in (by lives, then knockouts) first, then the eliminated, latest out first.
+- 2026-09-25, phase 07: Client.
+  - `LevelView` replaces `buildLevel`. Crumbled blocks get a zero-scale instance matrix and collapsed edge lines. The warned band shakes (±0.06 cells) and blinks red 4 times a second.
+  - Each ball has its own materials now (the bottom half was shared), so a protected ball renders at 40% opacity.
+  - An eliminated local player's camera follows its killer while the killer is on screen, and orbits otherwise. The "Floor crumbles in N" countdown shows in the last 5 s.
+- 2026-09-25, phase 07: Bots.
+  - Plan worlds treat crumbled and warned bands as gone.
+  - A BFS bot standing on a warned or crumbled tile first paths to any standable cell.
+  - In knockout, seek hunts like bully (cells beside the nearest opponent) but pushes only into the void.
+  - After a bounce, a bot waits a random 0–500 ms. Two bots that bounced off each other otherwise recovered on the same tick and pushed each other again in lockstep. In one arena round the last two bullies did this until the timeout.
+  - Wander is unchanged: it doesn't plan, so it doesn't avoid warned tiles.

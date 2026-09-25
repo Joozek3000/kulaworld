@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadLevel, type Level, type LevelJson } from '@kula/shared';
+import { crumbleBands, loadLevel, type Level, type LevelJson } from '@kula/shared';
 
 const files = import.meta.glob<LevelJson>('../../../../levels/*.json', { eager: true, import: 'default' });
 
@@ -10,34 +10,94 @@ export function findLevel(id: string): Level | null {
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const edgeVerts = new THREE.EdgesGeometry(boxGeo).getAttribute('position').array;
+const WARN = new THREE.Color(0xff3b3b);
+const SHAKE = 0.06; // cells
+const m = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0), tint = new THREE.Color();
 
-/** One InstancedMesh for all blocks (checkerboard shading) plus one LineSegments for all edges. */
-export function buildLevel(level: Level): THREE.Group {
-  const group = new THREE.Group();
-  const cells = [...level.solid].map((k) => k.split(',').map(Number));
+/**
+ * One InstancedMesh for all blocks (checkerboard shading) plus one LineSegments for all edges.
+ * Knockout crumble (§15): bands the server reports as removed get a zero-scale matrix and collapsed edges; the
+ * warned band shakes and blinks red. Bands come from the shared `crumbleBands`, the same as the sim's.
+ */
+export class LevelView {
+  readonly group = new THREE.Group();
+  private readonly cells: number[][];
+  private readonly mesh: THREE.InstancedMesh;
+  private readonly edges: THREE.BufferAttribute;
+  private readonly bands: number[][]; // instance indices per band
+  private crumbled = 0;
+  private warnBand = -1;
+  private readonly removed = new Set<string>();
 
-  const mesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ roughness: 0.85 }), cells.length);
-  const m = new THREE.Matrix4();
-  const light = new THREE.Color(0x9aa4c8), dark = new THREE.Color(0x7c86ab);
-  cells.forEach(([x, y, z], i) => {
-    mesh.setMatrixAt(i, m.makeTranslation(x, y, z));
-    mesh.setColorAt(i, (x + y + z) & 1 ? dark : light);
-  });
-  group.add(mesh);
+  constructor(private readonly level: Level) {
+    const keys = [...level.solid];
+    this.cells = keys.map((k) => k.split(',').map(Number));
+    const index = new Map(keys.map((k, i) => [k, i]));
+    this.bands = level.mode === 'knockout' ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
 
-  const pos = new Float32Array(cells.length * edgeVerts.length);
-  cells.forEach(([x, y, z], i) => {
+    this.mesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ roughness: 0.85 }), this.cells.length);
+    this.cells.forEach((_, i) => { this.place(i, 0); this.mesh.setColorAt(i, this.baseColor(i)); });
+    this.group.add(this.mesh);
+
+    this.edges = new THREE.BufferAttribute(new Float32Array(this.cells.length * edgeVerts.length), 3);
+    this.cells.forEach((_, i) => this.placeEdges(i, true));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', this.edges);
+    this.group.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x2a2e44 })));
+  }
+
+  private baseColor(i: number): THREE.Color {
+    const [x, y, z] = this.cells[i];
+    return tint.set((x + y + z) & 1 ? 0x7c86ab : 0x9aa4c8);
+  }
+
+  private place(i: number, shake: number): void {
+    const [x, y, z] = this.cells[i];
+    const j = shake ? (k: number) => Math.sin(shake * 47 + i * 13 + k) * SHAKE : () => 0;
+    this.mesh.setMatrixAt(i, m.makeTranslation(x + j(0), y + j(1), z + j(2)));
+  }
+
+  private placeEdges(i: number, visible: boolean): void {
+    const [x, y, z] = this.cells[i], a = this.edges.array as Float32Array;
     for (let j = 0; j < edgeVerts.length; j += 3) {
-      const o = i * edgeVerts.length + j;
-      pos[o] = edgeVerts[j] * 1.002 + x;
-      pos[o + 1] = edgeVerts[j + 1] * 1.002 + y;
-      pos[o + 2] = edgeVerts[j + 2] * 1.002 + z;
+      const o = i * edgeVerts.length + j, s = visible ? 1.002 : 0;
+      a[o] = edgeVerts[j] * s + x; a[o + 1] = edgeVerts[j + 1] * s + y; a[o + 2] = edgeVerts[j + 2] * s + z;
     }
-  });
-  const edges = new THREE.BufferGeometry();
-  edges.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  group.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x2a2e44 })));
-  return group;
+  }
+
+  /** Per frame, from the synced `crumbled` (bands removed) and `warnBand`. A new round resets both to none. */
+  update(crumbled: number, warnBand: number, timeSec: number): void {
+    if (!this.bands.length) return;
+    if (crumbled !== this.crumbled || warnBand !== this.warnBand) {
+      // Restore everything, then apply the new state (rare: once per band change or round).
+      this.bands.forEach((band, b) => band.forEach((i) => {
+        const gone = b < crumbled;
+        if (gone) this.mesh.setMatrixAt(i, ZERO); else this.place(i, 0);
+        this.mesh.setColorAt(i, this.baseColor(i));
+        this.placeEdges(i, !gone);
+      }));
+      this.edges.needsUpdate = true;
+      this.removed.clear();
+      for (const band of this.bands.slice(0, crumbled)) for (const i of band) this.removed.add(this.cells[i].join(','));
+      this.crumbled = crumbled;
+      this.warnBand = warnBand;
+    }
+    if (warnBand >= 0 && warnBand < this.bands.length) {
+      const red = Math.floor(timeSec * 8) % 2 === 0; // blinks 4 times a second
+      for (const i of this.bands[warnBand]) {
+        this.place(i, timeSec);
+        this.mesh.setColorAt(i, red ? WARN : this.baseColor(i));
+      }
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /** Solid for rendering (blob shadows): the level minus crumbled blocks. */
+  solid = (x: number, y: number, z: number): boolean => {
+    const k = `${x},${y},${z}`;
+    return this.level.solid.has(k) && !this.removed.has(k);
+  };
 }
 
 export function levelBounds(level: Level) {

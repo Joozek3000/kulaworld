@@ -1,0 +1,30 @@
+{
+  "id": "arena-01",
+  "name": "Arena 01",
+  "version": 1,
+  "mode": "knockout",
+  "lives": 3,
+  "timeLimitSec": 180,
+  "crumble": { "startSec": 45, "intervalSec": 10, "warnSec": 2 },
+  "boxes": [
+    { "min": [0, 0, 0], "max": [8, 0, 1] },
+    { "min": [0, 0, 2], "max": [1, 0, 2] },
+    { "min": [3, 0, 2], "max": [5, 0, 2] },
+    { "min": [7, 0, 2], "max": [8, 0, 2] },
+    { "min": [0, 0, 3], "max": [8, 0, 5] },
+    { "min": [0, 0, 6], "max": [1, 0, 6] },
+    { "min": [3, 0, 6], "max": [5, 0, 6] },
+    { "min": [7, 0, 6], "max": [8, 0, 6] },
+    { "min": [0, 0, 7], "max": [8, 0, 8] }
+  ],
+  "spawns": [
+    { "cell": [1, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [4, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [7, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [8, 1, 4], "up": "+Y", "fwd": "-X" },
+    { "cell": [7, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [4, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [1, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [0, 1, 4], "up": "+Y", "fwd": "+X" }
+  ]
+}

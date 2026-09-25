@@ -1,9 +1,8 @@
 import { FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
-import { isSolid } from '../level/load.ts';
 import type { Pose } from '../level/types.ts';
 import { add, sub, type Vec3 } from '../vec.ts';
-import { Action, isFree, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
+import { Action, isFree, isSolid, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
 
 export interface Plan { action: Action; to: Pose; ticks: number }
 
@@ -32,7 +31,7 @@ export function previewAction(
       const A = add(C, F);
       if (!free(A)) return null; // wall or player
       const below = sub(A, U);
-      if (isSolid(world.level, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: ROLL_TICKS };
+      if (isSolid(world, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: ROLL_TICKS };
       if (!free(below)) return null;
       return { action: Action.Flip, to: { cell: below, up: fwd, fwd: opposite(up) }, ticks: FLIP_TICKS };
     }
@@ -43,7 +42,7 @@ export function previewAction(
       return { action: Action.Jump, to: { cell: free(A2) ? A2 : A1, up, fwd }, ticks: JUMP_TICKS };
     }
     case 'hop':
-      if (isSolid(world.level, add(C, U))) return null; // low ceiling
+      if (isSolid(world, add(C, U))) return null; // low ceiling
       return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: JUMP_TICKS };
   }
 }
@@ -65,7 +64,7 @@ export function startAction(p: PlayerState, plan: Plan, tick: number): void {
 export function startFall(world: World, p: PlayerState, tick: number): boolean {
   const { cell, up, fwd } = p.pose;
   const below = sub(cell, dirVec(up));
-  if (isSolid(world.level, below)) return false;
+  if (isSolid(world, below)) return false;
   startAction(p, { action: Action.Fall, to: { cell: below, up, fwd }, ticks: FALL_TICKS_PER_CELL }, tick);
   return true;
 }

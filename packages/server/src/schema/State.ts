@@ -1,5 +1,5 @@
 import { schema, t, type SchemaType } from '@colyseus/schema';
-import { Action, type Pose, type World } from '@kula/shared';
+import { Action, nextCrumbleTick, type Pose, type World } from '@kula/shared';
 
 export const PlayerS = schema({
   id: t.string(),
@@ -16,6 +16,13 @@ export const PlayerS = schema({
   /** Stunned by a failed push (render: lunge and recoil). */
   bounce: t.boolean().default(false),
   keys: t.uint8().default(0),
+  /** Knockout: lives left, elimination (tick, and who knocked the player out: '' = nobody), spawn protection. */
+  lives: t.uint8().default(0),
+  eliminated: t.boolean().default(false),
+  eliminatedTick: t.int32().default(-1),
+  eliminatedBy: t.string().default(''),
+  protectedUntil: t.int32().default(0),
+  knockouts: t.uint8().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
 }, 'PlayerS');
@@ -35,6 +42,12 @@ export const GameState = schema({
   tick: t.int32(),
   phaseEndTick: t.int32(),
   levelId: t.string(),
+  mode: t.string().default('race'), // 'race' | 'knockout', from the level
+  /** Knockout crumble: bands removed so far (the client recomputes bands from the level), the warned band (-1 none),
+   * and the tick the next band goes (-1 none). */
+  crumbled: t.uint8().default(0),
+  warnBand: t.int8().default(-1),
+  nextCrumbleTick: t.int32().default(-1),
   winnerId: t.string(), // '' = none / draw
   players: t.map(PlayerS),
   items: t.map(ItemS),
@@ -68,6 +81,12 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'turnStartTick', p.turnStartTick);
     set(s, 'bounce', p.bounce);
     set(s, 'keys', p.keys);
+    set(s, 'lives', p.lives);
+    set(s, 'eliminated', p.eliminated);
+    set(s, 'eliminatedTick', p.eliminatedTick);
+    set(s, 'eliminatedBy', p.eliminatedBy ?? '');
+    set(s, 'protectedUntil', p.protectedUntil);
+    set(s, 'knockouts', p.knockouts);
   }
   for (const k of world.keys) {
     const id = `key-${k.id}`;
@@ -77,8 +96,10 @@ export function syncSchema(world: World, state: GameState): void {
       state.items.set(id, new ItemS({ id, kind: 'key', ...k.cell, up: world.level.keys[k.id].up }));
     }
   }
-  if (!state.items.has('exit')) {
-    const { cell, up } = world.level.exit;
-    state.items.set('exit', new ItemS({ id: 'exit', kind: 'exit', ...cell, up }));
-  }
+  const exit = world.level.exit;
+  if (exit && !state.items.has('exit')) state.items.set('exit', new ItemS({ id: 'exit', kind: 'exit', ...exit.cell, up: exit.up }));
+  set(state, 'mode', world.mode);
+  set(state, 'crumbled', world.knockout?.next ?? 0);
+  set(state, 'warnBand', world.knockout?.warn ?? -1);
+  set(state, 'nextCrumbleTick', nextCrumbleTick(world));
 }

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
   Action, BALL_RADIUS, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
-  type AirTurn, type Dir, type Level, type Pose, type RenderPose,
+  type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 
@@ -24,7 +24,6 @@ const effStart = (s: Seg) => (s.action === Action.Idle ? s.endTick : s.startTick
 
 const topGeo = new THREE.SphereGeometry(BALL_RADIUS, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
 const bottomGeo = new THREE.SphereGeometry(BALL_RADIUS, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
-const bottomMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const airTurn: AirTurn = { fromFwd: 4, progress: 1 };
 const tmpQ = new THREE.Quaternion(), spinQ = new THREE.Quaternion(), tmpUp = new THREE.Vector3(), tmpFwd = new THREE.Vector3();
@@ -71,11 +70,14 @@ class PlayerView {
   action: number = Action.Idle;
   readonly color: string;
   private readonly top: THREE.MeshStandardMaterial;
+  private readonly bottom = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
+  /** Knockout spawn protection (server tick): the ball renders translucent until then. */
+  private protectedUntil = 0;
 
   constructor(p: PlayerS, local: boolean, scene: THREE.Scene) {
     this.color = p.color;
     this.top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
-    this.ball.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, bottomMat));
+    this.ball.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.visible = false;
     this.shadow.visible = false;
     this.ring.visible = false;
@@ -96,6 +98,7 @@ class PlayerView {
   get newest(): Seg { return this.segs[this.head]; }
 
   track(p: PlayerS): void {
+    this.protectedUntil = p.protectedUntil;
     const s = this.newest;
     if (this.count && s.action === p.action && s.startTick === p.startTick && s.endTick === p.endTick) {
       // Same action. Only a mid-air turn changes it in flight (to.fwd + turn record): update in place.
@@ -179,6 +182,8 @@ class PlayerView {
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
       this.ball.quaternion.copy(tmpQ.fromArray(this.pose.quat));
       if (s.action === Action.Stunned) this.stunned(s, renderTick);
+      const ghost = renderTick < this.protectedUntil;
+      for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
       this.ball.quaternion.multiply(spinQ);
       this.label?.position.copy(this.ball.position).addScaledVector(tmpUp, 0.75);
       // Mid-flip the up axis points into air over the edge: keep the last placement until the new face takes over.
@@ -227,7 +232,8 @@ class PlayerView {
   dispose(scene: THREE.Scene): void {
     scene.remove(this.ball, this.shadow, this.ring);
     this.shadowMat.dispose();
-    (this.ball.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.Material>).material.dispose();
+    this.top.dispose();
+    this.bottom.dispose();
     if (this.label) { scene.remove(this.label); this.label.element.remove(); }
   }
 }
@@ -245,8 +251,9 @@ export class PlayersView {
 
   constructor(private scene: THREE.Scene) {}
 
-  setLevel(level: Level | null): void {
-    this.solid = level ? (x, y, z) => level.solid.has(`${x},${y},${z}`) : null;
+  /** Solid test for blob shadows (the level minus crumbled blocks), or null without a level. */
+  setSolid(solid: SolidFn | null): void {
+    this.solid = solid;
   }
 
   /** The local ball renders at localRenderTick (it may run closer to the server than the others). */
@@ -290,9 +297,9 @@ export class PlayersView {
     return Math.min(KNOCK_TICKS - 1, Math.max(0, ticks)) / KNOCK_TICKS;
   }
 
-  /** The local ball's render pose, or null when it isn't on screen (lobby, spectating, dead). */
-  localPose(localId: string): RenderPose | null {
-    const v = this.views.get(localId);
+  /** A ball's render pose, or null when it isn't on screen (lobby, spectating, dead). */
+  poseOf(id: string): RenderPose | null {
+    const v = this.views.get(id);
     return v?.shown ? v.pose : null;
   }
 

@@ -29,15 +29,19 @@ export function loadLevel(json: LevelJson): Level {
     id: json.id,
     name: json.name,
     version: json.version,
+    mode: json.mode ?? 'race',
+    lives: json.lives ?? 0,
+    crumble: json.crumble ?? null,
     solid,
     min,
     max,
     spawns: json.spawns.map((s) => ({ cell: v3(s.cell), up: parseDir(s.up), fwd: parseDir(s.fwd) })),
-    keys: json.keys.map((k) => ({ cell: v3(k.cell), up: parseDir(k.up) })),
-    exit: { cell: v3(json.exit.cell), up: parseDir(json.exit.up) },
-    keysRequired: json.keysRequired,
+    keys: (json.keys ?? []).map((k) => ({ cell: v3(k.cell), up: parseDir(k.up) })),
+    exit: json.exit ? { cell: v3(json.exit.cell), up: parseDir(json.exit.up) } : null,
+    keysRequired: json.keysRequired ?? 0,
     timeLimitSec: json.timeLimitSec,
   };
 }
 
-export const isSolid = (level: Level, v: Vec3): boolean => level.solid.has(cellKey(v));
+/** A block in the level as authored. The sim asks `isSolid(world, v)` instead, which also sees crumbled blocks. */
+export const levelSolid = (level: Level, v: Vec3): boolean => level.solid.has(cellKey(v));

@@ -1,9 +1,9 @@
 import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
-import { dirVec, type Dir } from '../dir.ts';
-import { mulberry32 } from '../rng.ts';
-import { isSolid } from '../level/load.ts';
-import type { Level, Pose } from '../level/types.ts';
-import { add, cellKey, type Vec3 } from '../vec.ts';
+import { ALL_DIRS, dirVec, perpendicular, type Dir } from '../dir.ts';
+import { mulberry32, rngNext } from '../rng.ts';
+import type { Level, Mode, Pose } from '../level/types.ts';
+import { add, cellKey, sub, type Vec3 } from '../vec.ts';
+import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
 export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9 } as const;
@@ -43,17 +43,45 @@ export interface PlayerState {
   /** Who knocked this player last and when, for knockout credit. Cleared on death. */
   lastKnockedBy: string | null;
   lastKnockedTick: number;
+  /** Push credits (knockouts) this round; the knockout-mode timeout tiebreak. */
+  knockouts: number;
+  /** Knockout mode: lives left, and elimination (at 0 lives: stays Dead, reserves nothing, spectates). */
+  lives: number;
+  eliminated: boolean;
+  /** Tick of elimination (-1 while in) and who knocked the player out last, if credited. */
+  eliminatedTick: number;
+  eliminatedBy: string | null;
+  /** Unpushable while tick < protectedUntil (knockout respawn). Ends early when this player pushes. */
+  protectedUntil: number;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
-export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' }
+/** 'lastAlive': one knockout player left; 'allOut': the last ones were eliminated together (a draw). */
+export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' | 'lastAlive' | 'allOut' }
 
 export interface Rules { push: boolean }
 
+/** Knockout crumble progress (ARCHITECTURE §15). Bands are block cellKeys, furthest from the centre first. */
+export interface KnockoutState {
+  bands: string[][];
+  /** Index of the next band to remove. */
+  next: number;
+  /** Band currently warned, or -1. */
+  warn: number;
+  /** The floor rule stopped crumbling for good. */
+  stopped: boolean;
+}
+
 export interface World {
   level: Level;
+  mode: Mode;
   rules: Rules;
   seed: number;
+  /** mulberry32 state for in-round randomness (knockout respawn spawns). */
+  rng: number;
+  /** Crumbled blocks (cellKeys). isSolid(world, v) is the level minus these. */
+  removed: Set<string>;
+  knockout: KnockoutState | null;
   tick: number;
   timeLimitTick: number;
   /** Join order; step() iterates it rotated by tick for fairness. */
@@ -72,13 +100,23 @@ export type SimEvent =
   | { type: 'push'; pusherId: string; victimId: string }
   | { type: 'bounce'; playerId: string }
   | { type: 'keyDrop'; playerId: string; keyId: number }
-  | { type: 'knockout'; pusherId: string; victimId: string };
+  | { type: 'knockout'; pusherId: string; victimId: string }
+  | { type: 'lifeLost'; playerId: string; livesLeft: number }
+  | { type: 'eliminated'; playerId: string; byId?: string }
+  | { type: 'crumbleWarn'; band: number }
+  | { type: 'crumble'; band: number };
 
+/** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
+  const knockout = level.mode === 'knockout';
   return {
     level,
-    rules,
+    mode: level.mode,
+    rules: knockout ? { ...rules, push: true } : rules,
     seed,
+    rng: seed >>> 0,
+    removed: new Set(),
+    knockout: knockout ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
     players: [],
@@ -101,11 +139,23 @@ function shuffledIndices(n: number, seed: number): number[] {
 
 const clonePose = (p: Pose): Pose => ({ cell: { ...p.cell }, up: p.up, fwd: p.fwd });
 
-/** Places the player on the first free spawn. Returns false (player untouched) if all are taken. */
-export function trySpawn(world: World, p: PlayerState): boolean {
+/**
+ * Places the player on a free spawn that still has ground: the first in spawnOrder, or with `random` a seeded-random
+ * one (knockout respawns). When crumbling has taken the ground from every spawn, a random respawn uses any free cell
+ * on a remaining block instead. Returns false (player untouched) if there is none.
+ */
+export function trySpawn(world: World, p: PlayerState, random = false): boolean {
   const res = reservations(world);
-  const spawn = world.spawnOrder.map((i) => world.level.spawns[i]).find((s) => isFree(world, res, p.id, s.cell));
-  if (!spawn) return false;
+  let open = world.spawnOrder.map((i) => world.level.spawns[i])
+    .filter((s) => isFree(world, res, p.id, s.cell) && isSolid(world, sub(s.cell, dirVec(s.up))));
+  if (!open.length && random) open = standingCells(world).filter((s) => isFree(world, res, p.id, s.cell));
+  if (!open.length) return false;
+  let spawn = open[0];
+  if (random) {
+    const r = rngNext(world.rng);
+    world.rng = r.state;
+    spawn = open[Math.floor(r.value * open.length)];
+  }
   p.pose = clonePose(spawn);
   p.to = clonePose(spawn);
   p.action = Action.Idle;
@@ -115,6 +165,20 @@ export function trySpawn(world: World, p: PlayerState): boolean {
   return true;
 }
 
+/** Every place a ball could stand on the remaining blocks (any face), in level order; fwd is the first perpendicular dir. */
+function standingCells(world: World): Pose[] {
+  const out: Pose[] = [];
+  for (const k of world.level.solid) {
+    if (world.removed.has(k)) continue;
+    const [x, y, z] = k.split(',').map(Number);
+    for (const up of ALL_DIRS) {
+      const cell = add({ x, y, z }, dirVec(up));
+      if (!isSolid(world, cell)) out.push({ cell, up, fwd: ALL_DIRS.find((d) => perpendicular(d, up))! });
+    }
+  }
+  return out;
+}
+
 /** Adds a player at the first free spawn. With no free spawn it waits as Dead and retries every tick. */
 export function addPlayer(world: World, id: string, name: string): PlayerState {
   const spawn = clonePose(world.level.spawns[0]);
@@ -122,7 +186,8 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
     startTick: world.tick, endTick: world.tick + 1, keys: 0, keyIds: [],
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
-    bounce: false, lastKnockedBy: null, lastKnockedTick: 0,
+    bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
+    lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -155,13 +220,16 @@ export function occupiedCells(p: PlayerState): Vec3[] {
 }
 
 /**
- * Can a push land on `v` at `tick` (ARCHITECTURE §14)? Idle, Turning, Stunned, or Hopping while low: the first
- * HOP_PUSH_WINDOW ticks after the hop's start tick or the last HOP_PUSH_WINDOW before its end. A hop on its start
- * tick is an escape, not pushable. The same-face check is the pusher's (v.pose.up === pusher up).
+ * Can a push land on `v` at `tick` (ARCHITECTURE §14)? Idle, Turning, Stunned by a bounce (not the stagger after a
+ * knock), or Hopping while low: the first HOP_PUSH_WINDOW ticks after the hop's start tick or the last HOP_PUSH_WINDOW
+ * before its end. A hop on its start tick is an escape, not pushable. Never while spawn-protected (§15).
+ * The same-face check is the pusher's (v.pose.up === pusher up).
  */
 export function isPushable(v: PlayerState, tick: number): boolean {
+  if (tick < v.protectedUntil) return false; // knockout spawn protection
   switch (v.action) {
-    case Action.Idle: case Action.Turn: case Action.Stunned: return true;
+    case Action.Idle: case Action.Turn: return true;
+    case Action.Stunned: return v.bounce; // a knocked victim staggers; a bounced pusher is fair game
     case Action.Hop: {
       const since = tick - v.startTick;
       return (since >= 1 && since <= HOP_PUSH_WINDOW) || v.endTick - tick <= HOP_PUSH_WINDOW;
@@ -190,8 +258,14 @@ export function reserve(res: Reservations, p: PlayerState): void {
 }
 
 /** Not solid, and not reserved by another player. */
+/** A block here: in the level and not crumbled. Every sim/BFS ground check goes through this. */
+export const isSolid = (world: World, v: Vec3): boolean => {
+  const k = cellKey(v);
+  return world.level.solid.has(k) && !world.removed.has(k);
+};
+
 export function isFree(world: World, res: Reservations, selfId: string, v: Vec3): boolean {
-  if (isSolid(world.level, v)) return false;
+  if (isSolid(world, v)) return false;
   const owner = res.get(cellKey(v));
   return owner === undefined || owner === selfId;
 }

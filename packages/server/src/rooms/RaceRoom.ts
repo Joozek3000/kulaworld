@@ -152,7 +152,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;
         s.phaseEndTick = 0;
-        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id}, push ${config.push ? 'on' : 'off'}`);
+        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id} (${this.level.mode}), push ${world.rules.push ? 'on' : 'off'}`);
         break;
       }
       case 'playing':
@@ -164,8 +164,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
         s.winnerId = result.winnerId ?? '';
         s.phaseEndTick = s.tick + RESULTS_TICKS;
         const winner = result.winnerId ? this.nameOf(result.winnerId) : 'draw';
-        const keys = this.world!.players.map((p) => `${p.name}:${p.keys}`).join(' ');
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${this.world!.tick}, keys ${keys}`);
+        const w = this.world!;
+        const stats = w.mode === 'knockout'
+          ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
+          : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}`);
         break;
       }
     }
@@ -181,6 +184,10 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'push': console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}`); break;
       case 'knockout': console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
       case 'keyDrop': console.log(`event keyDrop: ${who} dropped key ${e.keyId}`); break;
+      case 'lifeLost': console.log(`event lifeLost: ${who} has ${e.livesLeft}`); break;
+      case 'eliminated': console.log(`event eliminated: ${who}${e.byId ? ` by ${this.nameOf(e.byId)}` : ''}`); break;
+      case 'crumbleWarn': console.log(`event crumbleWarn: band ${e.band}`); break;
+      case 'crumble': console.log(`event crumble: band ${e.band}`); break;
       case 'win': console.log(`event win: ${e.winnerId ? this.nameOf(e.winnerId) : 'draw'} (${e.reason})`); break;
     }
   }

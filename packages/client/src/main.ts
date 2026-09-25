@@ -4,7 +4,7 @@ import { setupInput } from './input.ts';
 import { connect, serverUrl, type Net } from './net.ts';
 import { CameraRig, type CameraMode } from './render/camera.ts';
 import { ItemsView } from './render/items.ts';
-import { buildLevel, findLevel, levelBounds } from './render/level.ts';
+import { findLevel, levelBounds, LevelView } from './render/level.ts';
 import { PlayersView } from './render/players.ts';
 import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
@@ -61,13 +61,18 @@ net.onEvent((e) => {
     case 'bounce': sfx.buzz(); break;
     case 'knockout': hud.toast(`${nameOf(e.pusherId)} knocked ${nameOf(e.victimId)} off!`, colorOf(e.pusherId)); break;
     case 'keyDrop': hud.toast(`${nameOf(e.playerId)} dropped a key`, colorOf(e.playerId)); break;
+    case 'eliminated':
+      hud.toast(e.byId ? `${nameOf(e.byId)} knocked ${nameOf(e.playerId)} out!` : `${nameOf(e.playerId)} ${e.playerId === net.sessionId ? 'are' : 'is'} out`, colorOf(e.playerId));
+      sfx.eliminated(e.playerId === net.sessionId);
+      break;
+    case 'crumbleWarn': sfx.crumbleWarn(); break;
   }
 });
 
 if (import.meta.env.DEV) Object.assign(window, { kula: { net, players } }); // console/automation access
 
 let level: Level | null = null;
-let levelGroup: THREE.Group | null = null;
+let levelView: LevelView | null = null;
 let bounds = { center: new THREE.Vector3(), radius: 5 };
 let last = performance.now();
 let lastPhase = '';
@@ -83,10 +88,10 @@ view.renderer.setAnimationLoop((now: number) => {
 
   if (s.levelId && level?.id !== s.levelId) {
     level = findLevel(s.levelId);
-    if (levelGroup) view.scene.remove(levelGroup);
-    levelGroup = level ? buildLevel(level) : null;
-    players.setLevel(level);
-    if (level && levelGroup) { view.scene.add(levelGroup); bounds = levelBounds(level); }
+    if (levelView) view.scene.remove(levelView.group);
+    levelView = level ? new LevelView(level) : null;
+    players.setSolid(levelView?.solid ?? null);
+    if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
   }
 
   const renderTick = net.estServerTick - INTERP_TICKS;
@@ -95,8 +100,12 @@ view.renderer.setAnimationLoop((now: number) => {
   const mine = s.players.get(me);
   items.update(s, active, !!level && !!mine && mine.keys >= level.keysRequired, now / 1000);
 
-  const pose = players.localPose(me);
-  const mode: CameraMode = !active || !mine || mine.spectating ? 'orbit' : pose ? 'follow' : 'hold';
+  levelView?.update(active ? s.crumbled : 0, active ? s.warnBand : -1, now / 1000);
+
+  // Knocked out of a knockout round: follow whoever did it while they're on screen, otherwise orbit.
+  const out = !!mine?.eliminated && active;
+  const pose = players.poseOf(out ? mine!.eliminatedBy : me);
+  const mode: CameraMode = !active || !mine || mine.spectating || (out && !pose) ? 'orbit' : pose ? 'follow' : 'hold';
   rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
 
   // Countdown beeps: one per second, a higher one when play starts.

@@ -12,7 +12,8 @@ export function onLand(world: World, p: PlayerState, events: SimEvent[]): void {
     p.keyIds.push(k.id);
     events.push({ type: 'key', playerId: p.id, keyId: k.id, keys: p.keys });
   }
-  if (p.keys >= world.level.keysRequired && eq(world.level.exit.cell, p.pose.cell)) {
+  const exit = world.level.exit;
+  if (exit && p.keys >= world.level.keysRequired && eq(exit.cell, p.pose.cell)) {
     world.result = { winnerId: p.id, reason: 'exit' };
     events.push({ type: 'win', winnerId: p.id, reason: 'exit' });
   }
@@ -20,20 +21,25 @@ export function onLand(world: World, p: PlayerState, events: SimEvent[]): void {
 
 /**
  * Push rules only (ARCHITECTURE §14): a death drops the last key back to its spot (not once the round has a result),
- * and credits the last pusher if the knock was at most KNOCKOUT_CREDIT_TICKS ago.
+ * and credits the last pusher if the knock was at most KNOCKOUT_CREDIT_TICKS ago. Returns the credited pusher's id.
  */
-export function onDeath(world: World, p: PlayerState, events: SimEvent[]): void {
-  if (!world.rules.push) return;
+export function onDeath(world: World, p: PlayerState, events: SimEvent[]): string | null {
+  if (!world.rules.push) return null;
   const keyId = world.result ? undefined : p.keyIds.pop();
   if (keyId !== undefined) {
     p.keys--;
     world.keys[keyId].collected = false;
     events.push({ type: 'keyDrop', playerId: p.id, keyId });
   }
+  let creditId: string | null = null;
   if (p.lastKnockedBy !== null && world.tick - p.lastKnockedTick <= KNOCKOUT_CREDIT_TICKS) {
-    events.push({ type: 'knockout', pusherId: p.lastKnockedBy, victimId: p.id });
+    creditId = p.lastKnockedBy;
+    events.push({ type: 'knockout', pusherId: creditId, victimId: p.id });
+    const pusher = world.players.find((q) => q.id === creditId);
+    if (pusher) pusher.knockouts++;
   }
   p.lastKnockedBy = null;
+  return creditId;
 }
 
 /** At the time limit, most keys wins; a tie for most is a draw (winnerId null). */

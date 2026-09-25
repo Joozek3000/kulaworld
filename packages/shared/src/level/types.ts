@@ -3,17 +3,24 @@ import type { Vec3 } from '../vec.ts';
 
 type V3 = [number, number, number];
 
-/** On-disk format, see ARCHITECTURE §9. */
+export type Mode = 'race' | 'knockout';
+/** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
+export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
+
+/** On-disk format, see ARCHITECTURE §9 and §15. Knockout levels have no keys/exit/keysRequired. */
 export interface LevelJson {
   id: string;
   name: string;
   version: number;
+  mode?: Mode;
+  lives?: number;
+  crumble?: Crumble;
   blocks?: V3[];
   boxes?: { min: V3; max: V3; hollow?: boolean }[];
   spawns: { cell: V3; up: DirName; fwd: DirName }[];
-  keys: { cell: V3; up: DirName }[];
-  exit: { cell: V3; up: DirName };
-  keysRequired: number;
+  keys?: { cell: V3; up: DirName }[];
+  exit?: { cell: V3; up: DirName };
+  keysRequired?: number;
   timeLimitSec: number;
 }
 
@@ -24,12 +31,17 @@ export interface Level {
   id: string;
   name: string;
   version: number;
+  mode: Mode;
+  /** Knockout: lives per player (0 in race). */
+  lives: number;
+  crumble: Crumble | null;
   solid: Set<string>; // cellKeys
   min: Vec3; // AABB of all blocks, inclusive
   max: Vec3;
   spawns: Pose[];
   keys: Placement[];
-  exit: Placement;
+  /** null in knockout. */
+  exit: Placement | null;
   keysRequired: number;
   timeLimitSec: number;
 }

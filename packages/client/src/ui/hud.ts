@@ -6,6 +6,10 @@ const dot = (color: string) => `<span class="dot" style="background:${esc(color)
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 const CONTROLS = 'W roll · A/D turn · Space jump (hold to bounce) · R ready · M mute · F3 debug';
 const TOAST_MS = 2500;
+const CRUMBLE_COUNTDOWN_SEC = 5;
+const hearts = (lives: number, max: number) =>
+  `<span class="hearts">${'♥'.repeat(lives)}<span class="dim">${'♥'.repeat(Math.max(0, max - lives))}</span></span>`;
+const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`); // up to 8 players
 
 function div(id: string): HTMLDivElement {
   const el = document.createElement('div');
@@ -31,8 +35,15 @@ export function createHud() {
     s.players.forEach((p) => { if (!p.spectating) list.push(p); });
     return list.sort((a, b) => b.keys - a.keys || a.name.localeCompare(b.name));
   };
+  /** Knockout standings: players still in (most lives, then knockouts), then the eliminated, latest out first. */
+  const byPlace = (s: GameState) => {
+    const list: PlayerS[] = [];
+    s.players.forEach((p) => { if (!p.spectating) list.push(p); });
+    return list.sort((a, b) => Number(a.eliminated) - Number(b.eliminated) || b.lives - a.lives || b.knockouts - a.knockouts
+      || b.eliminatedTick - a.eliminatedTick || a.name.localeCompare(b.name));
+  };
   const row = (p: PlayerS, me: string, right: string) =>
-    `<li class="${p.id === me ? 'me' : ''}">${dot(p.color)}<span class="name">${esc(p.name)}${p.id === me ? ' (you)' : ''}</span><span class="val">${right}</span></li>`;
+    `<li class="${p.id === me ? 'me' : ''}${p.eliminated ? ' out' : ''}">${dot(p.color)}<span class="name">${esc(p.name)}${p.id === me ? ' (you)' : ''}</span><span class="val">${right}</span></li>`;
 
   return {
     error(text: string) { set(top, esc(text)); },
@@ -53,6 +64,9 @@ export function createHud() {
       const name = (id: string) => s.players.get(id)?.name ?? '?';
       const sound = muted ? ' · <span class="muted">muted</span>' : '';
       const levelName = esc(level?.name ?? s.levelId);
+      const ko = (level?.mode ?? s.mode) === 'knockout';
+      const maxLives = level?.lives ?? 3;
+      const goal = ko ? `last ball rolling wins · ${maxLives} lives` : `collect ${required} keys, then reach the exit`;
 
       switch (s.phase) {
         case 'lobby': {
@@ -64,7 +78,7 @@ export function createHud() {
           });
           const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : 'Press <kbd>R</kbd> to ready';
           set(top, `Lobby · ${levelName}${sound}`);
-          set(center, `<div class="panel"><h1>Key Race</h1><div class="sub">${levelName} · collect ${required} keys, then reach the exit</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
+          set(center, `<div class="panel"><h1>${ko ? 'Knockout' : 'Key Race'}</h1><div class="sub">${levelName} · ${goal}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
           set(status, CONTROLS);
           break;
@@ -73,10 +87,22 @@ export function createHud() {
           set(top, `${levelName}${sound}`);
           set(center, `<div class="big">${secs || 'GO'}</div>`);
           set(board, '');
-          set(status, mine?.spectating ? 'Spectating: you join next round' : `Collect ${required} keys, then reach the exit`);
+          set(status, mine?.spectating ? 'Spectating: you join next round' : goal[0].toUpperCase() + goal.slice(1));
           break;
         case 'playing': {
           const spectating = !mine || mine.spectating;
+          if (ko) {
+            const out = !!mine?.eliminated;
+            const crumbleIn = s.nextCrumbleTick >= 0 ? Math.ceil((s.nextCrumbleTick - s.tick) / TICK_RATE) : -1;
+            const crumble = crumbleIn > 0 && crumbleIn <= CRUMBLE_COUNTDOWN_SEC ? ` · <span class="warn">Floor crumbles in ${crumbleIn}</span>` : '';
+            set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${crumble}${sound}`);
+            const by = mine?.eliminatedBy ? ` by ${esc(name(mine.eliminatedBy))}` : '';
+            set(center, out ? `<div class="panel"><h1 class="warn">ELIMINATED</h1><div class="sub">Knocked out${by} · spectating</div></div>` : '');
+            set(board, `<ul class="list">${byPlace(s).map((p) => row(p, me, p.eliminated ? '<span class="dim">out</span>' : `${hearts(p.lives, maxLives)} ${p.knockouts ? `KO ${p.knockouts}` : ''}`)).join('')}</ul>`);
+            set(status, spectating ? 'Spectating: you join next round' : out ? 'Spectating until the round ends'
+              : `Lives ${hearts(mine!.lives, maxLives)} · Knockouts <b>${mine!.knockouts}</b>`);
+            break;
+          }
           const keys = mine?.keys ?? 0;
           const open = keys >= required;
           set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${sound}`);
@@ -90,7 +116,10 @@ export function createHud() {
           const color = s.players.get(s.winnerId)?.color ?? '#fff';
           const banner = s.winnerId ? `<h1 style="color:${esc(color)}">${esc(name(s.winnerId))} wins!</h1>` : '<h1>Draw</h1>';
           set(top, `Results${sound}`);
-          set(center, `<div class="panel">${banner}<ul class="list">${byKeys(s).map((p) => row(p, me, `${p.keys} key${p.keys === 1 ? '' : 's'}`)).join('')}</ul><div class="hint">Lobby in ${secs}s</div></div>`);
+          const rows = ko
+            ? byPlace(s).map((p, i) => row(p, me, `${ordinal(i + 1)} · ${p.eliminated ? 'out' : hearts(p.lives, maxLives)} · KO ${p.knockouts}`))
+            : byKeys(s).map((p) => row(p, me, `${p.keys} key${p.keys === 1 ? '' : 's'}`));
+          set(center, `<div class="panel">${banner}<ul class="list">${rows.join('')}</ul><div class="hint">Lobby in ${secs}s</div></div>`);
           set(board, '');
           set(status, '');
           break;

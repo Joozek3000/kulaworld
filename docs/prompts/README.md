@@ -18,3 +18,4 @@ Workflow:
 | 05 | Key Race complete | HUD, results, seek bots, first real playtest |
 | 05b | Air turns | Left/right mid-bounce turns instantly; spawn shuffle for bot fairness |
 | 06 | Push (PvP) | Roll into players to knock them; deaths drop a key; bully bots |
+| 07 | Knockout | Stagger fix (no chain pushes), lives, crumbling arenas, mixed-mode rotation |

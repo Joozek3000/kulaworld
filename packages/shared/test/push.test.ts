@@ -137,11 +137,15 @@ describe('push', () => {
     expect(p1.endTick).toBe(w.tick + KNOCK_TICKS);
   });
 
-  const at = (action: Action, startTick = 10, endTick = 20) => ({ action, startTick, endTick }) as PlayerState;
+  const at = (action: Action, startTick = 10, endTick = 20, extra: Partial<PlayerState> = {}) =>
+    ({ action, startTick, endTick, bounce: false, protectedUntil: 0, ...extra }) as PlayerState;
   test.each([
     ['Idle', at(Action.Idle), 15, true],
     ['Turning', at(Action.Turn), 11, true],
-    ['Stunned', at(Action.Stunned), 11, true],
+    ['Stunned by a bounce', at(Action.Stunned, 10, 20, { bounce: true }), 11, true],
+    ['Stunned after a knock (stagger)', at(Action.Stunned), 11, false],
+    ['Idle but spawn-protected', at(Action.Idle, 10, 10, { protectedUntil: 16 }), 15, false],
+    ['Idle, protection just ended', at(Action.Idle, 10, 10, { protectedUntil: 15 }), 15, true],
     ['Rolling', at(Action.Roll), 12, false],
     ['Flipping', at(Action.Flip), 12, false],
     ['Jumping', at(Action.Jump), 11, false],
@@ -169,17 +173,55 @@ describe('push', () => {
     expect(player(w).action).toBe(Action.Idle);
   });
 
-  test('a Stunned victim is pushable (combo): holding W pushes it again as the roll ends', () => {
-    const w = makeWorld(row(0, 5), [pusher(), victim()]);
-    const p1 = player(w, 'p1');
-    push(w);
-    step(w);
-    run(w, KNOCK_TICKS);
-    expect(p1.action).toBe(Action.Stunned);
-    const events = run(w, ROLL_TICKS - KNOCK_TICKS);
-    expect(of(events, 'push')).toHaveLength(1);
-    expect(p1.action).toBe(Action.Knocked);
-    expect(p1.to.cell).toEqual(vec(3, 1, 0));
+  describe('stagger: no chain pushes along a straight edge', () => {
+    /** p0 pushes p1 at tick 1 and keeps holding W. Knock ends at 1 + KNOCK_TICKS, the stagger STUN_TICKS later. */
+    const chain = (victimInput: Parameters<typeof input>[0]) => {
+      const w = makeWorld(row(0, 6), [pusher(), victim('+X')]);
+      const p0 = player(w), p1 = player(w, 'p1');
+      push(w);
+      step(w);
+      const recover = 1 + KNOCK_TICKS + STUN_TICKS;
+      const blocked: SimEvent[] = [];
+      while (w.tick < recover - 1) {
+        blocked.push(...step(w));
+        if (w.tick > 1 + ROLL_TICKS) {
+          expect(p0.action).toBe(Action.Idle); // roll done, holding W, blocked by the stagger
+          expect(p1.action).toBe(Action.Stunned);
+        }
+      }
+      expect(blocked).toEqual([]);
+      setInput(w, 'p1', input(victimInput));
+      return { w, p0, p1, events: step(w) }; // the tick p1 recovers
+    };
+
+    test('the victim recovers first: its escape precedence beats the held W', () => {
+      const { p0, p1, events } = chain({ fwdHeld: true });
+      expect(of(events, 'push')).toEqual([]);
+      expect(p1.action).toBe(Action.Roll);
+      expect(p0.action).toBe(Action.Idle);
+    });
+
+    test('a victim that stays put after recovering can be pushed again', () => {
+      const { p1, events } = chain({});
+      expect(of(events, 'push')).toHaveLength(1);
+      expect(p1.action).toBe(Action.Knocked);
+      expect(p1.to.cell).toEqual(vec(3, 1, 0));
+    });
+  });
+
+  test('a bounce-stunned player is still pushable', () => {
+    // p0 bounces off p1 (wall behind p1), then p2 pushes the stunned p0 sideways onto open floor.
+    const floor = Array.from({ length: 3 }, (_, z) => row(0, 4, 0, z)).flat();
+    const w = makeWorld([...floor, [3, 1, 1]], [[[1, 1, 1], '+Y', '+X'], [[2, 1, 1], '+Y', '+Z'], [[1, 1, 0], '+Y', '+Z']]);
+    const p0 = player(w);
+    setInput(w, 'p0', input({ fwdHeld: true }));
+    expect(step(w)).toEqual([{ type: 'bounce', playerId: 'p0' }]);
+    setInput(w, 'p0', input({}));
+    expect(p0.bounce).toBe(true);
+    setInput(w, 'p2', input({ fwdHeld: true }));
+    expect(of(step(w), 'push')).toEqual([{ type: 'push', pusherId: 'p2', victimId: 'p0' }]);
+    expect(p0.action).toBe(Action.Knocked);
+    expect(p0.to.cell).toEqual(vec(1, 1, 2));
   });
 
   test.each([

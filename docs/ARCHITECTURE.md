@@ -82,7 +82,7 @@ Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is
 - **Mid-air turning** (per Jakub, from the original): a left/right press while **airborne** (Hop, Jump, Fall) turns the ball **immediately**. It changes `to.fwd` on the tick the input is applied, with no Turn action and no delay, and the ball spins in the air. The jump's trajectory (`to.cell`) doesn't change. Only the facing does, so the next forward jump or roll goes the new way. Several presses in one airborne action stack. Turns on the ground stay a 3-tick Turn action.
 - If a forward jump is blocked (A1 solid or taken), it falls back to a hop.
 
-**Hop**: the ball bounces up along U and lands on the same cell. `to` = the current pose, duration `JUMP_TICKS`. It reserves only its own cell. It's blocked if `solid(C + U)` (a low ceiling). During a hop the player isn't Idle, so it can't be pushed (§14). This is the counterplay to a push.
+**Hop**: the ball bounces up along U and lands on the same cell. `to` = the current pose, duration `JUMP_TICKS`. It reserves only its own cell. It's blocked if `solid(C + U)` (a low ceiling). With push on, a hopping player can only be pushed in the low part of the hop (§14 pushable states). This is the counterplay to a push.
 
 **Jump forward** (pulse + fwdHeld), up to 2 cells along F through the air:
 1. `A1 = C + F`, `A2 = C + 2F`. If `solid(A1)` or `!free(A1)`, the jump is blocked.
@@ -96,7 +96,7 @@ Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is
 - If the cell leaves the level AABB expanded by `KILL_MARGIN` on all sides, the player goes **Dead**.
 - MVP simplification: falls ignore other players. Overlap is allowed until one of them moves.
 
-**Dead**: after `RESPAWN_TICKS`, respawn at the first free spawn point. Keys are kept (death costs time only). Log this in DECISIONS.md if you change it.
+**Dead**: after `RESPAWN_TICKS`, respawn at a free spawn point. With push off, keys are kept. With push on, a death drops 1 key (§14). Knockout mode uses lives instead (§15).
 
 ## 6. Timing and input
 
@@ -232,17 +232,17 @@ Bump/knockback, pickups (speed, heavy, gravity lock, crumble trap), client predi
 ## 14. PvP: push (phase 06)
 
 **Pushable states.** Only players on the same gravity face (`V.up === P.up`) can be pushed. A victim V is pushable when it is:
-- Idle, Turning or Stunned, or
+- Idle, Turning, or Stunned **from a failed push (bounce)**, or
 - Hopping within `HOP_PUSH_WINDOW` (2) ticks of the hop's start or end, i.e. while it's low.
 
-Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked and Dead players can't be pushed. Holding jump therefore gives partial cover, 6 of every 10 ticks, not immunity.
+Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after being knocked** (stagger) and Dead players can't be pushed. The stagger rule stops chain pushes: one push can't carry a victim across a whole platform (decided after phase 06, when one push on a straight edge was always a kill). Holding jump therefore gives partial cover, 6 of every 10 ticks, not immunity.
 
 **Push**
 - Trigger: P's fwd intent targets cell `A = C + F` and `A` holds a pushable V. P doesn't need a special button: rolling into someone pushes them.
 - **Success** when `A + F` is not solid and not reserved:
   - V gets `Knocked` (moves `A → A + F` over `KNOCK_TICKS` = 4), cancelling any Turn/Hop/Stun it was in.
   - P's Roll into `A` proceeds normally.
-  - When the knock ends: if `solid(A + F − U)` V becomes `Stunned` for `STUN_TICKS` (8). Otherwise V starts a **Fall** (the reusable fall function); off the map that means death.
+  - When the knock ends: if `solid(A + F − U)` V becomes `Stunned` for `STUN_TICKS` (6) and can't be pushed during it (stagger). When it recovers, the escape rule gives it first move. Otherwise V starts a **Fall** (the reusable fall function); off the map that means death.
 - **Fail** when `A + F` is solid or reserved (a wall or another player behind V): P gets `Stunned` in place for `STUN_TICKS` with a *bounce* flag, rendered as a short lunge and recoil. V is unaffected, so pinning against a wall doesn't work.
 - **Not pushable:** if V is in a non-pushable state, P is simply blocked (MVP behaviour, no stun) and retries next tick if fwd is still held. So holding W against a bouncing player pushes them the moment they're low.
 
@@ -260,11 +260,47 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked and Dead players ca
 - `PUSH=on|off` in `.env` (default on). It's passed into `createWorld` as a rule flag, so tests can run both ways.
 - With PUSH=off, the MVP rules apply exactly, including death keeping keys.
 
-**Modes using it**:
-- **Key Race + push**: the default once PvP lands. Knocking the leader off steals their progress.
-- **Knockout** (phase 07): a small arena, no keys, 3 lives. Last ball rolling wins. After 60 s the outer ring of tiles starts crumbling inward every 10 s.
+**Modes using it**: Key Race with push is the default. Knockout is §15.
 
 **Later options (don't build yet)**:
 - Charged ram: hold fwd for 1 s to push 2 cells.
 - Heavy pickup: can't be pushed.
 - Jump-stomp: landing on a player stuns them.
+
+## 15. Knockout mode (phase 07)
+
+**The level decides the mode.** A level JSON gets `"mode": "race" | "knockout"`, defaulting to race. Knockout levels have no `keys`/`exit`/`keysRequired`. Instead they have:
+
+```json
+"mode": "knockout",
+"lives": 3,
+"timeLimitSec": 180,
+"crumble": { "startSec": 45, "intervalSec": 10, "warnSec": 2 }
+```
+
+`LEVEL` lists can mix race and knockout levels, and the mode switches per round. `Rules` stays `{ push }` (push is always on in Knockout). The mode lives in `world.mode` + `world.knockout` state.
+
+**Lives**
+- Each player starts with `lives`. A death costs 1 life.
+- With lives left, the player respawns after `RESPAWN_TICKS` at a random free spawn (seeded RNG). It gets **spawn protection**: unpushable for `SPAWN_PROTECT_TICKS` (40), rendered translucent. Protection ends early if the player pushes someone.
+- At 0 lives the player is **eliminated**. It spectates (the camera follows whoever knocked it out, or orbits) and reserves no cells.
+
+**Win**
+- Last player with lives > 0 wins.
+- If the last players are all eliminated on the same tick, it's a draw between them.
+- On timeout: most lives, then most knockouts; still tied means a draw.
+- In solo dev (1 player) the round ends only by timeout or death, so it's testable alone.
+
+**Crumble**
+- The world gets an overlay `removed: Set<cellKey>`. `isSolid(world, v) = level.solid.has(v) && !removed.has(v)`. Every sim/BFS/validation path that asks "is there ground" must use the world version.
+- Crumble order: blocks sorted by distance from the level's bounding-box centre, furthest first, grouped into bands of equal rounded distance. Every `intervalSec` after `startSec`, the next band is removed.
+- `warnSec` before removal, a band is marked `warning`, which is synced and rendered as shaking and red blinking.
+- A block is never removed if that would leave fewer blocks than 2× the number of alive players. Stop crumbling there.
+- A player standing on a removed block starts a Fall on the next tick. Mid-action players are checked when the action finishes (existing landing logic).
+
+**Events**: `lifeLost {playerId, livesLeft}`, `eliminated {playerId, byId?}`, `crumbleWarn {band}`, `crumble {band}`.
+
+**Arenas**
+- `arena-01`: a 9×9×1 plate with 4 single-cell holes and 8 spawns around the edge. Flat brawling.
+- `arena-02`: a solid 5×5×5 cube with spawns on 4 faces. Fights across faces, and flips as escapes. Corners and edges crumble first.
+
