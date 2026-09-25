@@ -91,8 +91,14 @@ export function rotate(q: Quat, v: V3, out: V3): V3 {
 
 const qa: Quat = [0, 0, 0, 1], qb: Quat = [0, 0, 0, 1], off: V3 = [0, 0, 0], Y: V3 = [0, 1, 0];
 
-/** Render pose for an action at `progress` (clamped to 0..1). Writes into `out`; allocates nothing when `out` is given. */
-export function poseAt(action: Action, from: Pose, to: Pose, progress: number, out: RenderPose = newRenderPose()): RenderPose {
+/** A mid-air turn during Hop/Jump/Fall: facing before it, and how far its TURN_TICKS spin has got (0..1). */
+export interface AirTurn { fromFwd: Dir; progress: number }
+
+/**
+ * Render pose for an action at `progress` (clamped to 0..1). Writes into `out`; allocates nothing when `out` is given.
+ * `airTurn` spins an airborne ball's facing from `airTurn.fromFwd` to `to.fwd`; its path still follows `from`.
+ */
+export function poseAt(action: Action, from: Pose, to: Pose, progress: number, out: RenderPose = newRenderPose(), airTurn?: AirTurn): RenderPose {
   const p = Math.min(1, Math.max(0, progress));
   const C = from.cell, U = dirVec(from.up), F = dirVec(from.fwd), T = to.cell;
   const pos = out.position;
@@ -133,6 +139,10 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
     case Action.Fall:
       lerp();
       break;
+  }
+  if (airTurn && airTurn.fromFwd !== to.fwd && (action === Action.Hop || action === Action.Jump || action === Action.Fall)) {
+    const t = Math.min(1, Math.max(0, airTurn.progress));
+    slerp(frameQuat(from.up, airTurn.fromFwd, qa), frameQuat(from.up, to.fwd, qb), t, out.quat);
   }
   rotate(out.quat, Y, out.up);
   return out;

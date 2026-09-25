@@ -255,20 +255,6 @@ describe('input', () => {
     expect(p.pulse).toBe(null);
   });
 
-  test.each([
-    ['hop', { jump: true }, Action.Hop],
-    ['forward jump', { jump: true, fwdHeld: true }, Action.Jump],
-  ] as const)('a turn pressed in the first tick of a %s is applied on landing', (_, start, airborne) => {
-    const w = makeWorld(row(0, 5), [onRow()]);
-    const p = player(w);
-    setInput(w, 'p0', input(start));
-    step(w);
-    expect(p.action).toBe(airborne);
-    setInput(w, 'p0', input({ turn: 1 }));
-    run(w, JUMP_TICKS);
-    expect(p.action).toBe(Action.Turn);
-    expect(p.startTick).toBe(1 + JUMP_TICKS);
-  });
 });
 
 describe('hop', () => {

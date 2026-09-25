@@ -79,6 +79,7 @@ Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is
 - A bounce is **forward** if forward is held when it starts, otherwise it's in place. So holding Space+W chains forward jumps.
 - **Forward latch:** pressing forward (rising edge) *during a Hop* makes the next action a forward jump immediately on landing, even if forward or jump is released before then. Forward pressed during a forward Jump doesn't latch; the ball just rolls on landing if W is still held.
 - A tap shorter than one tick still gives one bounce, via the jump pulse.
+- **Mid-air turning** (per Jakub, from the original): a left/right press while **airborne** (Hop, Jump, Fall) turns the ball **immediately**. It changes `to.fwd` on the tick the input is applied, with no Turn action and no delay, and the ball spins in the air. The jump's trajectory (`to.cell`) doesn't change. Only the facing does, so the next forward jump or roll goes the new way. Several presses in one airborne action stack. Turns on the ground stay a 3-tick Turn action.
 - If a forward jump is blocked (A1 solid or taken), it falls back to a hop.
 
 **Hop**: the ball bounces up along U and lands on the same cell. `to` = the current pose, duration `JUMP_TICKS`. It reserves only its own cell. It's blocked if `solid(C + U)` (a low ceiling). During a hop the player isn't Idle, so it can't be pushed (§14). This is the counterplay to a push.

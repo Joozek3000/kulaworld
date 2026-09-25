@@ -24,9 +24,15 @@ export function levelJson(blocks: V3[], spawns: Spawn[], extra: Partial<LevelJso
   };
 }
 
-/** A tiny world with one player per spawn, ids p0, p1, ... */
+/** Hand spawns out in level order (worlds shuffle them per seed), so tests know who starts where. */
+export function inOrder(w: World): World {
+  w.spawnOrder = w.level.spawns.map((_, i) => i);
+  return w;
+}
+
+/** A tiny world with one player per spawn, ids p0, p1, ... in spawn order. */
 export function makeWorld(blocks: V3[], spawns: Spawn[], extra: Partial<LevelJson> = {}): World {
-  const w = createWorld(loadLevel(levelJson(blocks, spawns, extra)), 1);
+  const w = inOrder(createWorld(loadLevel(levelJson(blocks, spawns, extra)), 1));
   spawns.forEach((_, i) => addPlayer(w, `p${i}`, `p${i}`));
   return w;
 }

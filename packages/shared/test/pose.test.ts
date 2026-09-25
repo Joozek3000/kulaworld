@@ -106,3 +106,18 @@ test('hop: parabola along up with peak HOP_HEIGHT, no lateral move, no spin', ()
   const side = pose(5, 2, 2, Dir.PX, Dir.PY); // on a +X face
   close(poseAt(Action.Hop, side, side, 0.5).position, [5 + HOP_HEIGHT, 2, 2]);
 });
+
+test('mid-air turn: facing spins from turnFromFwd to to.fwd over the turn, position unaffected', () => {
+  const from = pose(0, 1, 0, Dir.PY, Dir.PZ);
+  const to = pose(0, 1, 0, Dir.PY, Dir.PX); // turned left mid-hop
+  const at = (t: number) => poseAt(Action.Hop, from, to, 0.5, undefined, { fromFwd: Dir.PZ, progress: t });
+  close(apply(at(0).quat, [0, 0, 1]), [0, 0, 1]);
+  close(apply(at(0.5).quat, [0, 0, 1]), [Math.SQRT1_2, 0, Math.SQRT1_2]);
+  close(apply(at(1).quat, [0, 0, 1]), [1, 0, 0]);
+  close(apply(at(7).quat, [0, 0, 1]), [1, 0, 0]); // clamped
+  close(at(0.5).position, [0, 1 + HOP_HEIGHT, 0]);
+  close(at(0.5).up, [0, 1, 0]);
+  // a forward jump's path still follows from.fwd even though it lands facing the new way
+  const jumpTo = pose(0, 1, 2, Dir.PY, Dir.PX);
+  close(poseAt(Action.Jump, from, jumpTo, 0.5, undefined, { fromFwd: Dir.PZ, progress: 1 }).position, [0, 1 + JUMP_HEIGHT, 1]);
+});

@@ -53,6 +53,12 @@ export function startAction(p: PlayerState, plan: Plan, tick: number): void {
   p.to = plan.to;
   p.startTick = tick;
   p.endTick = tick + plan.ticks;
+  // Reset a stale mid-air turn record, but keep one that is still spinning (e.g. a turn on the landing tick of a
+  // chained hop), so the next action carries on rendering it instead of snapping.
+  if (tick - p.turnStartTick >= TURN_TICKS) {
+    p.turnFromFwd = plan.to.fwd;
+    p.turnStartTick = tick;
+  }
 }
 
 /** Starts one fall step along -up if nothing is below. Returns false when the player is standing on a block. */

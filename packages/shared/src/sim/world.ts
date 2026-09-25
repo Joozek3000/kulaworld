@@ -1,5 +1,6 @@
 import { KILL_MARGIN, TICK_RATE } from '../constants.ts';
-import { dirVec } from '../dir.ts';
+import { dirVec, type Dir } from '../dir.ts';
+import { mulberry32 } from '../rng.ts';
 import { isSolid } from '../level/load.ts';
 import type { Level, Pose } from '../level/types.ts';
 import { add, cellKey, type Vec3 } from '../vec.ts';
@@ -32,6 +33,9 @@ export interface PlayerState {
   pulse: Pulse | null;
   /** Ticks the buffered pulse has waited, not counting airborne ticks (Hop/Jump/Fall). */
   pulseAge: number;
+  /** Last mid-air turn, for rendering: facing before it and the tick it happened. Reset at every action start. */
+  turnFromFwd: Dir;
+  turnStartTick: number;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -46,6 +50,8 @@ export interface World {
   players: PlayerState[];
   keys: KeyItem[];
   result: RaceResult | null;
+  /** Spawn indices in the order players get them, shuffled per seed so join order doesn't fix the spawn. */
+  spawnOrder: number[];
 }
 
 export type SimEvent =
@@ -63,7 +69,19 @@ export function createWorld(level: Level, seed: number): World {
     players: [],
     keys: level.keys.map((k, id) => ({ id, cell: k.cell, collected: false })),
     result: null,
+    spawnOrder: shuffledIndices(level.spawns.length, seed),
   };
+}
+
+/** Fisher-Yates over 0..n-1 with the seeded RNG: deterministic per seed. */
+function shuffledIndices(n: number, seed: number): number[] {
+  const rnd = mulberry32(seed);
+  const a = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 const clonePose = (p: Pose): Pose => ({ cell: { ...p.cell }, up: p.up, fwd: p.fwd });
@@ -71,12 +89,14 @@ const clonePose = (p: Pose): Pose => ({ cell: { ...p.cell }, up: p.up, fwd: p.fw
 /** Places the player on the first free spawn. Returns false (player untouched) if all are taken. */
 export function trySpawn(world: World, p: PlayerState): boolean {
   const res = reservations(world);
-  const spawn = world.level.spawns.find((s) => isFree(world, res, p.id, s.cell));
+  const spawn = world.spawnOrder.map((i) => world.level.spawns[i]).find((s) => isFree(world, res, p.id, s.cell));
   if (!spawn) return false;
   p.pose = clonePose(spawn);
   p.to = clonePose(spawn);
   p.action = Action.Idle;
   p.startTick = p.endTick = world.tick;
+  p.turnFromFwd = spawn.fwd;
+  p.turnStartTick = world.tick;
   return true;
 }
 
@@ -86,7 +106,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
   const p: PlayerState = {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
     startTick: world.tick, endTick: world.tick + 1, keys: 0,
-    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0,
+    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
   };
   world.players.push(p);
   trySpawn(world, p);

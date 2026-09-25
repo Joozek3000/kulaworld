@@ -3,7 +3,7 @@ import {
   Action, addPlayer, cellKey, createWorld, findPath, loadLevel, resultPose, setInput, step,
   type Cmd, type PathStep, type Pose, type World,
 } from '../src/index.ts';
-import { input, levelFiles, readLevelJson } from './util.ts';
+import { inOrder, input, levelFiles, readLevelJson } from './util.ts';
 
 const worldOf = (file: string) => createWorld(loadLevel(readLevelJson(file)), 1);
 const MOVES: Cmd[] = ['fwd', 'left', 'right', 'jump'];
@@ -56,7 +56,7 @@ describe('findPath on test-cube', () => {
   test.each(targets.map((c) => cellKey(c)))('key/exit %s is reachable and the path works in the real sim', (goal) => {
     const path = findPath(w, spawn, new Set([goal]))!;
     expect(path).not.toBe(null);
-    const end = execute(worldOf('test-cube.json'), path);
+    const end = execute(inOrder(worldOf('test-cube.json')), path);
     expect(cellKey(end.cell)).toBe(goal);
   });
 

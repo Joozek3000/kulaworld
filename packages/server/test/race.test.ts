@@ -54,7 +54,10 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
 
   const me = a.state.players.get(a.sessionId);
   expect(me.action).toBe(Action.Idle);
-  expect([me.fromX, me.fromY, me.fromZ]).toEqual([1, 1, 1]); // test-flat spawn 0, facing +Z
+  // Spawns are shuffled per round; every test-flat spawn is at y=1, z=1 facing +Z.
+  const [x0, y0, z0] = [me.fromX, me.fromY, me.fromZ];
+  expect([1, 3, 5, 7]).toContain(x0);
+  expect([y0, z0]).toEqual([1, 1]);
   expect(a.state.items.size).toBe(4); // 3 keys + exit
 
   await waitFor('playing', () => a.state.phase === 'playing', 5000);
@@ -62,7 +65,7 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
   a.send('input', { seq: 2, fwdHeld: true, turn: 0, jump: false, jumpHeld: false });
   await waitFor('roll', () => me.action === Action.Roll);
   expect(me.startTick - sentAt).toBeLessThanOrEqual(4);
-  expect([me.toX, me.toY, me.toZ]).toEqual([1, 1, 2]);
+  expect([me.toX, me.toY, me.toZ]).toEqual([x0, 1, 2]);
   expect(me.endTick - me.startTick).toBe(ROLL_TICKS);
   await waitFor('arrive', () => me.fromZ === 2);
 

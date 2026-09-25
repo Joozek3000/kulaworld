@@ -88,13 +88,3 @@ describe('forward latch', () => {
     expect(starts(held, JUMP_TICKS)).toEqual([[1 + JUMP_TICKS, Action.Roll, 3]]);
   });
 });
-
-test('jumpHeld with a turn tap mid-hop → turn on landing, then hopping resumes', () => {
-  const w = world();
-  send(w, { jump: true, jumpHeld: true });
-  for (let i = 0; i < JUMP_TICKS - 3; i++) step(w); // tap within the input buffer before landing
-  send(w, { turn: 1, jumpHeld: true });
-  const s = starts(w, 1 + JUMP_TICKS + TURN_TICKS - w.tick);
-  expect(s).toEqual([[1 + JUMP_TICKS, Action.Turn, 0], [1 + JUMP_TICKS + TURN_TICKS, Action.Hop, 0]]);
-  expect(player(w).pose.cell).toEqual(vec(0, 1, 0));
-});

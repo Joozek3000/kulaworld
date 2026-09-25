@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { Action, BALL_RADIUS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, type Dir, type Level, type Pose, type RenderPose } from '@kula/shared';
+import {
+  Action, BALL_RADIUS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, TURN_TICKS,
+  type AirTurn, type Dir, type Level, type Pose, type RenderPose,
+} from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 
 /**
@@ -8,14 +11,11 @@ import type { GameState, PlayerS } from '../net.ts';
  * So each player keeps its last few action segments and we render whichever was running at renderTick;
  * otherwise a chained roll would replace from/to while the previous roll is still on screen.
  */
-interface Seg { serial: number; action: number; from: Pose; to: Pose; startTick: number; endTick: number }
+interface Seg { serial: number; action: number; from: Pose; to: Pose; startTick: number; endTick: number; turnFromFwd: Dir; turnStartTick: number }
 const HISTORY = 3;
 const newPose = (): Pose => ({ cell: { x: 0, y: 0, z: 0 }, up: 2, fwd: 4 });
-const newSeg = (): Seg => ({ serial: -1, action: Action.Idle, from: newPose(), to: newPose(), startTick: 0, endTick: 0 });
+const newSeg = (): Seg => ({ serial: -1, action: Action.Idle, from: newPose(), to: newPose(), startTick: 0, endTick: 0, turnFromFwd: 4, turnStartTick: 0 });
 
-function samePose(q: Pose, x: number, y: number, z: number, up: number, fwd: number): boolean {
-  return q.cell.x === x && q.cell.y === y && q.cell.z === z && q.up === up && q.fwd === fwd;
-}
 function setPose(q: Pose, x: number, y: number, z: number, up: number, fwd: number): void {
   q.cell.x = x; q.cell.y = y; q.cell.z = z; q.up = up as Dir; q.fwd = fwd as Dir;
 }
@@ -26,6 +26,7 @@ const topGeo = new THREE.SphereGeometry(BALL_RADIUS, 24, 12, 0, Math.PI * 2, 0, 
 const bottomGeo = new THREE.SphereGeometry(BALL_RADIUS, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
 const bottomMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+const airTurn: AirTurn = { fromFwd: 4, progress: 1 };
 const tmpQ = new THREE.Quaternion(), spinQ = new THREE.Quaternion(), tmpUp = new THREE.Vector3();
 
 // Blob shadow: a dark disc on the first block below the ball (along its up axis), fading with height.
@@ -85,9 +86,13 @@ class PlayerView {
 
   track(p: PlayerS): void {
     const s = this.newest;
-    if (this.count && s.action === p.action && s.startTick === p.startTick && s.endTick === p.endTick
-      && samePose(s.from, p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd)
-      && samePose(s.to, p.toX, p.toY, p.toZ, p.toUp, p.toFwd)) return;
+    if (this.count && s.action === p.action && s.startTick === p.startTick && s.endTick === p.endTick) {
+      // Same action. Only a mid-air turn changes it in flight (to.fwd + turn record): update in place.
+      setPose(s.to, p.toX, p.toY, p.toZ, p.toUp, p.toFwd);
+      s.turnFromFwd = p.turnFromFwd as Dir;
+      s.turnStartTick = p.turnStartTick;
+      return;
+    }
     this.head = (this.head + 1) % HISTORY;
     const n = this.segs[this.head];
     n.serial = ++this.serial;
@@ -96,6 +101,8 @@ class PlayerView {
     n.endTick = p.endTick;
     setPose(n.from, p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd);
     setPose(n.to, p.toX, p.toY, p.toZ, p.toUp, p.toFwd);
+    n.turnFromFwd = p.turnFromFwd as Dir;
+    n.turnStartTick = p.turnStartTick;
     this.count = Math.min(this.count + 1, HISTORY);
     // A moving segment that starts before what's already on screen arrived late: the ball has to jump into it.
     const late = this.lastRenderTick - effStart(n);
@@ -148,7 +155,9 @@ class PlayerView {
     if (this.label) this.label.visible = this.shown;
     if (this.shown) {
       const len = s.endTick - s.startTick;
-      poseAt(s.action as Action, s.from, s.to, len > 0 ? (renderTick - s.startTick) / len : 1, this.pose);
+      airTurn.fromFwd = s.turnFromFwd;
+      airTurn.progress = (renderTick - s.turnStartTick) / TURN_TICKS;
+      poseAt(s.action as Action, s.from, s.to, len > 0 ? (renderTick - s.startTick) / len : 1, this.pose, airTurn);
       const [px, py, pz] = this.pose.position;
       tmpUp.fromArray(this.pose.up);
       this.ball.position.set(px, py, pz).addScaledVector(tmpUp, BALL_RADIUS - 0.5); // rest on the block

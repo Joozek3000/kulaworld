@@ -54,3 +54,11 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
 - 2026-09-25, phase 05: Seek bots press one step at a time and release fwd/jump once the server shows the action started. They may press in the last tick of a Roll/Turn/Flip. They wait while another player is on A1/A2 before a forward jump, because a short jump can drop them into a gap.
 - 2026-09-25, phase 05: `LEVEL` accepts a comma list; the room rotates it at each countdown (`state.levelId` changes). The client keys item meshes by id + cell, because the exit keeps its id across levels.
 - 2026-09-25, phase 05: Death feedback is shown where the ball was last rendered (the client notices its rendered action turning Dead), not at the event's cell, which sits KILL_MARGIN below the level and is usually off screen.
+- 2026-09-25, phase 05b: Instant mid-air turning.
+  - In `step`'s input-apply pass, an airborne player (Hop/Jump/Fall) with a buffered turn pulse turns at once: `to.fwd = turnFwd(to.up, to.fwd, dir)`, the pulse is consumed, and `turnFromFwd`/`turnStartTick` are recorded.
+  - `to.cell`, `to.up`, `endTick` and reservations are untouched. Grounded turns stay TURN_TICKS actions; turns during Roll/Flip still buffer.
+  - `startAction` resets the record only when it's older than TURN_TICKS. A turn on the landing tick of a chained hop otherwise snapped at 150 ms latency, because the next hop started on the same tick and cleared it.
+- 2026-09-25, phase 05b: `PlayerS` gains `turnFromFwd` (uint8) and `turnStartTick` (int32).
+  - The client updates an in-flight segment in place when only its `to`/turn record changes (same action and ticks), so air turns don't count as late segments.
+  - `poseAt` takes an optional `AirTurn` and slerps the facing over TURN_TICKS for Hop/Jump/Fall; position still follows `from`.
+- 2026-09-25, phase 05b: Spawn shuffle. `createWorld` stores `spawnOrder`, a Fisher-Yates shuffle of the spawn indices using `mulberry32(seed)`, and `trySpawn` uses the first free spawn in that order. The server seeds each round with its round number. The test helper `inOrder(world)` pins level order for tests that place players by spawn.

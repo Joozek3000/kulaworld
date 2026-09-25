@@ -10,6 +10,9 @@ export const PlayerS = schema({
   toX: t.int16().default(0), toY: t.int16().default(0), toZ: t.int16().default(0), toUp: t.uint8().default(0), toFwd: t.uint8().default(0),
   startTick: t.int32().default(0),
   endTick: t.int32().default(0),
+  /** Mid-air turn (render only): facing before it and its tick; equals toFwd and startTick when there was none. */
+  turnFromFwd: t.uint8().default(0),
+  turnStartTick: t.int32().default(0),
   keys: t.uint8().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
@@ -59,6 +62,8 @@ export function syncSchema(world: World, state: GameState): void {
     setPose(s, 'to', p.action === Action.Idle ? p.pose : p.to);
     set(s, 'startTick', p.startTick);
     set(s, 'endTick', p.endTick);
+    set(s, 'turnFromFwd', p.turnFromFwd);
+    set(s, 'turnStartTick', p.turnStartTick);
     set(s, 'keys', p.keys);
   }
   for (const k of world.keys) {

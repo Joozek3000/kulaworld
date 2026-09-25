@@ -6,7 +6,7 @@ export interface PlayerS {
   id: string; name: string; color: string; action: number;
   fromX: number; fromY: number; fromZ: number; fromUp: number; fromFwd: number;
   toX: number; toY: number; toZ: number; toUp: number; toFwd: number;
-  startTick: number; endTick: number; keys: number; ready: boolean; spectating: boolean;
+  startTick: number; endTick: number; turnFromFwd: number; turnStartTick: number; keys: number; ready: boolean; spectating: boolean;
 }
 export interface ItemS { id: string; kind: 'key' | 'exit'; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }

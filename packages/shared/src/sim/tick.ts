@@ -1,5 +1,5 @@
 import { INPUT_BUFFER_TICKS, RESPAWN_TICKS } from '../constants.ts';
-import { previewAction, startAction, startFall } from './actions.ts';
+import { previewAction, startAction, startFall, turnFwd } from './actions.ts';
 import { checkTimeout, onLand } from './keyRace.ts';
 import { Action, outOfBounds, reservations, reserve, trySpawn, type Cmd, type PlayerState, type SimEvent, type World } from './world.ts';
 
@@ -9,8 +9,17 @@ export function step(world: World): SimEvent[] {
   const events: SimEvent[] = [];
   const order = fairOrder(world.players, tick);
 
-  // Buffered pulses age only while grounded, so a turn pressed early in a jump still applies on landing.
-  for (const p of order) if (p.pulse && !AIRBORNE.has(p.action)) p.pulseAge++;
+  // Apply inputs (§7 step 1). Airborne players turn instantly: only the facing they land with changes.
+  for (const p of order) {
+    if (!AIRBORNE.has(p.action)) {
+      if (p.pulse) p.pulseAge++; // buffered pulses age only while grounded
+    } else if (p.pulse === 'left' || p.pulse === 'right') {
+      p.turnFromFwd = p.to.fwd;
+      p.turnStartTick = tick;
+      p.to = { ...p.to, fwd: turnFwd(p.to.up, p.to.fwd, p.pulse === 'left' ? -1 : 1) };
+      p.pulse = null;
+    }
+  }
 
   for (const p of order) if (p.action !== Action.Idle && p.endTick === tick) finishAction(world, p, events);
 
