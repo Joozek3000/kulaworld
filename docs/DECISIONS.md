@@ -122,3 +122,18 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
 - 2026-09-25, phase 07b: Level `sky` is optional and render-only. `Level.sky` is `[top, bottom] | null`; validation requires two `#rrggbb` strings. The client draws it on a camera-centred inverted sphere (shader gradient on world Y, no texture) and tints the fog 35% of the way from bottom to top. Levels without a sky keep the old dark background.
 - 2026-09-25, phase 07b: Knockout reachability test. Spawn-to-spawn uses `findPath`. Surface coverage runs the same BFS as `findPath` (same moves via `resultPose`) to exhaustion once per spawn, instead of one `findPath` per surface, and counts (cell, up) pairs.
 - 2026-09-25, phase 07b: Bots. A hunter (bully, or seek in knockout) that has no opponent left to reach, because all are ignored after an unpushable stand-off, makes a random move (roll or turn) instead of idling. On Sky Cross, a seek bot tucked against the hanging column on the beam underside can't be pushed (the push bounces off the column), and it won't push its bully neighbour (not into the void). Both waited there until the crumble removed the column. One soak round timed out this way.
+- 2026-09-25, phase 08: Audio.
+  - `client/src/audio/`: `engine.ts` (context, master ← sfx/ui buses, voice cap, sample override, panners, roll loops) and `synth.ts` (recipes). `ui/sfx.ts` is gone.
+  - Ball sounds (takeoff, bounce, roll tick, squeak, hit, boing, fall, pop) come from rendered segment transitions in `PlayersView` (`onFeel`), not from server events. The server `push`/`bounce` events no longer play anything; `hit` fires at render-time contact and `boing` at the bounce lunge's peak.
+  - `exit` plays when the local player's exit unlocks, since there's no exit event. `lose` is `win` for anyone else, draws included.
+  - `bump`: forward held while both the server state and the rendered local ball are Idle for 150 ms, at most once per 300 ms.
+  - Voice cap: 24 one-shots. The per-ball roll loops (at most one per player) don't count.
+  - Panners use `equalpower` (HRTF is much heavier per voice) and the linear distance model: full volume within 2 cells, silent at 30.
+  - Master volume lives in the tuning object (`kula.tuning` in localStorage); mute stays `kula.muted`.
+- 2026-09-25, phase 08: Squash & stretch.
+  - A kick is shown unchanged on the frame it happens, and the spring moves from the next frame. At low frame rates a single spring step otherwise ate the squash before it was drawn (seen at 22 fps in headless Chrome).
+  - The ball's bottom stays on the ground: the centre moves along up by the change in half-height.
+  - The victim's slide stretch is driven from knock progress, not the spring. The slide is only ~2 ticks, too short for the spring to swing from the contact squash into a stretch.
+  - Contact fires when the knock's hold ends on screen. A contact or boing a frame skipped past fires at the next transition, late rather than never.
+  - Hit-stop holds both balls' render tick for `hitStopMs`, then snaps back to real time; it doesn't catch up gradually.
+- 2026-09-25, phase 08: Game keys ignore events whose target is an `<input>`, so a focused F4 slider doesn't steer the ball.

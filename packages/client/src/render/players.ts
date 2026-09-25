@@ -1,10 +1,21 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
+  Action, BALL_RADIUS, HOP_HEIGHT, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
+  SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
+import { tuning } from '../tuning.ts';
+import { applySquash, Spring } from './squash.ts';
+
+/**
+ * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
+ * `hit` is push contact (at the victim), `pop` a death.
+ */
+export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'fall' | 'hit' | 'boing' | 'pop';
+export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
+type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
 /**
  * The schema only holds each player's current action, but we render ~2 ticks behind the server.
@@ -45,6 +56,25 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ground = new THREE.Vector3(), axis = new THREE.Vector3(), probe = new THREE.Vector3();
 type SolidFn = (x: number, y: number, z: number) => boolean;
 
+// Squash & stretch (phase 08): stretch amounts, multiplied by tuning.squash. Scale along the axis is 1 + x.
+const SQUASH = {
+  anticipation: -0.15, // kicked at takeoff and held for the first tick of a hop/jump
+  rise: 0.15, // stretch along the velocity at takeoff, easing to 0 at the apex
+  descend: 0.08, // stretch again on the way down
+  fall: 0.1,
+  landMin: -0.2, // landing squash: 0.8 for a soft hop ...
+  landMax: -0.35, // ... to 0.65 for a long fall
+  contact: -0.25, // both balls at push contact
+  slide: 0.2, // the victim along the knock
+  stop: -0.2, // the victim when the knock ends
+  bounce: -0.3, // the pusher against the victim on a failed push
+  wobble: 0.12, // stunned
+  roll: -0.03, // pulse at each tile start
+};
+const ANTICIPATION_TICKS = 1;
+const orient = new THREE.Quaternion(), vel = new THREE.Vector3(), knockDir = new THREE.Vector3();
+const frameX = new THREE.Vector3(), frameZ = new THREE.Vector3();
+
 class PlayerView {
   readonly segs: Seg[] = Array.from({ length: HISTORY }, newSeg);
   private head = 0;
@@ -58,7 +88,22 @@ class PlayerView {
   lateCount = 0;
   lateMax = 0;
   readonly pose: RenderPose = newRenderPose();
+  /** Outer group: position and the squash (in an axis-aligned frame). The spin lives on `body`. */
   readonly ball = new THREE.Group();
+  private readonly body = new THREE.Group();
+  private readonly spring = new Spring();
+  /** World axis the spring's stretch applies along. */
+  private readonly squashAxis = new THREE.Vector3(0, 1, 0);
+  private shadowWidth = 1;
+  private fallCells = 0;
+  /** A knock started on screen; contact (squash, THWACK, hit-stop) fires when its hold ends and the slide begins. */
+  private contactPending = false;
+  /** A bounce started on screen; the hard squash + boing fire at the lunge's peak. */
+  private boingPending = false;
+  readonly local: boolean;
+  /** The segment on screen, and the tick it rendered at (last update). */
+  current: Seg = newSeg();
+  get renderTickNow(): number { return this.lastRenderTick; }
   private readonly shadowMat = new THREE.MeshBasicMaterial({
     color: 0x000000, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
@@ -77,7 +122,9 @@ class PlayerView {
   constructor(p: PlayerS, local: boolean, scene: THREE.Scene) {
     this.color = p.color;
     this.top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
-    this.ball.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
+    this.local = local;
+    this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
+    this.ball.add(this.body);
     this.ball.visible = false;
     this.shadow.visible = false;
     this.ring.visible = false;
@@ -147,11 +194,16 @@ class PlayerView {
   vanished = false;
 
   /** Returns true when the rendered segment changed. */
-  update(renderTick: number, show: boolean, solid: SolidFn | null, knockHold: (s: Seg) => number = () => KNOCK_HOLD): boolean {
+  update(
+    renderTick: number, show: boolean, solid: SolidFn | null, knockHold: (s: Seg) => number = () => KNOCK_HOLD,
+    dt = 0, feel: FeelFn = () => {},
+  ): boolean {
     const wasShown = this.shown;
     this.lastRenderTick = renderTick;
     const s = this.select(renderTick);
     const changed = s.serial !== this.renderedSerial;
+    const prevAction = this.renderedAction;
+    this.current = s;
     if (changed) {
       // Rolling spin is render-only; carry the finished roll's rotation into the next segment.
       if (this.renderedAction === Action.Roll || this.renderedAction === Action.Flip) {
@@ -180,11 +232,13 @@ class PlayerView {
       tmpUp.fromArray(this.pose.up);
       this.ball.position.set(px, py, pz).addScaledVector(tmpUp, BALL_RADIUS - 0.5); // rest on the block
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
-      this.ball.quaternion.copy(tmpQ.fromArray(this.pose.quat));
+      orient.copy(tmpQ.fromArray(this.pose.quat));
       if (s.action === Action.Stunned) this.stunned(s, renderTick);
       const ghost = renderTick < this.protectedUntil;
       for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
-      this.ball.quaternion.multiply(spinQ);
+      orient.multiply(spinQ);
+      if (changed && wasShown) this.transition(prevAction, s, solid, feel);
+      this.squash(s, renderTick, len, knockHold(s), dt, feel);
       this.label?.position.copy(this.ball.position).addScaledVector(tmpUp, 0.75);
       // Mid-flip the up axis points into air over the edge: keep the last placement until the new face takes over.
       if (!solid || (!this.placeShadow(solid) && s.action !== Action.Flip)) this.shadow.visible = false;
@@ -192,11 +246,130 @@ class PlayerView {
     return changed;
   }
 
+  /** Feel on a change of on-screen action: sounds, plus the squash kicks that happen at a moment (not over time). */
+  private transition(prev: number, s: Seg, solid: SolidFn | null, feel: FeelFn): void {
+    const sq = tuning.squash;
+    const airborne = prev === Action.Hop || prev === Action.Jump || prev === Action.Fall;
+    if (airborne && s.action !== Action.Fall && s.action !== Action.Dead) {
+      const i = prev === Action.Hop ? 0.35 : prev === Action.Jump ? 0.55 : Math.min(1, 0.5 + 0.1 * this.fallCells);
+      this.kick(tmpUp, (SQUASH.landMin + (SQUASH.landMax - SQUASH.landMin) * i) * sq);
+      feel('land', i);
+    }
+    // A contact or boing moment that a slow frame skipped past still fires, late rather than never.
+    if (this.contactPending && s.action !== Action.Knocked) { this.contactPending = false; feel('hit'); }
+    if (this.boingPending && s.action !== Action.Stunned) { this.boingPending = false; feel('boing'); }
+    if (prev === Action.Knocked && s.action !== Action.Knocked) this.kick(this.knockAxis, SQUASH.stop * sq);
+    switch (s.action) {
+      case Action.Hop:
+      case Action.Jump: this.kick(tmpUp, Math.min(this.spring.x, SQUASH.anticipation * sq)); feel('takeoff'); break;
+      case Action.Roll: if (this.spring.x > SQUASH.roll * sq) this.kick(tmpUp, SQUASH.roll * sq); feel('roll'); break; // don't cut a jiggle short
+      case Action.Flip: feel('flip'); break;
+      case Action.Knocked: this.contactPending = true; break;
+      case Action.Stunned: this.boingPending = s.bounce; break;
+      case Action.Fall:
+        if (prev !== Action.Fall) {
+          this.fallCells = 0;
+          if (solid && this.offMap(s, solid)) feel('fall');
+        }
+        this.fallCells++;
+        break;
+    }
+  }
+
+  /** Nothing solid below the fall's start, down past the kill margin: this fall leaves the map. */
+  private offMap(s: Seg, solid: SolidFn): boolean {
+    const [ux, uy, uz] = this.pose.up.map(Math.round);
+    const { x, y, z } = s.from.cell;
+    for (let k = 1; k <= 40 + KILL_MARGIN; k++) if (solid(x - ux * k, y - uy * k, z - uz * k)) return false;
+    return true;
+  }
+
+  private kick(axisV: THREE.Vector3, x: number): void {
+    this.squashAxis.copy(axisV);
+    this.spring.kick(x);
+  }
+
+  /** Push contact on the pusher's side, called by PlayersView: squash along the contact axis. */
+  contact(axisV: THREE.Vector3): void {
+    this.kick(axisV, SQUASH.contact * tuning.squash);
+  }
+
+  /** Direction of this ball's latest knock (read by PlayersView for the pusher's contact squash). */
+  readonly knockAxis = new THREE.Vector3();
+
+  /** Spring target + axis for the current action, the contact/boing moments, then the transform and shadow width. */
+  private squash(s: Seg, renderTick: number, len: number, hold: number, dt: number, feel: FeelFn): void {
+    const sq = tuning.squash;
+    const t = renderTick - s.startTick;
+    const p = len > 0 ? Math.min(1, Math.max(0, t / len)) : 1;
+    let target = 0;
+    let driven = false; // the stretch is set directly this frame (no spring step)
+    switch (s.action) {
+      case Action.Hop:
+      case Action.Jump: {
+        if (t < ANTICIPATION_TICKS) { target = SQUASH.anticipation; this.squashAxis.copy(tmpUp); break; }
+        // Velocity along the arc (cells/tick): the forward glide plus the parabola's rate along up.
+        const h = (4 * (s.action === Action.Hop ? HOP_HEIGHT : JUMP_HEIGHT)) / len;
+        const vu = h * (1 - 2 * p);
+        vel.set(s.to.cell.x - s.from.cell.x, s.to.cell.y - s.from.cell.y, s.to.cell.z - s.from.cell.z).divideScalar(len);
+        const vmax = Math.hypot(vel.length(), h);
+        vel.addScaledVector(tmpUp, vu);
+        const speed = vel.length();
+        if (speed > 1e-6) this.squashAxis.copy(vel).divideScalar(speed);
+        target = (vu >= 0 ? SQUASH.rise : SQUASH.descend) * (speed / vmax);
+        break;
+      }
+      case Action.Fall: target = SQUASH.fall; this.squashAxis.copy(tmpUp); break;
+      case Action.Knocked: {
+        knockDir.set(s.to.cell.x - s.from.cell.x, s.to.cell.y - s.from.cell.y, s.to.cell.z - s.from.cell.z).normalize();
+        this.knockAxis.copy(knockDir);
+        if (this.contactPending && p >= hold) {
+          this.contactPending = false;
+          this.kick(knockDir, SQUASH.contact * sq);
+          feel('hit');
+        } else if (p > hold && !this.contactPending) {
+          // The slide is only ~2 ticks, too short for the spring to swing from the contact squash into a stretch:
+          // drive it, squash → stretch over the first third, then hold the stretch until the stop kick.
+          const k = (p - hold) / (1 - hold);
+          this.squashAxis.copy(knockDir);
+          this.spring.x = (k < 0.35 ? SQUASH.contact + (SQUASH.slide - SQUASH.contact) * (k / 0.35) : SQUASH.slide) * sq;
+          this.spring.v = 0;
+          driven = true;
+        }
+        break;
+      }
+      case Action.Stunned: {
+        const fade = Math.max(0, 1 - t / STUN_TICKS);
+        if (this.boingPending && t >= LUNGE_TICKS / 2) {
+          this.boingPending = false;
+          this.kick(tmpFwd.set(0, 0, 1).applyQuaternion(tmpQ), SQUASH.bounce * sq);
+          feel('boing');
+        } else if (!s.bounce) {
+          // Wobble on two axes: the stretch axis circles the ground plane while it dies out.
+          frameX.set(1, 0, 0).applyQuaternion(tmpQ);
+          frameZ.set(0, 0, 1).applyQuaternion(tmpQ);
+          const a = t * 0.9;
+          this.squashAxis.copy(frameX).multiplyScalar(Math.cos(a)).addScaledVector(frameZ, Math.sin(a));
+          target = SQUASH.wobble * fade * Math.sin(t * 2.2);
+        }
+        break;
+      }
+    }
+    if (!driven) this.spring.step(dt, target * sq, tuning.stiffness, tuning.damping);
+    const k = Math.min(1.6, Math.max(0.5, 1 + this.spring.x));
+    applySquash(this.ball, this.body, this.squashAxis, k, orient);
+    // Keep the bottom on the ground: move the centre by the change in the ball's half-height along up.
+    const along = Math.abs(this.squashAxis.dot(tmpUp)), side = 1 / Math.sqrt(k);
+    this.ball.position.addScaledVector(tmpUp, BALL_RADIUS * (along * k + (1 - along) * side - 1));
+    // Shadow width: the ball's footprint on the ground plane (wide when squashed along up).
+    this.shadowWidth = along * side + ((1 - along) * (k + side)) / 2;
+  }
+
   /** Wobble, the flashing ring, and for a bounce the lunge into the blocked push and back. Ball only, not the camera. */
   private stunned(s: Seg, renderTick: number): void {
     const t = renderTick - s.startTick;
     const fade = Math.max(0, 1 - t / STUN_TICKS);
-    this.ball.quaternion.multiply(wobQ.setFromAxisAngle(Z_AXIS, WOBBLE_RAD * fade * Math.sin((t / STUN_TICKS) * WOBBLE_CYCLES * 2 * Math.PI)));
+    orient.multiply(wobQ.setFromAxisAngle(Z_AXIS, WOBBLE_RAD * fade * Math.sin((t / STUN_TICKS) * WOBBLE_CYCLES * 2 * Math.PI)));
     if (s.bounce && t < LUNGE_TICKS) {
       tmpFwd.set(0, 0, 1).applyQuaternion(tmpQ);
       this.ball.position.addScaledVector(tmpFwd, LUNGE_CELLS * Math.sin((Math.max(0, t) / LUNGE_TICKS) * Math.PI));
@@ -223,6 +396,7 @@ class PlayerView {
       this.shadow.quaternion.setFromUnitVectors(Z_AXIS, axis);
       const above = g - surface - 0.5 + this.pose.lift; // 0 when resting
       this.shadowMat.opacity = SHADOW_OPACITY * Math.max(0.15, 1 - above / 2.5);
+      this.shadow.scale.setScalar(this.shadowWidth * Math.max(0.5, 1 - above / 4)); // shrinks with height
       this.shadow.visible = true;
       return true;
     }
@@ -248,6 +422,10 @@ export class PlayersView {
   onVanish: ((at: THREE.Vector3, color: string) => void) | null = null;
   /** Called when the local player's rendered action changes to a moving one (input→motion metric). */
   onLocalMotion: (() => void) | null = null;
+  /** Render-time feel events (sounds). */
+  onFeel: ((e: Feel) => void) | null = null;
+  /** Hit-stop: a ball's render tick is held at `tick` until `until` (performance.now ms). Local and visual only. */
+  private frozen = new Map<string, { until: number; tick: number }>();
 
   constructor(private scene: THREE.Scene) {}
 
@@ -257,7 +435,7 @@ export class PlayersView {
   }
 
   /** The local ball renders at localRenderTick (it may run closer to the server than the others). */
-  update(state: GameState, renderTick: number, localId: string, localRenderTick = renderTick): void {
+  update(state: GameState, renderTick: number, localId: string, localRenderTick = renderTick, dt = 0, nowMs = 0): void {
     const newRound = state.phase === 'countdown' && this.lastPhase !== 'countdown';
     this.lastPhase = state.phase;
     const active = ACTIVE.has(state.phase);
@@ -271,13 +449,60 @@ export class PlayersView {
     state.players.forEach((p, id) => {
       const v = this.views.get(id)!;
       const hold = (s: Seg) => this.knockHold(s, id, localId, localRenderTick - renderTick);
-      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating, this.solid, hold);
+      let tick = id === localId ? localRenderTick : renderTick;
+      const f = this.frozen.get(id);
+      if (f && nowMs < f.until) tick = f.tick;
+      else this.frozen.delete(id);
+      const feel: FeelFn = (kind, intensity = 0.5) => {
+        if (kind === 'hit') this.contact(id, v, localId, nowMs);
+        else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
+      };
+      const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
-      if (v.vanished) this.onVanish?.(v.ball.position, v.color);
+      if (v.vanished) {
+        this.onVanish?.(v.ball.position, v.color);
+        this.onFeel?.({ kind: 'pop', at: v.ball.position, local: v.local, intensity: 0.5 });
+      }
     });
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
+  }
+
+  /**
+   * Push contact on `victim` (its knock's slide begins on screen): the pusher squashes too, both freeze for the hit-stop,
+   * and the THWACK plays at the victim.
+   */
+  private contact(victimId: string, victim: PlayerView, localId: string, nowMs: number): void {
+    const pusherId = this.pusherOf(victim.current, victimId);
+    const pusher = pusherId ? this.views.get(pusherId) : undefined;
+    pusher?.contact(victim.knockAxis);
+    if (tuning.hitStopMs > 0) {
+      for (const [id, v] of [[victimId, victim], [pusherId, pusher]] as const) {
+        if (id && v) this.frozen.set(id, { until: nowMs + tuning.hitStopMs, tick: v.renderTickNow });
+      }
+    }
+    this.onFeel?.({
+      kind: 'hit', at: victim.ball.position, local: victim.local || !!pusher?.local, intensity: victim.local ? 1 : 0.6,
+      victimLocal: victimId === localId,
+    });
+  }
+
+  /** The player whose roll pushed this knock: a Roll starting on the same tick into the victim's cell. */
+  private pusherOf(knock: Seg, victimId: string): string | null {
+    for (const [id, v] of this.views) {
+      if (id === victimId) continue;
+      if (v.segs.some((q) => q.action === Action.Roll && q.startTick === knock.startTick
+        && q.to.cell.x === knock.from.cell.x && q.to.cell.y === knock.from.cell.y && q.to.cell.z === knock.from.cell.z)) return id;
+    }
+    return null;
+  }
+
+  /** Every ball's roll state for the rumble loops: speed 1 while rolling or flipping on screen. */
+  rolling(): { id: string; speed: number; at: THREE.Vector3; local: boolean }[] {
+    return [...this.views].map(([id, v]) => ({
+      id, at: v.ball.position, local: v.local, speed: v.shown && (v.action === Action.Roll || v.action === Action.Flip) ? 1 : 0,
+    }));
   }
 
   /**
@@ -288,12 +513,7 @@ export class PlayersView {
   private knockHold(s: Seg, victimId: string, localId: string, lead: number): number {
     if (s.action !== Action.Knocked) return KNOCK_HOLD;
     let ticks = 1 + (victimId === localId ? lead : 0);
-    for (const [id, v] of this.views) {
-      if (id === victimId) continue;
-      const pushed = v.segs.some((q) => q.action === Action.Roll && q.startTick === s.startTick
-        && q.to.cell.x === s.from.cell.x && q.to.cell.y === s.from.cell.y && q.to.cell.z === s.from.cell.z);
-      if (pushed && id === localId) ticks -= lead;
-    }
+    if (this.pusherOf(s, victimId) === localId) ticks -= lead;
     return Math.min(KNOCK_TICKS - 1, Math.max(0, ticks)) / KNOCK_TICKS;
   }
 

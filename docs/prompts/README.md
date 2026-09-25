@@ -20,3 +20,6 @@ Workflow:
 | 06 | Push (PvP) | Roll into players to knock them; deaths drop a key; bully bots |
 | 07 | Knockout | Stagger fix (no chain pushes), lives, crumbling arenas, mixed-mode rotation |
 | 07b | Kula arena | Sky Cross arena (beams, ladder, gap, lower pad), finer crumble bands, gradient sky |
+| 08 | Rubber feel | Dodgeball rubber sounds (procedural + sample override), squash & stretch, hit-stop, F4 tuning panel |
+| 09 | Prediction | Own ball reacts instantly; server-authoritative reconciliation; no push prediction |
+| 10 | Stomp | Jump over players; landing on a player bumps them 1 tile in your jump direction; hop = clash defence |

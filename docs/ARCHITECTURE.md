@@ -206,11 +206,13 @@ Required test levels:
   - A/D or ←/→: turn (pulse)
   - Space: jump
   - R: ready
-  - F3: debug overlay
+  - M: mute, `[` / `]`: master volume
+  - F3: debug overlay, F4: feel-tuning panel (dev builds only)
 - Level: `InstancedMesh` of unit boxes with thin edge lines.
 - Ball: a sphere (r = 0.4) with two coloured hemispheres so rolling is visible.
 - Keys: yellow spinning octahedrons. Exit: a torus, grey when locked and green when unlocked for the local player.
 - Other players get CSS2D name labels.
+- Feel (phase 08): balls squash and stretch on a per-ball spring (render only). Sounds are procedural WebAudio synths, overridable by dropping `public/sfx/<name>.ogg|wav`. Ball sounds are triggered by rendered segment transitions (render time), and other players' sounds are positional.
 - Camera: follow cam at `ball − F·4 + U·2.5` looking at `ball + F·1.5`, with `camera.up = U`. The position and quaternion are damped (not snapped) so flips and turns rotate smoothly.
 - HUD (HTML overlay): phase/countdown, timer, keys x/required, player list with ready state and keys, and a results banner.
 - Debug overlay: estServerTick, ping, local player action/cell/up/fwd, patch rate.
@@ -305,4 +307,33 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - `arena-01`: a 9×9×1 plate with 4 single-cell holes and 8 spawns around the edge. Flat brawling.
 - `arena-02` "Sky Cross" (phase 07b): a 5×5 plate with four different arms (beam to a pad, a beam with a 1-cell jump gap to a pad, a ladder of two rails, and a beam that wraps down a hanging column to a lower pad). 8 spawns, 4 on top and 4 underneath. Pads crumble first, the plate core last.
 - `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the default rotation.
+
+## 16. Jump-over and stomp (phase 10)
+
+Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and the bump goes in **the attacker's jump direction** (option A). It's aimable and readable, with no randomness.
+
+**Jump over**
+- A forward jump is no longer blocked by a *player* on A1. The ball passes over (peak 1.2). A1 being **solid** still blocks it (falls back to a hop).
+- The player on A1 is unaffected. A1 isn't reserved by the jumper when a player stands there.
+
+**Stomp (forward jump landing on a player)**
+- At jump start, landing cell L (A2, or A1 on a short jump) is checked. If it holds a player V on the same face, the jump is a **stomp jump** when the bump cell `B = L + F` is not solid and not reserved.
+  - A stomp jump reserves C, L and B for its whole duration, so nobody else can move into B.
+  - If B is blocked at jump start, L counts as not free, and the existing short-jump/hop fallback applies.
+- **At landing:**
+  - **V still in L and grounded** (Idle, Turning, Stunned, or Hop within the low window): **stomp**.
+    - V is Knocked to B. It uses the push knock (`KNOCK_TICKS`), then falls if B has no ground.
+    - V then gets a stagger stun (`STUN_TICKS`, unpushable, can't be stomped again).
+    - The attacker lands in L.
+    - Events: `stomp {attackerId, victimId}`. Knockout credit works as for a push.
+  - **V in L but high in a hop:** **clash**. The attacker **rebounds** to its takeoff cell C (`Rebound` action, `REBOUND_TICKS` = 6, a reverse arc; C stayed reserved). No stun. V's hop continues. Event `clash`. Holding jump is the defence against stomps.
+  - **V already leaving L** (its action targets another cell): it escaped. The attacker lands normally.
+  - **L empty:** normal landing.
+- **Hop never stomps**: it lands on its own cell.
+- **Fall landing on a grounded player:** the faller stomps it. The bump direction is the first free of [faller fwd, faller left, faller right, faller back]. If none is free, the MVP overlap rule applies (rare).
+- **Stomp vs push:**
+  - A stomped victim is staggered (unpushable) for `STUN_TICKS`, so there are no stomp→push or push→stomp instant combos.
+  - After the stagger, the victim's escape precedence applies as for pushes.
+- **Prediction (§17):** jumps with a player on A1 or L are not predicted.
+- **Readability:** during a forward jump, a landing marker (ring in the attacker's colour) is drawn on L, visible to everyone. It turns red when L holds a player (a stomp is incoming).
 

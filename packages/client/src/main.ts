@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Level } from '@kula/shared';
+import { Action, type Level } from '@kula/shared';
 import { setupInput } from './input.ts';
 import { connect, serverUrl, type Net } from './net.ts';
 import { CameraRig, type CameraMode } from './render/camera.ts';
@@ -10,13 +10,17 @@ import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
 import { createDebug } from './ui/debug.ts';
 import { createHud } from './ui/hud.ts';
-import { createSfx } from './ui/sfx.ts';
+import { createTuningPanel } from './ui/tuning.ts';
+import { AudioEngine } from './audio/engine.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
 const INTERP_TICKS = 2;
 /** The local ball may render closer to the server (less input delay). Overridable with ?localInterp= for experiments. */
 const LOCAL_INTERP_TICKS = Number(new URLSearchParams(location.search).get('localInterp') ?? 1);
 const ACTIVE = new Set(['countdown', 'playing', 'results']);
+/** Forward held but nothing started for this long = blocked by a wall (or an unpushable player): a bump. */
+const BUMP_AFTER_MS = 150;
+const BUMP_EVERY_MS = 300;
 
 const view = createScene();
 view.setSky();
@@ -26,9 +30,24 @@ const players = new PlayersView(view.scene);
 const items = new ItemsView(view.scene);
 const rig = new CameraRig(view.camera);
 const fx = new Fx(view.scene);
-const sfx = createSfx();
+const audio = new AudioEngine();
+const tuningPanel = import.meta.env.DEV ? createTuningPanel(audio) : null;
 players.onLocalMotion = debug.motion;
-players.onVanish = (at, color) => { fx.vanish(at, color, performance.now() / 1000); sfx.death(); };
+players.onVanish = (at, color) => fx.vanish(at, color, performance.now() / 1000);
+// Ball sounds come from what's on screen (render time), not from when a patch or event arrives.
+players.onFeel = (e) => {
+  const at = e.local ? null : e.at; // the local ball isn't spatialised
+  switch (e.kind) {
+    case 'takeoff': audio.play('takeoff', { at }); break;
+    case 'land': audio.play('bounce', { at, intensity: e.intensity }); break;
+    case 'roll': audio.play('roll', { at }); break;
+    case 'flip': audio.play('squeak', { at }); break;
+    case 'fall': audio.play('fall', { at }); break;
+    case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
+    case 'boing': audio.play('boing', { at }); break;
+    case 'pop': audio.play('pop', { at }); break;
+  }
+};
 
 let net: Net;
 try {
@@ -41,12 +60,14 @@ net.room.onLeave(() => hud.error('disconnected'));
 
 let screenshot = false;
 let frozen = false;
-setupInput(net, {
+const input = setupInput(net, {
   onPress: debug.press,
   onDebug: debug.toggle,
   onScreenshot: () => { screenshot = true; },
   onFreeze: () => { frozen = !frozen; },
-  onMute: () => sfx.toggleMute(),
+  onMute: () => audio.toggleMute(),
+  onVolume: (d) => { audio.setVolume(audio.volume + d); hud.toast(`Volume ${Math.round(audio.volume * 100)}%`, '#fff'); },
+  onTuning: () => tuningPanel?.toggle(),
 });
 
 const nameOf = (id: string) => (id === net.sessionId ? 'You' : net.state.players.get(id)?.name ?? '?');
@@ -55,22 +76,21 @@ net.onEvent((e) => {
   switch (e.type) {
     case 'key':
       hud.toast(`${nameOf(e.playerId)} got a key (${e.keys}/${level?.keysRequired ?? '?'})`, colorOf(e.playerId));
-      sfx.key(e.playerId === net.sessionId);
+      audio.play('key', { mine: e.playerId === net.sessionId }, 'ui');
       break;
-    case 'win': sfx.win(e.winnerId === net.sessionId); break;
-    case 'push': sfx.thump(); break;
-    case 'bounce': sfx.buzz(); break;
+    case 'win': audio.play(e.winnerId === net.sessionId ? 'win' : 'lose', {}, 'ui'); break;
     case 'knockout': hud.toast(`${nameOf(e.pusherId)} knocked ${nameOf(e.victimId)} off!`, colorOf(e.pusherId)); break;
     case 'keyDrop': hud.toast(`${nameOf(e.playerId)} dropped a key`, colorOf(e.playerId)); break;
     case 'eliminated':
       hud.toast(e.byId ? `${nameOf(e.byId)} knocked ${nameOf(e.playerId)} out!` : `${nameOf(e.playerId)} ${e.playerId === net.sessionId ? 'are' : 'is'} out`, colorOf(e.playerId));
-      sfx.eliminated(e.playerId === net.sessionId);
+      audio.play('eliminated', { mine: e.playerId === net.sessionId }, 'ui');
       break;
-    case 'crumbleWarn': sfx.crumbleWarn(); break;
+    case 'crumbleWarn': audio.play('crumbleWarn', {}, 'ui'); break;
+    case 'crumble': audio.play('crumble', {}, 'ui'); break;
   }
 });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { net, players } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, input } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
@@ -78,6 +98,8 @@ let bounds = { center: new THREE.Vector3(), radius: 5 };
 let last = performance.now();
 let lastPhase = '';
 let lastCount = -1;
+let wasUnlocked = false;
+let blockedSince = 0, lastBump = 0;
 
 view.renderer.setAnimationLoop((now: number) => {
   const dtMs = Math.min(now - last, 100);
@@ -98,9 +120,12 @@ view.renderer.setAnimationLoop((now: number) => {
 
   const renderTick = net.estServerTick - INTERP_TICKS;
   const active = ACTIVE.has(s.phase);
-  players.update(s, renderTick, me, net.estServerTick - LOCAL_INTERP_TICKS);
+  players.update(s, renderTick, me, net.estServerTick - LOCAL_INTERP_TICKS, dtMs / 1000, now);
   const mine = s.players.get(me);
-  items.update(s, active, !!level && !!mine && mine.keys >= level.keysRequired, now / 1000);
+  const unlocked = !!level?.exit && !!mine && mine.keys >= level.keysRequired;
+  items.update(s, active, unlocked, now / 1000);
+  if (unlocked && !wasUnlocked && s.phase === 'playing') audio.play('exit', {}, 'ui');
+  wasUnlocked = unlocked;
 
   levelView?.update(active ? s.crumbled : 0, active ? s.warnBand : -1, now / 1000);
 
@@ -110,16 +135,27 @@ view.renderer.setAnimationLoop((now: number) => {
   const mode: CameraMode = !active || !mine || mine.spectating || (out && !pose) ? 'orbit' : pose ? 'follow' : 'hold';
   rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
 
-  // Countdown beeps: one per second, a higher one when play starts.
+  audio.setListener(view.camera);
+  const rolls = players.rolling();
+  for (const r of rolls) audio.roll(r.id, r.speed, r.at, r.local);
+  audio.endRolls(new Set(rolls.map((r) => r.id)));
+
+  // Bump: forward held while Idle (server and screen) for a moment means a wall is in the way.
+  const blocked = s.phase === 'playing' && input.fwdHeld && mine?.action === Action.Idle && players.localAction(me) === Action.Idle;
+  if (!blocked) blockedSince = 0;
+  else if (!blockedSince) blockedSince = now;
+  else if (now - blockedSince > BUMP_AFTER_MS && now - lastBump > BUMP_EVERY_MS) { audio.play('bump'); lastBump = now; }
+
+  // Countdown plucks: one per second, a higher one when play starts.
   const count = Math.ceil((s.phaseEndTick - s.tick) / 20);
-  if (s.phase === 'countdown' && count !== lastCount && count > 0) sfx.tick();
-  if (s.phase === 'playing' && lastPhase === 'countdown') sfx.go();
+  if (s.phase === 'countdown' && count !== lastCount && count > 0) audio.play('countdown', {}, 'ui');
+  if (s.phase === 'playing' && lastPhase === 'countdown') audio.play('go', {}, 'ui');
   lastCount = count;
   lastPhase = s.phase;
 
   players.highlight(s.phase === 'results' ? s.winnerId : '', now / 1000);
   fx.update(now / 1000);
-  hud.update(s, me, level, sfx.muted);
+  hud.update(s, me, level, audio.muted);
   view.render();
   debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me), players.localLate(me), LOCAL_INTERP_TICKS);
 
