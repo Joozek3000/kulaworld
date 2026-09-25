@@ -23,6 +23,10 @@ export const BALL_RADIUS = 0.4;
 export const SPIN_PER_CELL = 1 / BALL_RADIUS;
 export const JUMP_HEIGHT = 1.2;
 export const HOP_HEIGHT = 1.0;
+/** A knock waits this fraction of KNOCK_TICKS (1 tick: the pusher closing the 0.2-cell gap), then slides fast. */
+export const KNOCK_HOLD = 0.25;
+/** Rolling spin (rad) a knocked ball picks up while it skids one cell. */
+export const KNOCK_SPIN = Math.PI / 2;
 
 export const newRenderPose = (): RenderPose => ({ position: [0, 0, 0], quat: [0, 0, 0, 1], up: [0, 1, 0], spin: 0, lift: 0 });
 
@@ -97,8 +101,9 @@ export interface AirTurn { fromFwd: Dir; progress: number }
 /**
  * Render pose for an action at `progress` (clamped to 0..1). Writes into `out`; allocates nothing when `out` is given.
  * `airTurn` spins an airborne ball's facing from `airTurn.fromFwd` to `to.fwd`; its path still follows `from`.
+ * `knockHold` overrides KNOCK_HOLD when pusher and victim render at different ticks (see the client's PlayersView).
  */
-export function poseAt(action: Action, from: Pose, to: Pose, progress: number, out: RenderPose = newRenderPose(), airTurn?: AirTurn): RenderPose {
+export function poseAt(action: Action, from: Pose, to: Pose, progress: number, out: RenderPose = newRenderPose(), airTurn?: AirTurn, knockHold = KNOCK_HOLD): RenderPose {
   const p = Math.min(1, Math.max(0, progress));
   const C = from.cell, U = dirVec(from.up), F = dirVec(from.fwd), T = to.cell;
   const pos = out.position;
@@ -139,6 +144,12 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
     case Action.Fall:
       lerp();
       break;
+    case Action.Knocked: {
+      const k = Math.max(0, (p - knockHold) / (1 - knockHold));
+      pos[0] += (T.x - C.x) * k; pos[1] += (T.y - C.y) * k; pos[2] += (T.z - C.z) * k;
+      out.spin = k * KNOCK_SPIN;
+      break;
+    }
   }
   if (airTurn && airTurn.fromFwd !== to.fwd && (action === Action.Hop || action === Action.Jump || action === Action.Fall)) {
     const t = Math.min(1, Math.max(0, airTurn.progress));

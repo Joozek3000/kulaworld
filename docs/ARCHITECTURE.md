@@ -229,33 +229,42 @@ Required test levels:
 
 Bump/knockback, pickups (speed, heavy, gravity lock, crumble trap), client prediction using the shared sim, paint/tag/arena modes, a level editor, a visual style pass, audio.
 
-## 14. PvP (planned for phase 06+, not in the MVP)
+## 14. PvP: push (phase 06)
 
-Design this now so phase 02 doesn't make it hard to add later.
+**Pushable states.** Only players on the same gravity face (`V.up === P.up`) can be pushed. A victim V is pushable when it is:
+- Idle, Turning or Stunned, or
+- Hopping within `HOP_PUSH_WINDOW` (2) ticks of the hop's start or end, i.e. while it's low.
 
-**Push** (the core PvP action):
-- Trigger: player P starts a Roll into cell `A` occupied by victim V, where V is Idle or Turning and `V.up === P.up`. Players on different gravity faces can't push each other.
-- If `A + F` is free (not solid, not reserved), V gets a `Knocked` action: it moves to `A + F` over `KNOCK_TICKS` (4). P's roll into `A` proceeds normally.
-  - After the knock, if `solid(A + F − U)` V lands. Otherwise V **falls** along −U. At the edge of the map this means death.
-  - V is then `Stunned` for `STUN_TICKS` (8): no actions, but it can still be pushed.
-- If `A + F` is blocked, the push fails: P bounces back into its own cell and is stunned for `STUN_TICKS`. V is unaffected. This means pinning someone against a wall doesn't work.
-- Head-on: if two players start moves into each other's cell (or the same cell) on the same tick, both bounce and both are stunned. Nobody wins through tick order.
-- Held-jump bouncing must NOT give permanent push immunity. Decide in the PvP phase, e.g. a hopping ball is pushable during the first and last 2 ticks of each hop.
-- Pushing a moving player: blocked as in the MVP. A push only lands on a player who is standing still.
-- A hopping player can't be pushed, so timing a hop dodges a push. The pusher then rolls into a reserved cell and is blocked (no bounce, no stun).
+Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked and Dead players can't be pushed. Holding jump therefore gives partial cover, 6 of every 10 ticks, not immunity.
 
-**Death with PvP**: a death drops 1 key, which goes back to its original spot. (This replaces the MVP rule that keys are kept.) If the victim was knocked within the last 60 ticks, the pusher gets a `knockout` event for credit.
+**Push**
+- Trigger: P's fwd intent targets cell `A = C + F` and `A` holds a pushable V. P doesn't need a special button: rolling into someone pushes them.
+- **Success** when `A + F` is not solid and not reserved:
+  - V gets `Knocked` (moves `A → A + F` over `KNOCK_TICKS` = 4), cancelling any Turn/Hop/Stun it was in.
+  - P's Roll into `A` proceeds normally.
+  - When the knock ends: if `solid(A + F − U)` V becomes `Stunned` for `STUN_TICKS` (8). Otherwise V starts a **Fall** (the reusable fall function); off the map that means death.
+- **Fail** when `A + F` is solid or reserved (a wall or another player behind V): P gets `Stunned` in place for `STUN_TICKS` with a *bounce* flag, rendered as a short lunge and recoil. V is unaffected, so pinning against a wall doesn't work.
+- **Not pushable:** if V is in a non-pushable state, P is simply blocked (MVP behaviour, no stun) and retries next tick if fwd is still held. So holding W against a bouncing player pushes them the moment they're low.
+
+**Same-tick precedence.** Collect all Idle players' intents first, then resolve:
+1. **Escape first.** Victims whose own intent this tick is a Roll, Flip, Jump or Hop start it, and pushes aimed at them are blocked with no stun. A victim whose intent is a Turn is still pushed.
+2. **Mutual push.** If P and Q each target the other's cell, both are Stunned (bounce). Nobody wins through tick order.
+3. **Other pushes** resolve in fair order. A victim is knocked at most once per tick.
+4. **Non-push moves** into the same empty cell keep the existing fair-rotation rule.
+
+**Death with PvP**
+- Any death drops 1 key (if the player has any). The key reappears at its original spot and a `keyDrop` event is sent.
+- If the victim was knocked within `KNOCKOUT_CREDIT_TICKS` (60) before dying, a `knockout {pusherId, victimId}` event is sent.
+
+**Config**
+- `PUSH=on|off` in `.env` (default on). It's passed into `createWorld` as a rule flag, so tests can run both ways.
+- With PUSH=off, the MVP rules apply exactly, including death keeping keys.
 
 **Modes using it**:
 - **Key Race + push**: the default once PvP lands. Knocking the leader off steals their progress.
-- **Knockout**: a small arena, no keys, 3 lives. Last ball rolling wins. After 60 s the outer ring of tiles starts crumbling inward every 10 s.
+- **Knockout** (phase 07): a small arena, no keys, 3 lives. Last ball rolling wins. After 60 s the outer ring of tiles starts crumbling inward every 10 s.
 
 **Later options (don't build yet)**:
 - Charged ram: hold fwd for 1 s to push 2 cells.
 - Heavy pickup: can't be pushed.
 - Jump-stomp: landing on a player stuns them.
-
-**Sim implications (respect these in phase 02)**:
-- Keep move resolution in one function that sees all players' intended actions for the tick. Don't use per-player "if blocked, return" early exits scattered around.
-- Action and state enums must be easy to extend (`Knocked`, `Stunned`).
-- The fall start must be a reusable function, not inlined in Jump.

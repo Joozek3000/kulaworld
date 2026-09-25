@@ -10,5 +10,7 @@ export const config = {
   minPlayers: Number(env.MIN_PLAYERS ?? (prod ? 2 : 1)),
   level: env.LEVEL ?? 'test-cube',
   /** Round-trip ms passed to Colyseus simulateLatency; 0 = off. Ignored in production. */
+  /** PvP push rules (ARCHITECTURE §14): PUSH=on|off, default on. */
+  push: env.PUSH !== 'off',
   latencyMs: prod ? 0 : Number(env.LATENCY_MS ?? 0),
 };

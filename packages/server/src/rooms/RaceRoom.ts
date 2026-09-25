@@ -145,14 +145,14 @@ export class RaceRoom extends Room<{ state: GameState }> {
         // Fresh world with everyone at their spawns; not stepped until playing, so the timer starts with the round.
         this.level = this.levels[this.round % this.levels.length];
         s.levelId = this.level.id;
-        const world = createWorld(this.level, ++this.round);
+        const world = createWorld(this.level, ++this.round, { push: config.push });
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;
         s.items.clear();
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;
         s.phaseEndTick = 0;
-        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id}`);
+        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id}, push ${config.push ? 'on' : 'off'}`);
         break;
       }
       case 'playing':
@@ -178,6 +178,9 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'key': console.log(`event key: ${who} has ${e.keys}`); break;
       case 'death': console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z}`); break;
       case 'respawn': console.log(`event respawn: ${who}`); break;
+      case 'push': console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}`); break;
+      case 'knockout': console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
+      case 'keyDrop': console.log(`event keyDrop: ${who} dropped key ${e.keyId}`); break;
       case 'win': console.log(`event win: ${e.winnerId ? this.nameOf(e.winnerId) : 'draw'} (${e.reason})`); break;
     }
   }

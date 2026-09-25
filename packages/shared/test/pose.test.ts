@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   Action, ALL_DIRS, cross, Dir, dirVec, frameQuat, JUMP_HEIGHT, opposite, perpendicular, poseAt, rotate,
-  HOP_HEIGHT, SPIN_PER_CELL, vec, type Pose, type Quat, type V3,
+  HOP_HEIGHT, KNOCK_HOLD, KNOCK_SPIN, SPIN_PER_CELL, vec, type Pose, type Quat, type V3,
 } from '../src/index.ts';
 
 const pose = (x: number, y: number, z: number, up: Dir, fwd: Dir): Pose => ({ cell: vec(x, y, z), up, fwd });
@@ -51,6 +51,21 @@ describe('poseAt', () => {
     close(poseAt(Action.Jump, C, to, 0).position, [0, 1, 0]);
     close(poseAt(Action.Jump, C, to, 0.5).position, [0, 1 + JUMP_HEIGHT, 1]);
     close(poseAt(Action.Jump, C, to, 1).position, [0, 1, 2]);
+  });
+
+  test('knocked: holds while the pusher closes in, then slides along the push (not its own fwd) with a small spin', () => {
+    const to = pose(1, 1, 0, Dir.PY, Dir.PZ); // pushed along +X while facing +Z
+    const start = poseAt(Action.Knocked, C, to, KNOCK_HOLD);
+    close(start.position, [0, 1, 0]);
+    expect(start.spin).toBe(0);
+    const mid = poseAt(Action.Knocked, C, to, (1 + KNOCK_HOLD) / 2);
+    close(mid.position, [0.5, 1, 0]);
+    expect(mid.spin).toBeCloseTo(KNOCK_SPIN / 2);
+    const end = poseAt(Action.Knocked, C, to, 1);
+    close(end.position, [1, 1, 0]);
+    expect(end.spin).toBeCloseTo(KNOCK_SPIN);
+    expect(KNOCK_SPIN).toBeLessThan(SPIN_PER_CELL);
+    sameRot(end.quat, frameQuat(Dir.PY, Dir.PZ, [0, 0, 0, 1])); // facing kept
   });
 
   test('fall: linear along -up', () => {

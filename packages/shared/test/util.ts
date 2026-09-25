@@ -1,11 +1,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import {
   addPlayer, createWorld, loadLevel, step,
-  type DirName, type Input, type LevelJson, type PlayerState, type SimEvent, type World,
+  type DirName, type Input, type LevelJson, type PlayerState, type Rules, type SimEvent, type World,
 } from '../src/index.ts';
 
 type V3 = [number, number, number];
 export type Spawn = [V3, DirName, DirName];
+
+/** Rules for test worlds. pushOff.test.ts turns push off and re-runs the pre-push suites under it. */
+export const rules: Rules = { push: true };
 
 export const levelsDir = new URL('../../../levels/', import.meta.url);
 export const levelFiles = () => readdirSync(levelsDir).filter((f) => f.endsWith('.json'));
@@ -32,7 +35,7 @@ export function inOrder(w: World): World {
 
 /** A tiny world with one player per spawn, ids p0, p1, ... in spawn order. */
 export function makeWorld(blocks: V3[], spawns: Spawn[], extra: Partial<LevelJson> = {}): World {
-  const w = inOrder(createWorld(loadLevel(levelJson(blocks, spawns, extra)), 1));
+  const w = inOrder(createWorld(loadLevel(levelJson(blocks, spawns, extra)), 1, { ...rules }));
   spawns.forEach((_, i) => addPlayer(w, `p${i}`, `p${i}`));
   return w;
 }

@@ -3,7 +3,7 @@ import {
   Action, addPlayer, createWorld, Dir, loadLevel, mulberry32, ROLL_TICKS, setInput, step, turnFwd,
   type Dir as DirT, type World,
 } from '../src/index.ts';
-import { inOrder, input, makeWorld, player, readLevelJson, row, run, serialize } from './util.ts';
+import { inOrder, input, rules, makeWorld, player, readLevelJson, row, run, serialize } from './util.ts';
 
 describe('key race', () => {
   test('key is collected when an action finishes in its cell and removed for everyone', () => {
@@ -58,7 +58,7 @@ describe('key race', () => {
 });
 
 describe('test-cube', () => {
-  const cube = () => inOrder(createWorld(loadLevel(readLevelJson('test-cube.json')), 1));
+  const cube = () => inOrder(createWorld(loadLevel(readLevelJson('test-cube.json')), 1, { ...rules }));
 
   /** Holds fwd until the running action ends at the spawn cell on the top face, then lets it finish. */
   function loop(w: World, faces: Set<DirT>) {
@@ -96,7 +96,7 @@ describe('test-cube', () => {
 
 describe('determinism', () => {
   function randomGame(seed: number): string {
-    const w = createWorld(loadLevel(readLevelJson('test-cube.json')), seed);
+    const w = createWorld(loadLevel(readLevelJson('test-cube.json')), seed, { ...rules });
     const ids = ['a', 'b', 'c', 'd'];
     for (const id of ids) addPlayer(w, id, id);
     const rnd = mulberry32(seed);

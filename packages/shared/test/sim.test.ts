@@ -298,6 +298,7 @@ describe('hop', () => {
 
   test("a player can't roll into a hopping player's cell", () => {
     const w = makeWorld(row(0, 3), [onRow(), [[1, 1, 0], '+Y', '+X']]);
+    w.rules = { push: false }; // MVP rule; with push, a low hop is pushable (push.test.ts)
     setInput(w, 'p1', input({ jump: true }));
     step(w);
     expect(player(w, 'p1').action).toBe(Action.Hop);

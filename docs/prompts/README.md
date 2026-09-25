@@ -17,3 +17,4 @@ Workflow:
 | 04c | Held jump | Hold Space = continuous bounce, W during bounce = forward jump, blob shadows |
 | 05 | Key Race complete | HUD, results, seek bots, first real playtest |
 | 05b | Air turns | Left/right mid-bounce turns instantly; spawn shuffle for bot fairness |
+| 06 | Push (PvP) | Roll into players to knock them; deaths drop a key; bully bots |

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, TURN_TICKS,
+  Action, BALL_RADIUS, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Level, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
@@ -11,10 +11,10 @@ import type { GameState, PlayerS } from '../net.ts';
  * So each player keeps its last few action segments and we render whichever was running at renderTick;
  * otherwise a chained roll would replace from/to while the previous roll is still on screen.
  */
-interface Seg { serial: number; action: number; from: Pose; to: Pose; startTick: number; endTick: number; turnFromFwd: Dir; turnStartTick: number }
+interface Seg { serial: number; action: number; from: Pose; to: Pose; startTick: number; endTick: number; turnFromFwd: Dir; turnStartTick: number; bounce: boolean }
 const HISTORY = 3;
 const newPose = (): Pose => ({ cell: { x: 0, y: 0, z: 0 }, up: 2, fwd: 4 });
-const newSeg = (): Seg => ({ serial: -1, action: Action.Idle, from: newPose(), to: newPose(), startTick: 0, endTick: 0, turnFromFwd: 4, turnStartTick: 0 });
+const newSeg = (): Seg => ({ serial: -1, action: Action.Idle, from: newPose(), to: newPose(), startTick: 0, endTick: 0, turnFromFwd: 4, turnStartTick: 0, bounce: false });
 
 function setPose(q: Pose, x: number, y: number, z: number, up: number, fwd: number): void {
   q.cell.x = x; q.cell.y = y; q.cell.z = z; q.up = up as Dir; q.fwd = fwd as Dir;
@@ -27,7 +27,16 @@ const bottomGeo = new THREE.SphereGeometry(BALL_RADIUS, 24, 12, 0, Math.PI * 2, 
 const bottomMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const airTurn: AirTurn = { fromFwd: 4, progress: 1 };
-const tmpQ = new THREE.Quaternion(), spinQ = new THREE.Quaternion(), tmpUp = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion(), spinQ = new THREE.Quaternion(), tmpUp = new THREE.Vector3(), tmpFwd = new THREE.Vector3();
+const wobQ = new THREE.Quaternion(), RING_TILT = new THREE.Quaternion().setFromAxisAngle(X_AXIS, Math.PI / 2);
+
+// Stun: the ball wobbles (tilts side to side, dying out) under a flashing ring. A bounce also lunges forward and back.
+const WOBBLE_RAD = 0.35;
+const WOBBLE_CYCLES = 3;
+const LUNGE_CELLS = 0.25;
+const LUNGE_TICKS = 4;
+const ringGeo = new THREE.TorusGeometry(0.28, 0.04, 8, 24);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
 
 // Blob shadow: a dark disc on the first block below the ball (along its up axis), fading with height.
 const shadowGeo = new THREE.CircleGeometry(0.34, 24);
@@ -57,6 +66,7 @@ class PlayerView {
   });
   readonly shadow = new THREE.Mesh(shadowGeo, this.shadowMat);
   readonly label: CSS2DObject | null;
+  private readonly ring = new THREE.Mesh(ringGeo, ringMat);
   shown = false;
   action: number = Action.Idle;
   readonly color: string;
@@ -68,7 +78,8 @@ class PlayerView {
     this.ball.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, bottomMat));
     this.ball.visible = false;
     this.shadow.visible = false;
-    scene.add(this.ball, this.shadow);
+    this.ring.visible = false;
+    scene.add(this.ball, this.shadow, this.ring);
     if (local) {
       this.label = null;
     } else {
@@ -103,6 +114,7 @@ class PlayerView {
     setPose(n.to, p.toX, p.toY, p.toZ, p.toUp, p.toFwd);
     n.turnFromFwd = p.turnFromFwd as Dir;
     n.turnStartTick = p.turnStartTick;
+    n.bounce = p.bounce;
     this.count = Math.min(this.count + 1, HISTORY);
     // A moving segment that starts before what's already on screen arrived late: the ball has to jump into it.
     const late = this.lastRenderTick - effStart(n);
@@ -132,7 +144,7 @@ class PlayerView {
   vanished = false;
 
   /** Returns true when the rendered segment changed. */
-  update(renderTick: number, show: boolean, solid: SolidFn | null): boolean {
+  update(renderTick: number, show: boolean, solid: SolidFn | null, knockHold: (s: Seg) => number = () => KNOCK_HOLD): boolean {
     const wasShown = this.shown;
     this.lastRenderTick = renderTick;
     const s = this.select(renderTick);
@@ -141,6 +153,8 @@ class PlayerView {
       // Rolling spin is render-only; carry the finished roll's rotation into the next segment.
       if (this.renderedAction === Action.Roll || this.renderedAction === Action.Flip) {
         this.spinBase = (this.spinBase + SPIN_PER_CELL) % (Math.PI * 2);
+      } else if (this.renderedAction === Action.Knocked) {
+        this.spinBase = (this.spinBase + KNOCK_SPIN) % (Math.PI * 2);
       }
       this.renderedSerial = s.serial;
       this.renderedAction = s.action;
@@ -152,22 +166,39 @@ class PlayerView {
     this.vanished = wasShown && show && s.action === Action.Dead;
     this.ball.visible = this.shown;
     if (!this.shown) this.shadow.visible = false;
+    this.ring.visible = false;
     if (this.label) this.label.visible = this.shown;
     if (this.shown) {
       const len = s.endTick - s.startTick;
       airTurn.fromFwd = s.turnFromFwd;
       airTurn.progress = (renderTick - s.turnStartTick) / TURN_TICKS;
-      poseAt(s.action as Action, s.from, s.to, len > 0 ? (renderTick - s.startTick) / len : 1, this.pose, airTurn);
+      poseAt(s.action as Action, s.from, s.to, len > 0 ? (renderTick - s.startTick) / len : 1, this.pose, airTurn, knockHold(s));
       const [px, py, pz] = this.pose.position;
       tmpUp.fromArray(this.pose.up);
       this.ball.position.set(px, py, pz).addScaledVector(tmpUp, BALL_RADIUS - 0.5); // rest on the block
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
-      this.ball.quaternion.copy(tmpQ.fromArray(this.pose.quat)).multiply(spinQ);
+      this.ball.quaternion.copy(tmpQ.fromArray(this.pose.quat));
+      if (s.action === Action.Stunned) this.stunned(s, renderTick);
+      this.ball.quaternion.multiply(spinQ);
       this.label?.position.copy(this.ball.position).addScaledVector(tmpUp, 0.75);
       // Mid-flip the up axis points into air over the edge: keep the last placement until the new face takes over.
       if (!solid || (!this.placeShadow(solid) && s.action !== Action.Flip)) this.shadow.visible = false;
     }
     return changed;
+  }
+
+  /** Wobble, the flashing ring, and for a bounce the lunge into the blocked push and back. Ball only, not the camera. */
+  private stunned(s: Seg, renderTick: number): void {
+    const t = renderTick - s.startTick;
+    const fade = Math.max(0, 1 - t / STUN_TICKS);
+    this.ball.quaternion.multiply(wobQ.setFromAxisAngle(Z_AXIS, WOBBLE_RAD * fade * Math.sin((t / STUN_TICKS) * WOBBLE_CYCLES * 2 * Math.PI)));
+    if (s.bounce && t < LUNGE_TICKS) {
+      tmpFwd.set(0, 0, 1).applyQuaternion(tmpQ);
+      this.ball.position.addScaledVector(tmpFwd, LUNGE_CELLS * Math.sin((Math.max(0, t) / LUNGE_TICKS) * Math.PI));
+    }
+    this.ring.visible = Math.floor(t * 3) % 2 === 0; // flashes ~6 times a second
+    this.ring.position.copy(this.ball.position).addScaledVector(tmpUp, 0.6);
+    this.ring.quaternion.copy(tmpQ).multiply(RING_TILT); // lies flat, facing up
   }
 
   /** Projects the shadow along the dominant axis of up (diagonal mid-flip) onto the first block within reach. */
@@ -194,7 +225,7 @@ class PlayerView {
   }
 
   dispose(scene: THREE.Scene): void {
-    scene.remove(this.ball, this.shadow);
+    scene.remove(this.ball, this.shadow, this.ring);
     this.shadowMat.dispose();
     (this.ball.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.Material>).material.dispose();
     if (this.label) { scene.remove(this.label); this.label.element.remove(); }
@@ -229,13 +260,34 @@ export class PlayersView {
       if (!v) this.views.set(id, (v = new PlayerView(p, id === localId, this.scene)));
       if (newRound) v.clear(); // last round's segments would otherwise sort before the new spawn
       v.track(p);
-      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating, this.solid);
+    });
+    state.players.forEach((p, id) => {
+      const v = this.views.get(id)!;
+      const hold = (s: Seg) => this.knockHold(s, id, localId, localRenderTick - renderTick);
+      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating, this.solid, hold);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
       if (v.vanished) this.onVanish?.(v.ball.position, v.color);
     });
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
+  }
+
+  /**
+   * The local ball renders `lead` ticks closer to the server than the others. A knock (which starts on the same tick
+   * as the pusher's roll) waits 1 tick for the pusher to close the gap, adjusted so it matches what is on screen:
+   * longer when the victim is local, shorter when the pusher is.
+   */
+  private knockHold(s: Seg, victimId: string, localId: string, lead: number): number {
+    if (s.action !== Action.Knocked) return KNOCK_HOLD;
+    let ticks = 1 + (victimId === localId ? lead : 0);
+    for (const [id, v] of this.views) {
+      if (id === victimId) continue;
+      const pushed = v.segs.some((q) => q.action === Action.Roll && q.startTick === s.startTick
+        && q.to.cell.x === s.from.cell.x && q.to.cell.y === s.from.cell.y && q.to.cell.z === s.from.cell.z);
+      if (pushed && id === localId) ticks -= lead;
+    }
+    return Math.min(KNOCK_TICKS - 1, Math.max(0, ticks)) / KNOCK_TICKS;
   }
 
   /** The local ball's render pose, or null when it isn't on screen (lobby, spectating, dead). */

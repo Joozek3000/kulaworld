@@ -13,6 +13,8 @@ export const PlayerS = schema({
   /** Mid-air turn (render only): facing before it and its tick; equals toFwd and startTick when there was none. */
   turnFromFwd: t.uint8().default(0),
   turnStartTick: t.int32().default(0),
+  /** Stunned by a failed push (render: lunge and recoil). */
+  bounce: t.boolean().default(false),
   keys: t.uint8().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
@@ -64,6 +66,7 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'endTick', p.endTick);
     set(s, 'turnFromFwd', p.turnFromFwd);
     set(s, 'turnStartTick', p.turnStartTick);
+    set(s, 'bounce', p.bounce);
     set(s, 'keys', p.keys);
   }
   for (const k of world.keys) {

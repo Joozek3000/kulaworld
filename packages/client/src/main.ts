@@ -48,14 +48,20 @@ setupInput(net, {
   onMute: () => sfx.toggleMute(),
 });
 
+const nameOf = (id: string) => (id === net.sessionId ? 'You' : net.state.players.get(id)?.name ?? '?');
+const colorOf = (id: string) => net.state.players.get(id)?.color ?? '#fff';
 net.onEvent((e) => {
-  const p = e.type === 'win' ? undefined : net.state.players.get(e.playerId);
-  const mine = e.type === 'win' ? e.winnerId === net.sessionId : e.playerId === net.sessionId;
-  if (e.type === 'key' && p) {
-    hud.toast(`${mine ? 'You' : p.name} got a key (${e.keys}/${level?.keysRequired ?? '?'})`, p.color);
-    sfx.key(mine);
+  switch (e.type) {
+    case 'key':
+      hud.toast(`${nameOf(e.playerId)} got a key (${e.keys}/${level?.keysRequired ?? '?'})`, colorOf(e.playerId));
+      sfx.key(e.playerId === net.sessionId);
+      break;
+    case 'win': sfx.win(e.winnerId === net.sessionId); break;
+    case 'push': sfx.thump(); break;
+    case 'bounce': sfx.buzz(); break;
+    case 'knockout': hud.toast(`${nameOf(e.pusherId)} knocked ${nameOf(e.victimId)} off!`, colorOf(e.pusherId)); break;
+    case 'keyDrop': hud.toast(`${nameOf(e.playerId)} dropped a key`, colorOf(e.playerId)); break;
   }
-  if (e.type === 'win') sfx.win(mine);
 });
 
 if (import.meta.env.DEV) Object.assign(window, { kula: { net, players } }); // console/automation access

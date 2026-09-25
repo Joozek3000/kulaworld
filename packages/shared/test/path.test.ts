@@ -3,9 +3,9 @@ import {
   Action, addPlayer, cellKey, createWorld, findPath, loadLevel, resultPose, setInput, step,
   type Cmd, type PathStep, type Pose, type World,
 } from '../src/index.ts';
-import { inOrder, input, levelFiles, readLevelJson } from './util.ts';
+import { inOrder, input, levelFiles, readLevelJson, rules } from './util.ts';
 
-const worldOf = (file: string) => createWorld(loadLevel(readLevelJson(file)), 1);
+const worldOf = (file: string) => createWorld(loadLevel(readLevelJson(file)), 1, { ...rules });
 const MOVES: Cmd[] = ['fwd', 'left', 'right', 'jump'];
 
 /** Runs a path through the real sim the way a seek bot does: press, let the action start, release, wait. */

@@ -1,12 +1,12 @@
-import { KILL_MARGIN, TICK_RATE } from '../constants.ts';
+import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
 import { dirVec, type Dir } from '../dir.ts';
 import { mulberry32 } from '../rng.ts';
 import { isSolid } from '../level/load.ts';
 import type { Level, Pose } from '../level/types.ts';
 import { add, cellKey, type Vec3 } from '../vec.ts';
 
-/** Extend by appending (e.g. Knocked, Stunned for PvP); values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7 } as const;
+/** Extend by appending; values go over the network. */
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */
@@ -26,6 +26,8 @@ export interface PlayerState {
   startTick: number;
   endTick: number;
   keys: number;
+  /** Ids of the held keys, oldest first; a death drops the last one (push rules). */
+  keyIds: number[];
   fwdHeld: boolean;
   jumpHeld: boolean;
   /** Forward pressed during a Hop: the next decision is a forward jump even if W is released by then. */
@@ -36,13 +38,21 @@ export interface PlayerState {
   /** Last mid-air turn, for rendering: facing before it and the tick it happened. Reset at every action start. */
   turnFromFwd: Dir;
   turnStartTick: number;
+  /** Stunned by a failed push (render: lunge and recoil). */
+  bounce: boolean;
+  /** Who knocked this player last and when, for knockout credit. Cleared on death. */
+  lastKnockedBy: string | null;
+  lastKnockedTick: number;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
 export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' }
 
+export interface Rules { push: boolean }
+
 export interface World {
   level: Level;
+  rules: Rules;
   seed: number;
   tick: number;
   timeLimitTick: number;
@@ -58,11 +68,16 @@ export type SimEvent =
   | { type: 'key'; playerId: string; keyId: number; keys: number }
   | { type: 'win'; winnerId: string | null; reason: RaceResult['reason'] }
   | { type: 'death'; playerId: string; cell: Vec3 }
-  | { type: 'respawn'; playerId: string; cell: Vec3 };
+  | { type: 'respawn'; playerId: string; cell: Vec3 }
+  | { type: 'push'; pusherId: string; victimId: string }
+  | { type: 'bounce'; playerId: string }
+  | { type: 'keyDrop'; playerId: string; keyId: number }
+  | { type: 'knockout'; pusherId: string; victimId: string };
 
-export function createWorld(level: Level, seed: number): World {
+export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
   return {
     level,
+    rules,
     seed,
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
@@ -105,8 +120,9 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
   const spawn = clonePose(world.level.spawns[0]);
   const p: PlayerState = {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
-    startTick: world.tick, endTick: world.tick + 1, keys: 0,
+    startTick: world.tick, endTick: world.tick + 1, keys: 0, keyIds: [],
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
+    bounce: false, lastKnockedBy: null, lastKnockedTick: 0,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -132,9 +148,25 @@ export function occupiedCells(p: PlayerState): Vec3[] {
   const { cell, fwd } = p.pose;
   switch (p.action) {
     case Action.Dead: return [];
-    case Action.Idle: case Action.Turn: case Action.Hop: return [cell];
+    case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: return [cell];
     case Action.Flip: case Action.Jump: return [cell, add(cell, dirVec(fwd)), p.to.cell];
     default: return [cell, p.to.cell];
+  }
+}
+
+/**
+ * Can a push land on `v` at `tick` (ARCHITECTURE §14)? Idle, Turning, Stunned, or Hopping while low: the first
+ * HOP_PUSH_WINDOW ticks after the hop's start tick or the last HOP_PUSH_WINDOW before its end. A hop on its start
+ * tick is an escape, not pushable. The same-face check is the pusher's (v.pose.up === pusher up).
+ */
+export function isPushable(v: PlayerState, tick: number): boolean {
+  switch (v.action) {
+    case Action.Idle: case Action.Turn: case Action.Stunned: return true;
+    case Action.Hop: {
+      const since = tick - v.startTick;
+      return (since >= 1 && since <= HOP_PUSH_WINDOW) || v.endTick - tick <= HOP_PUSH_WINDOW;
+    }
+    default: return false;
   }
 }
 

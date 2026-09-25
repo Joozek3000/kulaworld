@@ -33,6 +33,8 @@ export function createSfx() {
     tick: () => tones([440], 0.12, 'sine', 0.08),
     go: () => tones([880], 0.25, 'sine', 0.08),
     key: (mine: boolean) => tones(mine ? [660, 990, 1320] : [660, 880], 0.07),
+    thump: () => tones([140, 90], 0.06, 'triangle', 0.12),
+    buzz: () => tones([70, 70], 0.08, 'sawtooth', 0.05),
     death: () => tones([330, 247, 165], 0.1, 'sawtooth', 0.04),
     win: (mine: boolean) => tones(mine ? [523, 659, 784, 1047] : [392, 330, 262], 0.13, 'triangle', 0.08),
   };
