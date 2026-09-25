@@ -23,6 +23,9 @@ export const PlayerS = schema({
   eliminatedBy: t.string().default(''),
   protectedUntil: t.int32().default(0),
   knockouts: t.uint8().default(0),
+  /** Prediction (§17): the last input applied (its seq) and the tick it was applied at. */
+  ackSeq: t.int32().default(-1),
+  ackTick: t.int32().default(-1),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
 }, 'PlayerS');

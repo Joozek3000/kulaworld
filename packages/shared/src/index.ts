@@ -15,3 +15,4 @@ export * from './sim/path.ts';
 export * from './sim/crumble.ts';
 export * from './sim/knockout.ts';
 export * from './pose.ts';
+export * from './predict.ts';

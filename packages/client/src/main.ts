@@ -12,6 +12,7 @@ import { createDebug } from './ui/debug.ts';
 import { createHud } from './ui/hud.ts';
 import { createTuningPanel } from './ui/tuning.ts';
 import { AudioEngine } from './audio/engine.ts';
+import { LocalPrediction } from './predict/local.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
 const INTERP_TICKS = 2;
@@ -57,6 +58,8 @@ try {
   throw e;
 }
 net.room.onLeave(() => hud.error('disconnected'));
+const predict = new LocalPrediction(net, findLevel);
+if (predict.enabled) net.stamp = (i) => predict.stamp(i);
 
 let screenshot = false;
 let frozen = false;
@@ -90,7 +93,7 @@ net.onEvent((e) => {
   }
 });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, input } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, input, predict, debug } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
@@ -120,7 +123,11 @@ view.renderer.setAnimationLoop((now: number) => {
 
   const renderTick = net.estServerTick - INTERP_TICKS;
   const active = ACTIVE.has(s.phase);
-  players.update(s, renderTick, me, net.estServerTick - LOCAL_INTERP_TICKS, dtMs / 1000, now);
+  // Prediction (§17): the local ball runs on its predicted timeline at predTick; otherwise it trails the server.
+  predict.update(dtMs);
+  const predicting = predict.predicting && !!s.players.get(me);
+  const localTick = predicting ? predict.predTick : net.estServerTick - LOCAL_INTERP_TICKS;
+  players.update(s, renderTick, me, localTick, dtMs / 1000, now, predicting ? predict.localPlayer(s.players.get(me)!) : null, predict.takeCorrection());
   const mine = s.players.get(me);
   const unlocked = !!level?.exit && !!mine && mine.keys >= level.keysRequired;
   items.update(s, active, unlocked, now / 1000);
@@ -157,7 +164,11 @@ view.renderer.setAnimationLoop((now: number) => {
   fx.update(now / 1000);
   hud.update(s, me, level, audio.muted);
   view.render();
-  debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me), players.localLate(me), LOCAL_INTERP_TICKS);
+  debug.update(now, net, renderTick, view.renderer.info.render.calls, players.localAction(me), players.localLate(me), LOCAL_INTERP_TICKS,
+    predict.enabled ? [
+      `predict       ${predicting ? 'on' : 'paused'}   predTick ${predict.predTick.toFixed(2)}   lead ${predict.lead.toFixed(2)}`,
+      `mispredict    ${predict.mispredictionsPerMin}/min (${predict.mispredictions} total)   deferred ${predict.deferred}   last fix ${players.localCorrection(me).toFixed(2)} cells`,
+    ] : ['predict       off (?predict=0)']);
 
   if (screenshot) {
     screenshot = false;

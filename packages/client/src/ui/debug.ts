@@ -11,14 +11,17 @@ export function createDebug() {
   document.body.appendChild(el);
   let frames = 0, fps = 0, windowStart = performance.now(), lastPaint = 0;
   let pressAt = 0, latency = 0;
+  const samples: number[] = [];
 
   return {
     toggle() { el.hidden = !el.hidden; },
     /** A gameplay key was pressed. */
     press() { if (!pressAt) pressAt = performance.now(); },
     /** The local ball started a new moving action on screen. */
-    motion() { if (pressAt) { latency = performance.now() - pressAt; pressAt = 0; } },
-    update(now: number, net: Net, renderTick: number, drawCalls: number, localAction: number | null, late: { count: number; max: number }, localInterp: number) {
+    motion() { if (pressAt) { latency = performance.now() - pressAt; pressAt = 0; samples.push(latency); } },
+    /** Every measured input→motion latency (ms), for automated checks. */
+    samples,
+    update(now: number, net: Net, renderTick: number, drawCalls: number, localAction: number | null, late: { count: number; max: number }, localInterp: number, extra: string[] = []) {
       frames++;
       if (now - windowStart >= 1000) { fps = (frames * 1000) / (now - windowStart); frames = 0; windowStart = now; }
       if (pressAt && now - pressAt > 2000) pressAt = 0; // press that didn't move (blocked, or not playing)
@@ -36,6 +39,7 @@ export function createDebug() {
         `late segs     ${late.count} (max ${late.max.toFixed(2)} ticks)`,
         `me            ${localAction === null ? '-' : ACTION_NAMES[localAction]} (server ${me ? ACTION_NAMES[me.action] : '-'})`,
         `cell          ${cell}   up/fwd ${upFwd}`,
+        ...extra,
       ].join('\n');
     },
   };

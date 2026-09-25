@@ -1,5 +1,5 @@
 import { Client, type Room } from '@colyseus/sdk';
-import type { Input, SimEvent } from '@kula/shared';
+import type { Input, InputMsg, SimEvent } from '@kula/shared';
 
 /** Client-side view of the server schema (packages/server/src/schema/State.ts). */
 export interface PlayerS {
@@ -8,6 +8,7 @@ export interface PlayerS {
   toX: number; toY: number; toZ: number; toUp: number; toFwd: number;
   startTick: number; endTick: number; turnFromFwd: number; turnStartTick: number; bounce: boolean; keys: number; ready: boolean; spectating: boolean;
   lives: number; eliminated: boolean; eliminatedTick: number; eliminatedBy: string; protectedUntil: number; knockouts: number;
+  ackSeq: number; ackTick: number;
 }
 export interface ItemS { id: string; kind: 'key' | 'exit'; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
@@ -36,6 +37,9 @@ export class Net {
   private patches = 0;
   private patchWindow = 0;
   private eventListeners: ((e: SimEvent) => void)[] = [];
+  private patchListeners: (() => void)[] = [];
+  /** Stamps outgoing inputs with their apply tick (prediction, §17); identity when unset. */
+  stamp: ((i: Input) => InputMsg) | null = null;
 
   constructor(readonly room: Room) {
     room.onStateChange((s: GameState) => {
@@ -44,6 +48,7 @@ export class Net {
       this.lastTick = s.tick;
       this.lastAt = performance.now();
       this.patches++;
+      for (const cb of this.patchListeners) cb();
     });
     room.onMessage('event', (e: SimEvent) => { for (const cb of this.eventListeners) cb(e); });
     // Leave promptly on navigation; a page kept in the back/forward cache would otherwise hold its seat.
@@ -78,7 +83,10 @@ export class Net {
   /** Sim events broadcast by the server (key, death, respawn, win). */
   onEvent(cb: (e: SimEvent) => void): void { this.eventListeners.push(cb); }
 
-  sendInput(input: Input): void { this.room.send('input', input); }
+  /** Called after every state patch, once the new state is in place. */
+  onPatch(cb: () => void): void { this.patchListeners.push(cb); }
+
+  sendInput(input: Input): void { this.room.send('input', this.stamp ? this.stamp(input) : input); }
   sendReady(): void { this.room.send('ready'); }
 }
 

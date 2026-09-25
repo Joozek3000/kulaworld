@@ -116,6 +116,7 @@ Server tick is 20 Hz (50 ms). Constants live in `shared/constants.ts`:
 - The client sends an `input` message when input changes: `{ seq, fwdHeld: boolean, turn: -1|0|1, jump: boolean }`. `turn` and `jump` are pulses.
 - The server stores `fwdHeld` plus **one buffered pulse** (the latest wins). A pulse expires after `INPUT_BUFFER_TICKS`.
 - Input also carries `jumpHeld: boolean`. The server derives the forward latch itself from the `fwdHeld` rising edge while the player is Hopping.
+- Since phase 09 an input may carry `tick`: the tick the client wants it applied at. The server queues it (§17). Without `tick` (bots) it applies on the next tick.
 - When a player is Idle on a tick (including the tick its previous action ended), it picks the next action in this priority order:
   1. buffered jump pulse or forward latch → jump (forward if `fwdHeld || latch`, else hop)
   2. buffered turn
@@ -336,4 +337,46 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
   - After the stagger, the victim's escape precedence applies as for pushes.
 - **Prediction (§17):** jumps with a player on A1 or L are not predicted.
 - **Readability:** during a forward jump, a landing marker (ring in the attacker's colour) is drawn on L, visible to everyone. It turns red when L holds a player (a stomp is incoming).
+
+## 17. Client prediction (phase 09)
+
+**Goal**: your own ball reacts on the next tick after a key press, whatever the ping, while the server stays authoritative. Other balls are unchanged (interpolated at `estServerTick − 2`).
+
+**Input timing**
+- The client runs a predicted clock `predTick = estServerTick + lead`. `estServerTick` itself trails the server by about RTT/2, so the lead covers the whole round trip: `lead = ceil(RTT / 50 ms) + margin`.
+  - `margin` starts at 2 ticks, because patches aren't phase-locked to ticks.
+  - It grows by 1 (up to 5) whenever an ack shows an input applied later than stamped, and eases back 1 per 15 s without one.
+  - The lead grows at most 2 ticks/s and shrinks 0.5 ticks/s, so `predTick` never jumps. It never runs backwards.
+- Every input is stamped `tick = floor(predTick) + 1`.
+- **Scheduling** (`InputSchedule`, shared by server and predictor, so both agree):
+  - An input applies at `max(stamp, now + 1, the previous input's tick)`.
+  - A pulse never shares a tick with an earlier pulse. The sim buffers one pulse, so a turn would overwrite a jump.
+  - A stamp more than 20 ticks ahead is clamped to +20, not dropped: a jump is never dropped.
+- **Server:** a per-player `InputQueue`. Before each step it applies the inputs due on that tick, and echoes `ackSeq`/`ackTick` (the last input applied and its tick) in the player's schema.
+
+**Predictor** (`shared/src/predict.ts`, pure; `client/src/predict/local.ts` wraps it)
+- A private `World`: the level, crumbled blocks and collected keys from the server, the local player, and every other player frozen at its latest server state (an obstacle whose action never ends).
+- It runs the shared `step()` with push off, no mode logic (no crumble schedule, no timeout), and events ignored.
+- It steps the local player up to `floor(predTick)`, applying its own logged inputs at their ticks, and records the local state per tick.
+- **Reconcile**, on every patch at server tick T:
+  1. Move logged inputs to the server's truth. The acked one goes to `ackTick`. An unacked one whose tick T has already passed arrived late, so it and everything after it are held back until acked, rather than guessed tick by tick.
+  2. Compare the recorded state at T with the server's (action, from, to, start/end ticks).
+  3. On a match, drop older history. On a mismatch, reset to the server state at T and re-simulate the logged inputs to the current predicted tick.
+     - Held flags come from the log.
+     - The buffered pulse and latch come from our own history, unless the server decided at T (it's Idle, or an action started at T), in which case they were spent.
+  4. A mismatch counts as a **misprediction**, or as a **deferral** when a held-back move toward a player was involved.
+- **Not predicted**:
+  - **Moves toward other players:** a roll, flip or forward jump whose next cell, the one beyond it, or the flip's landing cell is held by another player. The local player holds still and the server decides. That covers pushes, and in phase 10 jumps over or onto players (§16).
+  - **Knocks, stuns, deaths, respawns:** while the local player is Knocked, Stunned or Dead on the server or in the prediction, every patch resets and replays (nothing counted), and the ball renders from the server. Dead never respawns in the predictor.
+  - **Keys, exits, crumble falls, lives:** these only come from the server. A crumble fall is simply corrected when the patch arrives.
+
+**Rendering**
+- The local ball renders the predicted player at `predTick`.
+- It follows the server timeline (as with `?predict=0`, at `estServerTick − 1`) while:
+  - it is Knocked, Stunned, Dead or eliminated; or
+  - a held-back move was just resolved by the server (a push, a bounce, or a roll once the way cleared), until the server has it Idle again with nothing held back. The server's action starts from the cell the predicted ball was holding in, so the switch is seamless and pushes render exactly as without prediction.
+- A correction, or a switch between the timelines, blends the drawn pose into the new one over 100 ms (a decaying position offset and orientation slerp) instead of teleporting.
+- Sounds and squash come from the rendered segments, so for the local ball they happen at press time.
+- `?predict=0` turns prediction off: unstamped inputs, server timeline only (phase 08 behaviour).
+- F3 shows `predTick`, the lead, mispredictions per minute, deferrals and the last correction's size.
 

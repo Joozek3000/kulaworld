@@ -73,3 +73,32 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
   await a.leave();
   await b.leave();
 });
+
+test('stamped inputs (§17): a future tick applies exactly then, a late one at the next tick', { timeout: 15000 }, async () => {
+  const client = new Client(`ws://localhost:${PORT}`);
+  const a: Room = await client.joinOrCreate('race', { name: 'A' });
+  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  await waitFor('2 players', () => a.state.players?.size === 2);
+  a.send('ready');
+  b.send('ready');
+  await waitFor('playing', () => a.state.phase === 'playing', 8000);
+  const me = a.state.players.get(a.sessionId);
+
+  const future = a.state.tick + 12;
+  a.send('input', { seq: 10, fwdHeld: true, turn: 0, jump: false, jumpHeld: false, tick: future });
+  await waitFor('ack 10', () => me.ackSeq === 10);
+  expect(me.ackTick).toBe(future);
+  await waitFor('roll', () => me.action === Action.Roll);
+  expect(me.startTick).toBe(future);
+
+  const sentAt = a.state.tick;
+  a.send('input', { seq: 11, fwdHeld: false, turn: 1, jump: false, jumpHeld: false, tick: sentAt - 5 });
+  await waitFor('ack 11', () => me.ackSeq === 11);
+  expect(me.ackTick).toBeGreaterThan(sentAt - 5); // late: applied when it arrived, not dropped
+  expect(me.ackTick).toBeLessThanOrEqual(a.state.tick);
+
+  a.send('input', { seq: 12, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, tick: 1.5 });
+  expect(parseInput({ seq: 12, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, tick: 1.5 })).toBe(null);
+  await a.leave();
+  await b.leave();
+});

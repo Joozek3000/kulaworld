@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
 import { Room, type Client } from 'colyseus';
 import {
-  addPlayer, createWorld, loadLevel, removePlayer, setInput, step, TICK_RATE, validateLevel,
-  type Input, type Level, type SimEvent, type World,
+  addPlayer, createWorld, InputQueue, loadLevel, removePlayer, setInput, step, TICK_RATE, validateLevel,
+  type InputMsg, type Level, type SimEvent, type World,
 } from '@kula/shared';
 import { config } from '../config.ts';
 import { GameState, PlayerS, syncSchema } from '../schema/State.ts';
@@ -26,13 +26,16 @@ export function loadLevelFile(id: string): Level {
 /** LEVEL may be a comma list (e.g. "race-01,test-cube"); rooms rotate through it each round. */
 export const levelIds = (): string[] => config.level.split(',').map((s) => s.trim()).filter(Boolean);
 
-/** Validates an `input` message at the trust boundary. */
-export function parseInput(m: unknown): Input | null {
+/** Validates an `input` message at the trust boundary. `tick` (when to apply it, §17) is optional: bots omit it. */
+export function parseInput(m: unknown): InputMsg | null {
   if (typeof m !== 'object' || m === null) return null;
-  const { seq, fwdHeld, turn, jump, jumpHeld } = m as Record<string, unknown>;
+  const { seq, fwdHeld, turn, jump, jumpHeld, tick } = m as Record<string, unknown>;
   if (!Number.isInteger(seq) || typeof fwdHeld !== 'boolean' || typeof jump !== 'boolean' || typeof jumpHeld !== 'boolean') return null;
   if (turn !== -1 && turn !== 0 && turn !== 1) return null;
-  return { seq: seq as number, fwdHeld, turn, jump, jumpHeld };
+  if (tick !== undefined && !Number.isInteger(tick)) return null;
+  const input: InputMsg = { seq: seq as number, fwdHeld, turn, jump, jumpHeld };
+  if (tick !== undefined) input.tick = tick as number;
+  return input;
 }
 
 export class RaceRoom extends Room<{ state: GameState }> {
@@ -45,6 +48,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private round = 0;
   private frame = 0;
   private inputCounts = new Map<string, number>();
+  /** Per player: inputs waiting for their tick (§17), and the last one applied (echoed as ackSeq/ackTick). */
+  private queues = new Map<string, InputQueue>();
   private warned = new Set<string>();
 
   onCreate() {
@@ -71,6 +76,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
     console.log(`leave ${this.nameOf(id)} (${id}), players=${this.state.players.size - 1}`);
     this.state.players.delete(id);
     this.inputCounts.delete(id);
+    this.queues.delete(id);
     if (this.world) {
       removePlayer(this.world, id);
       if (this.world.players.length === 0) this.setPhase('lobby');
@@ -92,7 +98,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
     if (n > MAX_INPUTS_PER_SEC) return this.warnOnce(id, 'rate', `more than ${MAX_INPUTS_PER_SEC} inputs/s, dropping extras`);
     const input = parseInput(msg);
     if (!input) return this.warnOnce(id, 'invalid', `invalid input ${inspect(msg, { depth: 2, breakLength: Infinity }).slice(0, 120)}`);
-    if (this.state.phase === 'playing' && this.world) setInput(this.world, id, input);
+    if (this.state.phase !== 'playing' || !this.world) return;
+    let q = this.queues.get(id);
+    if (!q) this.queues.set(id, (q = new InputQueue()));
+    const { tick, ...sim } = input;
+    q.push(sim, tick, this.world.tick);
   }
 
   private warnOnce(id: string, kind: string, msg: string) {
@@ -117,6 +127,13 @@ export class RaceRoom extends Room<{ state: GameState }> {
         break;
       case 'playing': {
         const world = this.world!;
+        for (const [id, q] of this.queues) {
+          for (const input of q.due(world.tick + 1)) {
+            setInput(world, id, input);
+            const p = s.players.get(id);
+            if (p) { p.ackSeq = input.seq; p.ackTick = world.tick + 1; }
+          }
+        }
         const events = step(world);
         s.tick = world.tick;
         syncSchema(world, s);
@@ -148,6 +165,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const world = createWorld(this.level, ++this.round, { push: config.push });
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;
+        this.queues.clear();
+        for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
         s.items.clear();
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;

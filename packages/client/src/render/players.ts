@@ -72,6 +72,9 @@ const SQUASH = {
   roll: -0.03, // pulse at each tile start
 };
 const ANTICIPATION_TICKS = 1;
+/** Prediction (§17): a corrected or re-sourced local ball blends from where it was drawn over this long. */
+const BLEND_MS = 100;
+const blendQ = new THREE.Quaternion(), IDENTITY = new THREE.Quaternion();
 const orient = new THREE.Quaternion(), vel = new THREE.Vector3(), knockDir = new THREE.Vector3();
 const frameX = new THREE.Vector3(), frameZ = new THREE.Vector3();
 
@@ -104,6 +107,19 @@ class PlayerView {
   /** The segment on screen, and the tick it rendered at (last update). */
   current: Seg = newSeg();
   get renderTickNow(): number { return this.lastRenderTick; }
+  /** Where the ball was drawn last frame (before squash), and a pending/active correction blend. */
+  private readonly lastPos = new THREE.Vector3();
+  private readonly lastOrient = new THREE.Quaternion();
+  private hasLast = false;
+  private blendRequested = false;
+  private blend: { pos: THREE.Vector3; q: THREE.Quaternion; start: number } | null = null;
+  /** Size of the last correction blend (cells), for the F3 overlay. */
+  lastCorrection = 0;
+  /** Which timeline the local ball follows: 'server' or 'pred'. */
+  source = 'server';
+
+  /** Blend from the currently drawn pose to wherever the next update puts the ball (no teleport). */
+  requestBlend(): void { this.blendRequested = true; }
   private readonly shadowMat = new THREE.MeshBasicMaterial({
     color: 0x000000, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
@@ -196,7 +212,7 @@ class PlayerView {
   /** Returns true when the rendered segment changed. */
   update(
     renderTick: number, show: boolean, solid: SolidFn | null, knockHold: (s: Seg) => number = () => KNOCK_HOLD,
-    dt = 0, feel: FeelFn = () => {},
+    dt = 0, feel: FeelFn = () => {}, nowMs = 0,
   ): boolean {
     const wasShown = this.shown;
     this.lastRenderTick = renderTick;
@@ -237,6 +253,7 @@ class PlayerView {
       const ghost = renderTick < this.protectedUntil;
       for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
       orient.multiply(spinQ);
+      this.applyBlend(wasShown, nowMs);
       if (changed && wasShown) this.transition(prevAction, s, solid, feel);
       this.squash(s, renderTick, len, knockHold(s), dt, feel);
       this.label?.position.copy(this.ball.position).addScaledVector(tmpUp, 0.75);
@@ -244,6 +261,32 @@ class PlayerView {
       if (!solid || (!this.placeShadow(solid) && s.action !== Action.Flip)) this.shadow.visible = false;
     }
     return changed;
+  }
+
+  /**
+   * Correction blend: on request, the error between last frame's drawn pose and this frame's is captured, then decays
+   * to 0 over BLEND_MS (position offset + orientation slerp). Records this frame's pose for the next request.
+   */
+  private applyBlend(wasShown: boolean, nowMs: number): void {
+    if (this.blendRequested) {
+      this.blendRequested = false;
+      if (wasShown && this.hasLast) {
+        const err = this.lastPos.clone().sub(this.ball.position);
+        this.lastCorrection = err.length();
+        this.blend = { pos: err, q: this.lastOrient.clone().multiply(orient.clone().invert()), start: nowMs };
+      }
+    }
+    if (this.blend) {
+      const k = (nowMs - this.blend.start) / BLEND_MS;
+      if (k >= 1) this.blend = null;
+      else {
+        this.ball.position.addScaledVector(this.blend.pos, 1 - k);
+        orient.premultiply(blendQ.copy(this.blend.q).slerp(IDENTITY, k));
+      }
+    }
+    this.lastPos.copy(this.ball.position);
+    this.lastOrient.copy(orient);
+    this.hasLast = true;
   }
 
   /** Feel on a change of on-screen action: sounds, plus the squash kicks that happen at a moment (not over time). */
@@ -434,8 +477,14 @@ export class PlayersView {
     this.solid = solid;
   }
 
-  /** The local ball renders at localRenderTick (it may run closer to the server than the others). */
-  update(state: GameState, renderTick: number, localId: string, localRenderTick = renderTick, dt = 0, nowMs = 0): void {
+  /**
+   * The local ball renders at localRenderTick (it may run closer to the server than the others). With prediction
+   * (§17) `local` is the predicted local player, rendered at the predicted tick; `corrected` blends a correction.
+   */
+  update(
+    state: GameState, renderTick: number, localId: string, localRenderTick = renderTick, dt = 0, nowMs = 0,
+    local: PlayerS | null = null, corrected = false,
+  ): void {
     const newRound = state.phase === 'countdown' && this.lastPhase !== 'countdown';
     this.lastPhase = state.phase;
     const active = ACTIVE.has(state.phase);
@@ -444,7 +493,12 @@ export class PlayersView {
       let v = this.views.get(id);
       if (!v) this.views.set(id, (v = new PlayerView(p, id === localId, this.scene)));
       if (newRound) v.clear(); // last round's segments would otherwise sort before the new spawn
-      v.track(p);
+      if (id === localId) {
+        const source = local ? 'pred' : 'server';
+        if (v.source !== source) { v.source = source; v.clear(); v.requestBlend(); } // the timelines don't mix
+        else if (corrected) v.requestBlend();
+      }
+      v.track(id === localId && local ? local : p);
     });
     state.players.forEach((p, id) => {
       const v = this.views.get(id)!;
@@ -457,7 +511,7 @@ export class PlayersView {
         if (kind === 'hit') this.contact(id, v, localId, nowMs);
         else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
       };
-      const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel);
+      const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
       if (v.vanished) {
         this.onVanish?.(v.ball.position, v.color);
@@ -497,6 +551,9 @@ export class PlayersView {
     }
     return null;
   }
+
+  /** Last correction blend of the local ball (cells), for F3. */
+  localCorrection(localId: string): number { return this.views.get(localId)?.lastCorrection ?? 0; }
 
   /** Every ball's roll state for the rumble loops: speed 1 while rolling or flipping on screen. */
   rolling(): { id: string; speed: number; at: THREE.Vector3; local: boolean }[] {
