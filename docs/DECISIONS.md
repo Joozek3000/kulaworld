@@ -39,4 +39,13 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - **Kept −1.** It can be overridden with `?localInterp=2`. The F3 "late segs" counter watches for snaps on real networks with jitter; `simulateLatency` has none.
 - 2026-09-24, phase 04b: `RenderPose.lift` (the jump/hop height) is added, and the follow camera tracks `position − up·lift`. If the camera follows the hop height, the ground moves instead of the ball, and a hop barely reads.
 - 2026-09-24, phase 04b: The client calls `room.leave()` on `pagehide`. Navigating to a new URL put the old page in the back/forward cache, where it kept its seat, so the next join became a spectator.
+- 2026-09-25, phase 04c: Held jump + forward latch (ARCHITECTURE §5/§6).
+  - `Input.jumpHeld` is required: `parseInput` rejects messages without it.
+  - `setInput` sets `fwdLatch` on a fwdHeld false→true edge while the player is Hopping.
+  - `commands()` priority: jump pulse or latch → `jumpCmds(fwdHeld || latch)`; buffered turn; `jumpHeld` → `jumpCmds(fwdHeld)`; `fwdHeld` → roll. The latch is cleared at every decision.
+  - The client sends the jump pulse with the Space keydown, so a tap shorter than one tick still bounces once.
+  - A turn tapped early in a hop can expire before landing (INPUT_BUFFER_TICKS = 6 of the hop's 10), as with any pulse.
+- 2026-09-25, phase 04c: Blob shadow per ball.
+  - It's projected along the dominant axis of the rendered `up` onto the first block within 3 cells, sits 0.01 above the face, and fades with height.
+  - Mid-flip the dominant axis points into air over the edge, so during a Flip the shadow keeps its last placement instead of blinking off.
 - 2026-09-24, phase 04b: Ball contact (`−U·0.1` along the pose's `up`) was already in place from phase 04. It was verified visually on a side face.

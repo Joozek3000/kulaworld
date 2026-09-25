@@ -22,8 +22,15 @@ The `race` room runs the shared sim at 20 Hz, handles the round phases and syncs
    - while playing, it holds forward and sends random turn/jump pulses every 300–1200 ms
    - it logs its keys and deaths
    - flag `--duration <sec>`
+   - retries the connection for up to 30 s (fixes the ECONNREFUSED on start from report 01), and on disconnect exits cleanly with a summary
 5. Integration test (`@colyseus/testing` or an in-process server): 2 clients join, ready, the round starts, one sends inputs, and its state changes in the schema within the expected ticks.
 6. Server logs: one line per phase change and per event. No per-tick spam.
+
+## Notes from the phase 02 review
+- The time limit counts from world tick 0 (DECISIONS). At countdown start, create a fresh world and add all non-spectating players so they appear at their spawns. Don't call `step` until `playing` starts, so the timer begins with the round.
+- When `world.result` becomes non-null, stop stepping immediately and switch to `results`. Don't rely on the sim freezing items.
+- The sim stores `pose` (current) + `to`. Map that to the schema's `from*` = `pose` and `to*` = `to`. For an Idle player, set to = from.
+- Dead players keep their out-of-bounds cell in `pose`. The client hides them by action, so leave the cell as-is.
 
 ## Constraints
 - The room doesn't implement rules. Anything rule-like belongs in shared.

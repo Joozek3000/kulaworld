@@ -22,6 +22,13 @@ Play the game in a browser: see the level, your ball and other balls moving smoo
 6. `ui/debug.ts`: F3 overlay per §11 plus the FPS.
 7. Minimal HUD placeholder: phase text, and a ready hint in the lobby (full HUD is phase 05).
 
+## Notes from the phase 03 review
+- `state.tick` is a **round clock**. It is 0 in the lobby, starts at -60 at countdown start, and runs continuously through playing and results. `estServerTick` must reset when `phase` changes, or when `tick` jumps backwards by more than 5. Otherwise it must never go backwards.
+- Render balls only in `countdown` / `playing` / `results`, and only for players with `spectating === false` and `action !== Dead`. In the lobby, the `from`/`to` fields are stale from the last round, so show the level with a slow orbit camera instead.
+- If the local player is spectating, orbit the level (or follow the leading player) instead of using the follow cam.
+- `PlayerS.color` is a hex string (`#e6194b`). Item ids are `key-N` and `exit`, with the kind in `ItemS.kind`.
+- Countdown and results time left = `(phaseEndTick - tick) / 20`.
+
 ## Constraints
 - The client never decides movement. It only renders `poseAt` from server state at `renderTick`.
 - 60 fps target on a mid laptop with 8 players on test-cube. Don't allocate per frame in the render loop.

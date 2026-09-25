@@ -25,10 +25,10 @@ async function waitFor<T>(what: string, fn: () => T, timeoutMs = 6000): Promise<
 }
 
 test('parseInput rejects malformed messages', () => {
-  expect(parseInput({ seq: 1, fwdHeld: true, turn: 0, jump: false })).toEqual({ seq: 1, fwdHeld: true, turn: 0, jump: false });
-  for (const bad of [null, 'x', 5, {}, { seq: 1.5, fwdHeld: true, turn: 0, jump: false },
-    { seq: 1, fwdHeld: 'yes', turn: 0, jump: false }, { seq: 1, fwdHeld: true, turn: 2, jump: false },
-    { seq: 1, fwdHeld: true, turn: 0 }]) {
+  expect(parseInput({ seq: 1, fwdHeld: true, turn: 0, jump: false, jumpHeld: false })).toEqual({ seq: 1, fwdHeld: true, turn: 0, jump: false, jumpHeld: false });
+  for (const bad of [null, 'x', 5, {}, { seq: 1.5, fwdHeld: true, turn: 0, jump: false, jumpHeld: false },
+    { seq: 1, fwdHeld: 'yes', turn: 0, jump: false, jumpHeld: false }, { seq: 1, fwdHeld: true, turn: 2, jump: false, jumpHeld: false },
+    { seq: 1, fwdHeld: true, turn: 0 }, { seq: 1, fwdHeld: true, turn: 0, jump: false }]) {
     expect(parseInput(bad)).toBe(null);
   }
 });
@@ -44,7 +44,7 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
   // Garbage and outside-playing inputs are dropped without crashing the room.
   a.send('input', { turn: 5 });
   a.send('input', 'nonsense');
-  a.send('input', { seq: 1, fwdHeld: true, turn: 0, jump: false });
+  a.send('input', { seq: 1, fwdHeld: true, turn: 0, jump: false, jumpHeld: false });
 
   a.send('ready');
   await waitFor('A ready', () => a.state.players.get(a.sessionId)?.ready);
@@ -59,14 +59,14 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
 
   await waitFor('playing', () => a.state.phase === 'playing', 5000);
   const sentAt = a.state.tick;
-  a.send('input', { seq: 2, fwdHeld: true, turn: 0, jump: false });
+  a.send('input', { seq: 2, fwdHeld: true, turn: 0, jump: false, jumpHeld: false });
   await waitFor('roll', () => me.action === Action.Roll);
   expect(me.startTick - sentAt).toBeLessThanOrEqual(4);
   expect([me.toX, me.toY, me.toZ]).toEqual([1, 1, 2]);
   expect(me.endTick - me.startTick).toBe(ROLL_TICKS);
   await waitFor('arrive', () => me.fromZ === 2);
 
-  a.send('input', { seq: 3, fwdHeld: false, turn: 0, jump: false });
+  a.send('input', { seq: 3, fwdHeld: false, turn: 0, jump: false, jumpHeld: false });
   await a.leave();
   await b.leave();
 });

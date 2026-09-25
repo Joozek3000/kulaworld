@@ -26,10 +26,10 @@ export function loadLevelFile(id: string): Level {
 /** Validates an `input` message at the trust boundary. */
 export function parseInput(m: unknown): Input | null {
   if (typeof m !== 'object' || m === null) return null;
-  const { seq, fwdHeld, turn, jump } = m as Record<string, unknown>;
-  if (!Number.isInteger(seq) || typeof fwdHeld !== 'boolean' || typeof jump !== 'boolean') return null;
+  const { seq, fwdHeld, turn, jump, jumpHeld } = m as Record<string, unknown>;
+  if (!Number.isInteger(seq) || typeof fwdHeld !== 'boolean' || typeof jump !== 'boolean' || typeof jumpHeld !== 'boolean') return null;
   if (turn !== -1 && turn !== 0 && turn !== 1) return null;
-  return { seq: seq as number, fwdHeld, turn, jump };
+  return { seq: seq as number, fwdHeld, turn, jump, jumpHeld };
 }
 
 export class RaceRoom extends Room<{ state: GameState }> {

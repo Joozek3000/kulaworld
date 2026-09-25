@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { Action, BALL_RADIUS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, type Dir, type Pose, type RenderPose } from '@kula/shared';
+import { Action, BALL_RADIUS, newRenderPose, perpendicular, poseAt, SPIN_PER_CELL, type Dir, type Level, type Pose, type RenderPose } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 
 /**
@@ -28,6 +28,14 @@ const bottomMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const tmpQ = new THREE.Quaternion(), spinQ = new THREE.Quaternion(), tmpUp = new THREE.Vector3();
 
+// Blob shadow: a dark disc on the first block below the ball (along its up axis), fading with height.
+const shadowGeo = new THREE.CircleGeometry(0.34, 24);
+const SHADOW_OPACITY = 0.45;
+const SHADOW_REACH = 3; // cells
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const ground = new THREE.Vector3(), axis = new THREE.Vector3(), probe = new THREE.Vector3();
+type SolidFn = (x: number, y: number, z: number) => boolean;
+
 class PlayerView {
   readonly segs: Seg[] = Array.from({ length: HISTORY }, newSeg);
   private head = 0;
@@ -42,6 +50,11 @@ class PlayerView {
   lateMax = 0;
   readonly pose: RenderPose = newRenderPose();
   readonly ball = new THREE.Group();
+  private readonly shadowMat = new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+  });
+  readonly shadow = new THREE.Mesh(shadowGeo, this.shadowMat);
   readonly label: CSS2DObject | null;
   shown = false;
   action: number = Action.Idle;
@@ -50,7 +63,8 @@ class PlayerView {
     const top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
     this.ball.add(new THREE.Mesh(topGeo, top), new THREE.Mesh(bottomGeo, bottomMat));
     this.ball.visible = false;
-    scene.add(this.ball);
+    this.shadow.visible = false;
+    scene.add(this.ball, this.shadow);
     if (local) {
       this.label = null;
     } else {
@@ -99,7 +113,7 @@ class PlayerView {
   }
 
   /** Returns true when the rendered segment changed. */
-  update(renderTick: number, show: boolean): boolean {
+  update(renderTick: number, show: boolean, solid: SolidFn | null): boolean {
     this.lastRenderTick = renderTick;
     const s = this.select(renderTick);
     const changed = s.serial !== this.renderedSerial;
@@ -116,6 +130,7 @@ class PlayerView {
     const valid = perpendicular(s.from.up, s.from.fwd) && perpendicular(s.to.up, s.to.fwd);
     this.shown = show && valid && s.action !== Action.Dead;
     this.ball.visible = this.shown;
+    if (!this.shown) this.shadow.visible = false;
     if (this.label) this.label.visible = this.shown;
     if (this.shown) {
       const len = s.endTick - s.startTick;
@@ -126,12 +141,38 @@ class PlayerView {
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
       this.ball.quaternion.copy(tmpQ.fromArray(this.pose.quat)).multiply(spinQ);
       this.label?.position.copy(this.ball.position).addScaledVector(tmpUp, 0.75);
+      // Mid-flip the up axis points into air over the edge: keep the last placement until the new face takes over.
+      if (!solid || (!this.placeShadow(solid) && s.action !== Action.Flip)) this.shadow.visible = false;
     }
     return changed;
   }
 
+  /** Projects the shadow along the dominant axis of up (diagonal mid-flip) onto the first block within reach. */
+  private placeShadow(solid: SolidFn): boolean {
+    const [ux, uy, uz] = this.pose.up;
+    const ax = Math.abs(ux), ay = Math.abs(uy), az = Math.abs(uz);
+    if (ax >= ay && ax >= az) axis.set(Math.sign(ux), 0, 0);
+    else if (ay >= az) axis.set(0, Math.sign(uy), 0);
+    else axis.set(0, 0, Math.sign(uz));
+    ground.fromArray(this.pose.position).addScaledVector(tmpUp, -this.pose.lift); // tmpUp = pose.up
+    for (let k = 1; k <= SHADOW_REACH; k++) {
+      probe.copy(ground).addScaledVector(axis, -k).round();
+      if (!solid(probe.x, probe.y, probe.z)) continue;
+      const surface = probe.dot(axis) + 0.5; // block face, as a coordinate along axis
+      const g = ground.dot(axis);
+      this.shadow.position.copy(ground).addScaledVector(axis, surface - g + 0.01);
+      this.shadow.quaternion.setFromUnitVectors(Z_AXIS, axis);
+      const above = g - surface - 0.5 + this.pose.lift; // 0 when resting
+      this.shadowMat.opacity = SHADOW_OPACITY * Math.max(0.15, 1 - above / 2.5);
+      this.shadow.visible = true;
+      return true;
+    }
+    return false;
+  }
+
   dispose(scene: THREE.Scene): void {
-    scene.remove(this.ball);
+    scene.remove(this.ball, this.shadow);
+    this.shadowMat.dispose();
     (this.ball.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.Material>).material.dispose();
     if (this.label) { scene.remove(this.label); this.label.element.remove(); }
   }
@@ -142,10 +183,15 @@ const ACTIVE = new Set(['countdown', 'playing', 'results']);
 export class PlayersView {
   private views = new Map<string, PlayerView>();
   private lastPhase = '';
+  private solid: SolidFn | null = null;
   /** Called when the local player's rendered action changes to a moving one (input→motion metric). */
   onLocalMotion: (() => void) | null = null;
 
   constructor(private scene: THREE.Scene) {}
+
+  setLevel(level: Level | null): void {
+    this.solid = level ? (x, y, z) => level.solid.has(`${x},${y},${z}`) : null;
+  }
 
   /** The local ball renders at localRenderTick (it may run closer to the server than the others). */
   update(state: GameState, renderTick: number, localId: string, localRenderTick = renderTick): void {
@@ -158,7 +204,7 @@ export class PlayersView {
       if (!v) this.views.set(id, (v = new PlayerView(p, id === localId, this.scene)));
       if (newRound) v.clear(); // last round's segments would otherwise sort before the new spawn
       v.track(p);
-      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating);
+      const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating, this.solid);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
     });
     for (const [id, v] of this.views) {

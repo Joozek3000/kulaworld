@@ -61,6 +61,7 @@ view.renderer.setAnimationLoop((now: number) => {
     level = findLevel(s.levelId);
     if (levelGroup) view.scene.remove(levelGroup);
     levelGroup = level ? buildLevel(level) : null;
+    players.setLevel(level);
     if (level && levelGroup) { view.scene.add(levelGroup); bounds = levelBounds(level); }
   }
 

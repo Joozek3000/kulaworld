@@ -25,16 +25,22 @@ function fairOrder(players: PlayerState[], tick: number): PlayerState[] {
   return [...players.slice(k), ...players.slice(0, k)];
 }
 
+/** A jump goes forward when `forward`, otherwise hops in place; a blocked forward jump hops. */
+const jumpCmds = (forward: boolean): Cmd[] => (forward ? ['jump', 'hop'] : ['hop']);
+
 /**
- * Candidate commands in priority order: the buffered pulse (jump beats turn at input time), then held forward.
- * A jump pulse jumps forward if fwd is held on this tick, otherwise hops in place; a blocked forward jump hops.
+ * Candidate commands in priority order (ARCHITECTURE §6):
+ * 1. buffered jump pulse or forward latch, 2. buffered turn, 3. jumpHeld, 4. fwdHeld.
+ * The latch is cleared at every decision.
  */
 function commands(p: PlayerState, tick: number): Cmd[] {
   if (p.pulse && tick - p.pulseTick > INPUT_BUFFER_TICKS) p.pulse = null;
   const cmds: Cmd[] = [];
-  if (p.pulse === 'jump') cmds.push(...(p.fwdHeld ? ['jump', 'hop'] as const : ['hop'] as const));
-  else if (p.pulse) cmds.push(p.pulse);
+  if (p.pulse === 'jump' || p.fwdLatch) cmds.push(...jumpCmds(p.fwdHeld || p.fwdLatch));
+  if (p.pulse === 'left' || p.pulse === 'right') cmds.push(p.pulse);
+  if (p.jumpHeld) cmds.push(...jumpCmds(p.fwdHeld));
   if (p.fwdHeld) cmds.push('fwd');
+  p.fwdLatch = false;
   return cmds;
 }
 

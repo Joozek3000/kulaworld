@@ -68,7 +68,7 @@ async function runBot(client: Client, name: string): Promise<Stats> {
       const r = wasPlaying ? Math.random() : 1;
       const hop = r < 0.1;
       const pulse = { turn: r < 0.1 ? 0 : r < 0.4 ? -1 : r < 0.7 ? 1 : 0, jump: hop || (r >= 0.7 && r < 0.9) } as const;
-      room.send('input', { seq: ++seq, fwdHeld: !hop, ...pulse });
+      room.send('input', { seq: ++seq, fwdHeld: !hop, jumpHeld: false, ...pulse });
       if (hop) stats.hops++;
       nextPulseAt = Date.now() + (hop ? 600 : between(300, 1200)); // after a hop, resume holding fwd soon
     }

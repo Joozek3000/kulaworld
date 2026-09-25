@@ -12,8 +12,8 @@ export type Action = (typeof Action)[keyof typeof Action];
 export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop';
 export type Pulse = 'left' | 'right' | 'jump';
 
-/** Client → server input message (ARCHITECTURE §6). `turn` and `jump` are pulses. */
-export interface Input { seq: number; fwdHeld: boolean; turn: -1 | 0 | 1; jump: boolean }
+/** Client → server input message (ARCHITECTURE §6). `turn` and `jump` are pulses; `jumpHeld` keeps bouncing. */
+export interface Input { seq: number; fwdHeld: boolean; turn: -1 | 0 | 1; jump: boolean; jumpHeld: boolean }
 
 export interface PlayerState {
   id: string;
@@ -26,6 +26,9 @@ export interface PlayerState {
   endTick: number;
   keys: number;
   fwdHeld: boolean;
+  jumpHeld: boolean;
+  /** Forward pressed during a Hop: the next decision is a forward jump even if W is released by then. */
+  fwdLatch: boolean;
   pulse: Pulse | null;
   pulseTick: number;
 }
@@ -82,7 +85,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
   const p: PlayerState = {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
     startTick: world.tick, endTick: world.tick + 1, keys: 0,
-    fwdHeld: false, pulse: null, pulseTick: 0,
+    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseTick: 0,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -96,7 +99,9 @@ export function removePlayer(world: World, id: string): void {
 export function setInput(world: World, id: string, input: Input): void {
   const p = world.players.find((q) => q.id === id);
   if (!p) return;
+  if (input.fwdHeld && !p.fwdHeld && p.action === Action.Hop) p.fwdLatch = true;
   p.fwdHeld = input.fwdHeld;
+  p.jumpHeld = input.jumpHeld;
   const pulse: Pulse | null = input.jump ? 'jump' : input.turn < 0 ? 'left' : input.turn > 0 ? 'right' : null;
   if (pulse) { p.pulse = pulse; p.pulseTick = world.tick; }
 }

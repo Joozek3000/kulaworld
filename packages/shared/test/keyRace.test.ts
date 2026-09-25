@@ -104,7 +104,7 @@ describe('determinism', () => {
       for (const id of ids) {
         if (rnd() < 0.3) {
           const r = rnd();
-          setInput(w, id, input({ fwdHeld: rnd() < 0.7, turn: r < 0.15 ? -1 : r < 0.3 ? 1 : 0, jump: r > 0.9 }));
+          setInput(w, id, input({ fwdHeld: rnd() < 0.7, turn: r < 0.15 ? -1 : r < 0.3 ? 1 : 0, jump: r > 0.9, jumpHeld: r > 0.95 }));
         }
       }
       step(w);

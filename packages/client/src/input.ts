@@ -7,25 +7,36 @@ export interface InputHooks {
   onFreeze(): void; // F8: freeze the rendered frame (screenshots)
 }
 
-/** Keyboard per ARCHITECTURE §11. Sends only on change; pulses once per physical press. */
+/**
+ * Keyboard per ARCHITECTURE §6/§11. Sends only on change. Turn and jump fire a pulse once per physical press;
+ * forward and jump are also held states (holding Space keeps bouncing).
+ */
 export function setupInput(net: Net, hooks: InputHooks): void {
   let fwdHeld = false;
+  let jumpHeld = false;
   let seq = 0;
-  const send = (turn: -1 | 0 | 1, jump: boolean) => net.sendInput({ seq: ++seq, fwdHeld, turn, jump });
+  const send = (turn: -1 | 0 | 1, jump: boolean) => net.sendInput({ seq: ++seq, fwdHeld, turn, jump, jumpHeld });
   const setFwd = (held: boolean) => {
     if (held === fwdHeld) return;
     fwdHeld = held;
     send(0, false);
     if (held) hooks.onPress();
   };
-  const pulse = (turn: -1 | 0 | 1, jump: boolean) => { send(turn, jump); hooks.onPress(); };
+  const setJump = (held: boolean) => {
+    if (held === jumpHeld) return;
+    jumpHeld = held;
+    send(0, held); // the press also carries the jump pulse, so a tap shorter than a tick still bounces once
+    if (held) hooks.onPress();
+  };
+  const turn = (t: -1 | 1) => { send(t, false); hooks.onPress(); };
+  const releaseAll = () => { setFwd(false); setJump(false); };
 
   addEventListener('keydown', (e) => {
     switch (e.code) {
       case 'KeyW': case 'ArrowUp': setFwd(true); break;
-      case 'KeyA': case 'ArrowLeft': if (!e.repeat) pulse(-1, false); break;
-      case 'KeyD': case 'ArrowRight': if (!e.repeat) pulse(1, false); break;
-      case 'Space': if (!e.repeat) pulse(0, true); break;
+      case 'KeyA': case 'ArrowLeft': if (!e.repeat) turn(-1); break;
+      case 'KeyD': case 'ArrowRight': if (!e.repeat) turn(1); break;
+      case 'Space': setJump(true); break;
       case 'KeyR': if (!e.repeat) net.sendReady(); break;
       case 'F3': if (!e.repeat) hooks.onDebug(); break;
       case 'F8': if (!e.repeat) hooks.onFreeze(); break;
@@ -36,7 +47,8 @@ export function setupInput(net: Net, hooks: InputHooks): void {
   });
   addEventListener('keyup', (e) => {
     if (e.code === 'KeyW' || e.code === 'ArrowUp') setFwd(false);
+    if (e.code === 'Space') setJump(false);
   });
-  addEventListener('blur', () => setFwd(false));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) setFwd(false); });
+  addEventListener('blur', releaseAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 }

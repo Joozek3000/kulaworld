@@ -13,4 +13,6 @@ Workflow:
 | 02 | Shared sim | All movement rules + Key Race logic, fully unit-tested, no network |
 | 03 | Server + bots | Authoritative room, phases, wander bots, latency sim |
 | 04 | Client | Rendered level, smooth players, follow camera, controls |
+| 04b | Jump fix + feel | Space = hop in place, W+Space = jump forward; ball sits on tiles |
+| 04c | Held jump | Hold Space = continuous bounce, W during bounce = forward jump, blob shadows |
 | 05 | Key Race complete | HUD, results, seek bots, first real playtest |

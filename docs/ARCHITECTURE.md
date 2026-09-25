@@ -74,7 +74,16 @@ Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is
 - `right: to.fwd = cross(F, U)`
 - Check: with U=+Y and F=+Z, right is −X. This matches a Three.js camera behind the ball looking along F. Unit-test it.
 
-**Jump** (pulse), up to 2 cells along F through the air:
+**Jump selection** (like the original, per Jakub's playtest):
+- Jump is a **held** button. While it's held, the ball keeps bouncing: each hop chains into the next with no idle tick.
+- A bounce is **forward** if forward is held when it starts, otherwise it's in place. So holding Space+W chains forward jumps.
+- **Forward latch:** pressing forward (rising edge) *during a Hop* makes the next action a forward jump immediately on landing, even if forward or jump is released before then. Forward pressed during a forward Jump doesn't latch; the ball just rolls on landing if W is still held.
+- A tap shorter than one tick still gives one bounce, via the jump pulse.
+- If a forward jump is blocked (A1 solid or taken), it falls back to a hop.
+
+**Hop**: the ball bounces up along U and lands on the same cell. `to` = the current pose, duration `JUMP_TICKS`. It reserves only its own cell. It's blocked if `solid(C + U)` (a low ceiling). During a hop the player isn't Idle, so it can't be pushed (§14). This is the counterplay to a push.
+
+**Jump forward** (pulse + fwdHeld), up to 2 cells along F through the air:
 1. `A1 = C + F`, `A2 = C + 2F`. If `solid(A1)` or `!free(A1)`, the jump is blocked.
 2. If `solid(A2)` or `!free(A2)`, it becomes a short jump with landing cell `L = A1`. Otherwise `L = A2`.
 3. Jump action: `to.cell = L`, same up/fwd, duration `JUMP_TICKS` (short jumps also use it).
@@ -105,7 +114,14 @@ Server tick is 20 Hz (50 ms). Constants live in `shared/constants.ts`:
 
 - The client sends an `input` message when input changes: `{ seq, fwdHeld: boolean, turn: -1|0|1, jump: boolean }`. `turn` and `jump` are pulses.
 - The server stores `fwdHeld` plus **one buffered pulse** (the latest wins). A pulse expires after `INPUT_BUFFER_TICKS`.
-- When a player is Idle on a tick (including the tick its previous action ended), it picks the next action in priority order: **buffered jump > buffered turn > fwdHeld**. So holding forward rolls continuously, and turning mid-roll takes effect the moment the roll ends.
+- Input also carries `jumpHeld: boolean`. The server derives the forward latch itself from the `fwdHeld` rising edge while the player is Hopping.
+- When a player is Idle on a tick (including the tick its previous action ended), it picks the next action in this priority order:
+  1. buffered jump pulse or forward latch → jump (forward if `fwdHeld || latch`, else hop)
+  2. buffered turn
+  3. `jumpHeld` → jump (forward if `fwdHeld`, else hop)
+  4. `fwdHeld` → roll
+
+  The latch is cleared at every decision. So holding forward rolls continuously, and turning mid-roll takes effect the moment the roll ends.
 - Actions can't be cancelled.
 
 ## 7. Tick order and reservations
@@ -174,6 +190,8 @@ Required test levels:
 - Turn: slerp the orientation around U.
 - Flip: the ball's centre sweeps a semicircle around the edge line `E = (C − U) + 0.5·U + 0.5·F`. The offset `(C − E)` rotates by 0→π about the axis `cross(U, F)`. Meanwhile the up vector rotates 90° from U to F (the camera follows the up vector, not the position arc). Unit-test the start, mid and end points.
 - Jump: lerp plus a parabola along U (peak 1.2 cells).
+- Hop: the same parabola along U with no lateral movement (peak 1.0 cell).
+- Ball contact: the ball's radius is 0.4 and the cell centre is 0.5 above the face, so render the ball offset by `−U·0.1` so it touches the surface.
 - Fall: linear along −U.
 - Dead: hidden.
 
@@ -221,7 +239,9 @@ Design this now so phase 02 doesn't make it hard to add later.
   - V is then `Stunned` for `STUN_TICKS` (8): no actions, but it can still be pushed.
 - If `A + F` is blocked, the push fails: P bounces back into its own cell and is stunned for `STUN_TICKS`. V is unaffected. This means pinning someone against a wall doesn't work.
 - Head-on: if two players start moves into each other's cell (or the same cell) on the same tick, both bounce and both are stunned. Nobody wins through tick order.
+- Held-jump bouncing must NOT give permanent push immunity. Decide in the PvP phase, e.g. a hopping ball is pushable during the first and last 2 ticks of each hop.
 - Pushing a moving player: blocked as in the MVP. A push only lands on a player who is standing still.
+- A hopping player can't be pushed, so timing a hop dodges a push. The pusher then rolls into a reserved cell and is blocked (no bounce, no stun).
 
 **Death with PvP**: a death drops 1 key, which goes back to its original spot. (This replaces the MVP rule that keys are kept.) If the victim was knocked within the last 60 ticks, the pusher gets a `knockout` event for credit.
 
