@@ -2,6 +2,7 @@
   "id": "race-01",
   "name": "Race 01: Four Islands",
   "version": 1,
+  "sky": ["#4f9ee8", "#d6efff"],
   "boxes": [
     { "min": [0, 0, 0], "max": [4, 0, 4] },
     { "min": [0, 0, 6], "max": [4, 0, 10] },

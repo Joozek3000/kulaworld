@@ -19,6 +19,7 @@ const LOCAL_INTERP_TICKS = Number(new URLSearchParams(location.search).get('loca
 const ACTIVE = new Set(['countdown', 'playing', 'results']);
 
 const view = createScene();
+view.setSky();
 const hud = createHud();
 const debug = createDebug();
 const players = new PlayersView(view.scene);
@@ -92,6 +93,7 @@ view.renderer.setAnimationLoop((now: number) => {
     levelView = level ? new LevelView(level) : null;
     players.setSolid(levelView?.solid ?? null);
     if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
+    view.setSky(level?.sky ?? undefined);
   }
 
   const renderTick = net.estServerTick - INTERP_TICKS;

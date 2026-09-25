@@ -15,6 +15,8 @@ export interface LevelJson {
   mode?: Mode;
   lives?: number;
   crumble?: Crumble;
+  /** Optional sky gradient, top and bottom colour ("#rrggbb"). Render-only. */
+  sky?: [string, string];
   blocks?: V3[];
   boxes?: { min: V3; max: V3; hollow?: boolean }[];
   spawns: { cell: V3; up: DirName; fwd: DirName }[];
@@ -35,6 +37,7 @@ export interface Level {
   /** Knockout: lives per player (0 in race). */
   lives: number;
   crumble: Crumble | null;
+  sky: [string, string] | null;
   solid: Set<string>; // cellKeys
   min: Vec3; // AABB of all blocks, inclusive
   max: Vec3;

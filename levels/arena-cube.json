@@ -1,0 +1,20 @@
+{
+  "id": "arena-cube",
+  "name": "Arena Cube",
+  "version": 1,
+  "mode": "knockout",
+  "lives": 3,
+  "timeLimitSec": 180,
+  "crumble": { "startSec": 45, "intervalSec": 10, "warnSec": 2 },
+  "boxes": [{ "min": [0, 0, 0], "max": [4, 4, 4] }],
+  "spawns": [
+    { "cell": [5, 2, 1], "up": "+X", "fwd": "+Z" },
+    { "cell": [5, 2, 3], "up": "+X", "fwd": "-Z" },
+    { "cell": [-1, 2, 1], "up": "-X", "fwd": "+Z" },
+    { "cell": [-1, 2, 3], "up": "-X", "fwd": "-Z" },
+    { "cell": [1, 2, 5], "up": "+Z", "fwd": "+X" },
+    { "cell": [3, 2, 5], "up": "+Z", "fwd": "-X" },
+    { "cell": [1, 2, -1], "up": "-Z", "fwd": "+X" },
+    { "cell": [3, 2, -1], "up": "-Z", "fwd": "-X" }
+  ]
+}

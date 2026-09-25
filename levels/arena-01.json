@@ -6,6 +6,7 @@
   "lives": 3,
   "timeLimitSec": 180,
   "crumble": { "startSec": 45, "intervalSec": 10, "warnSec": 2 },
+  "sky": ["#2b1d4f", "#d9738c"],
   "boxes": [
     { "min": [0, 0, 0], "max": [8, 0, 1] },
     { "min": [0, 0, 2], "max": [1, 0, 2] },

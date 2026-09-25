@@ -169,7 +169,8 @@ const samePose = (a: Pose, b: Pose) => cellKey(a.cell) === cellKey(b.cell) && a.
  * whenever an opponent ahead would be knocked into the void.
  * In knockout, seek hunts like bully but only pushes into the void, and every BFS bot first steps off a warned tile.
  * bully: BFS to a cell beside the nearest opponent, turns to face it and pushes whenever it's pushable. An opponent
- * it can't push for BULLY_PATIENCE_MS (e.g. a wall behind it) is ignored for BULLY_IGNORE_MS.
+ * it can't push for BULLY_PATIENCE_MS (e.g. a wall behind it) is ignored for BULLY_IGNORE_MS. A hunter with no
+ * opponent left to reach makes a random move instead of idling.
  * Executes one step at a time: press, then release once the action has started (holding fwd would chain rolls).
  * Replans when the target disappears, the pose drifts from the plan, or a move is blocked twice.
  */
@@ -270,7 +271,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       }
       if (adj) { // facing it, but it isn't pushable (high hop, or something behind it): wait, then give up on it
         if (facing?.id !== adj.id) facing = { id: adj.id, since: Date.now() };
-        else if (Date.now() - facing.since > BULLY_PATIENCE_MS) ignored.set(adj.id, Date.now() + BULLY_IGNORE_MS);
+        else if (Date.now() - facing.since > BULLY_PATIENCE_MS) { ignored.set(adj.id, Date.now() + BULLY_IGNORE_MS); facing = null; }
         return;
       }
       facing = null;
@@ -284,7 +285,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     const onPlan = path.length > 0 && goals.has(target) && expected !== null && samePose(pose, expected);
     if (!onPlan) {
       const found = goals.size ? findPath(world, pose, goals) : null;
-      if (!found?.length) { replan(); return; }
+      if (!found?.length) {
+        replan();
+        // A hunter with nobody to reach (all ignored, e.g. an opponent tucked where every push bounces) roams instead
+        // of idling: two bots otherwise wait beside each other in such a pocket until the crumble breaks it up.
+        if (hunter && !unsafe) press(Math.random() < 0.5 ? 'fwd' : Math.random() < 0.5 ? 'left' : 'right', p.startTick, p.action, s.tick, true);
+        return;
+      }
       path = found;
       target = cellKey(found[found.length - 1].to.cell);
       expected = pose;

@@ -45,6 +45,7 @@ describe('validateLevel', () => {
     ['duplicate item cells', (j) => { j.exit!.cell = [8, 1, 0]; }, /exit .* shares its cell with key 0/],
     ['not enough keys', (j) => { j.keysRequired = 2; }, /keysRequired 2 > 1 keys/],
     ['no blocks', (j) => { j.blocks = []; }, /no blocks/],
+    ['bad sky colour', (j) => { j.sky = ['#123456', 'blue']; }, /sky must be two/],
   ];
   const knockout = (): LevelJson => ({
     ...valid(), mode: 'knockout', lives: 3, crumble: { startSec: 45, intervalSec: 10, warnSec: 2 },

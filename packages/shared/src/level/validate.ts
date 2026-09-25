@@ -23,6 +23,9 @@ export function validateLevel(level: Level): string[] {
     if (!perpendicular(s.up, s.fwd)) errors.push(`spawn ${i}: fwd ${dirName(s.fwd)} is not perpendicular to up ${dirName(s.up)}`);
   });
   if (level.spawns.length < 4) errors.push(`needs at least 4 spawns, has ${level.spawns.length}`);
+  if (level.sky && !(level.sky.length === 2 && level.sky.every((c) => /^#[0-9a-fA-F]{6}$/.test(c)))) {
+    errors.push(`sky must be two "#rrggbb" colours, got ${JSON.stringify(level.sky)}`);
+  }
   if (level.mode === 'knockout') {
     if (level.keys.length || level.exit || level.keysRequired) errors.push('knockout level must not have keys, an exit or keysRequired');
     if (!Number.isInteger(level.lives) || level.lives < 1) errors.push(`knockout lives must be a positive integer, got ${level.lives}`);

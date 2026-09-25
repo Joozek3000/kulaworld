@@ -32,6 +32,7 @@ export function loadLevel(json: LevelJson): Level {
     mode: json.mode ?? 'race',
     lives: json.lives ?? 0,
     crumble: json.crumble ?? null,
+    sky: json.sky ?? null,
     solid,
     min,
     max,

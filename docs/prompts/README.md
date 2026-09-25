@@ -19,3 +19,4 @@ Workflow:
 | 05b | Air turns | Left/right mid-bounce turns instantly; spawn shuffle for bot fairness |
 | 06 | Push (PvP) | Roll into players to knock them; deaths drop a key; bully bots |
 | 07 | Knockout | Stagger fix (no chain pushes), lives, crumbling arenas, mixed-mode rotation |
+| 07b | Kula arena | Sky Cross arena (beams, ladder, gap, lower pad), finer crumble bands, gradient sky |

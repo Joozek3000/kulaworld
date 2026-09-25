@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, cellKey, createWorld, findPath, loadLevel, resultPose, setInput, step,
-  type Cmd, type PathStep, type Pose, type World,
+  Action, addPlayer, cellKey, createWorld, dirVec, findPath, loadLevel, resultPose, setInput, step,
+  type Cmd, type Dir, type PathStep, type Pose, type World,
 } from '../src/index.ts';
 import { inOrder, input, levelFiles, readLevelJson, rules } from './util.ts';
 
@@ -79,6 +79,52 @@ describe('every race level: all keys and the exit are reachable from every spawn
       for (const t of [...w.level.keys, w.level.exit!]) {
         expect(findPath(w, s, new Set([cellKey(t.cell)])), `${file}: spawn ${cellKey(s.cell)} → ${cellKey(t.cell)}`).not.toBe(null);
       }
+    }
+  });
+});
+
+/** Every (cell, up) a ball can stand on: an empty cell with a block at cell - up. */
+function standable(w: World): Set<string> {
+  const out = new Set<string>();
+  for (const key of w.level.solid) {
+    const [x, y, z] = key.split(',').map(Number);
+    for (let d = 0 as Dir; d < 6; d++) {
+      const v = dirVec(d), cell = `${x + v.x},${y + v.y},${z + v.z}`;
+      if (!w.level.solid.has(cell)) out.add(`${cell}|${d}`);
+    }
+  }
+  return out;
+}
+
+/** (cell, up) of every pose findPath can reach from `from` (the same moves and search, run to exhaustion). */
+function reachable(w: World, from: Pose): Set<string> {
+  const seen = new Set([`${cellKey(from.cell)}|${from.up}|${from.fwd}`]);
+  const out = new Set<string>();
+  for (let frontier = [from]; frontier.length;) {
+    const next: Pose[] = [];
+    for (const pose of frontier) {
+      out.add(`${cellKey(pose.cell)}|${pose.up}`);
+      for (const cmd of MOVES) {
+        const to = resultPose(w, pose, cmd);
+        const k = to && `${cellKey(to.cell)}|${to.up}|${to.fwd}`;
+        if (to && !seen.has(k!)) { seen.add(k!); next.push(to); }
+      }
+    }
+    frontier = next;
+  }
+  return out;
+}
+
+describe('every knockout level: spawns reach each other and >= 90% of standable surfaces', () => {
+  test.each(levelFiles().filter((f) => readLevelJson(f).mode === 'knockout'))('%s', (file) => {
+    const w = worldOf(file);
+    const all = standable(w);
+    for (const s of w.level.spawns) {
+      for (const t of w.level.spawns) {
+        expect(findPath(w, s, new Set([cellKey(t.cell)])), `${file}: spawn ${cellKey(s.cell)} → ${cellKey(t.cell)}`).not.toBe(null);
+      }
+      const got = [...reachable(w, s)].filter((k) => all.has(k)).length;
+      expect(got / all.size, `${file}: from ${cellKey(s.cell)}, ${got}/${all.size}`).toBeGreaterThanOrEqual(0.9);
     }
   });
 });

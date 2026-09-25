@@ -1,7 +1,28 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const BG = 0x1a1d2b;
+const DEFAULT_SKY: [string, string] = ['#1a1d2b', '#1a1d2b'];
+
+/** Vertical two-colour gradient on an inverted sphere that rides with the camera (world +Y is "top"). */
+function createSky() {
+  const uniforms = { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() } };
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    side: THREE.BackSide,
+    depthWrite: false,
+    vertexShader: `varying float h;
+      void main() { h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 bottom; varying float h;
+      void main() {
+        gl_FragColor = vec4(mix(bottom, top, smoothstep(-0.8, 0.8, h)), 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(150, 32, 16), material);
+  mesh.renderOrder = -1;
+  mesh.frustumCulled = false;
+  return { mesh, uniforms };
+}
 
 export function createScene() {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -13,8 +34,10 @@ export function createScene() {
   document.body.appendChild(labels.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(BG);
-  scene.fog = new THREE.Fog(BG, 18, 50);
+  const sky = createSky();
+  scene.add(sky.mesh);
+  const fog = new THREE.Fog(0, 18, 50);
+  scene.fog = fog;
 
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
   scene.add(camera);
@@ -35,7 +58,14 @@ export function createScene() {
 
   return {
     renderer, scene, camera,
+    /** Per-level sky (§9 `sky`); the fog takes a faint tint between the two colours to match. */
+    setSky([top, bottom]: [string, string] = DEFAULT_SKY) {
+      sky.uniforms.top.value.set(top);
+      sky.uniforms.bottom.value.set(bottom);
+      fog.color.copy(sky.uniforms.bottom.value).lerp(sky.uniforms.top.value, 0.35);
+    },
     render() {
+      sky.mesh.position.copy(camera.position);
       renderer.render(scene, camera);
       labels.render(scene, camera);
     },

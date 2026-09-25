@@ -162,6 +162,7 @@ Each tick, `step(world, inputs)` in shared runs:
 }
 ```
 
+- Optional `"sky": ["#top", "#bottom"]`: the client's gradient sky colours (render-only, phase 07b).
 - `blocks` and `boxes` are merged. The loader expands boxes into a `Set<cellKey>`.
 - `validateLevel()` returns a list of errors. It checks that:
   - spawn, key and exit cells are empty and `solid(cell − up)`
@@ -293,7 +294,7 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 
 **Crumble**
 - The world gets an overlay `removed: Set<cellKey>`. `isSolid(world, v) = level.solid.has(v) && !removed.has(v)`. Every sim/BFS/validation path that asks "is there ground" must use the world version.
-- Crumble order: blocks sorted by distance from the level's bounding-box centre, furthest first, grouped into bands of equal rounded distance. Every `intervalSec` after `startSec`, the next band is removed.
+- Crumble order: blocks grouped by exact squared distance from the level's bounding-box centre, furthest first. Consecutive groups are then merged (outside in) until each band has at least 4 blocks; a short leftover core joins the band before it (phase 07b). Every `intervalSec` after `startSec`, the next band is removed.
 - `warnSec` before removal, a band is marked `warning`, which is synced and rendered as shaking and red blinking.
 - A block is never removed if that would leave fewer blocks than 2× the number of alive players. Stop crumbling there.
 - A player standing on a removed block starts a Fall on the next tick. Mid-action players are checked when the action finishes (existing landing logic).
@@ -302,5 +303,6 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 
 **Arenas**
 - `arena-01`: a 9×9×1 plate with 4 single-cell holes and 8 spawns around the edge. Flat brawling.
-- `arena-02`: a solid 5×5×5 cube with spawns on 4 faces. Fights across faces, and flips as escapes. Corners and edges crumble first.
+- `arena-02` "Sky Cross" (phase 07b): a 5×5 plate with four different arms (beam to a pad, a beam with a 1-cell jump gap to a pad, a ladder of two rails, and a beam that wraps down a hanging column to a lower pad). 8 spawns, 4 on top and 4 underneath. Pads crumble first, the plate core last.
+- `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the default rotation.
 
