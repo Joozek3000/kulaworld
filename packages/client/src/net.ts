@@ -1,5 +1,5 @@
 import { Client, type Room } from '@colyseus/sdk';
-import type { Input } from '@kula/shared';
+import type { Input, SimEvent } from '@kula/shared';
 
 /** Client-side view of the server schema (packages/server/src/schema/State.ts). */
 export interface PlayerS {
@@ -33,6 +33,7 @@ export class Net {
   private reset = true;
   private patches = 0;
   private patchWindow = 0;
+  private eventListeners: ((e: SimEvent) => void)[] = [];
 
   constructor(readonly room: Room) {
     room.onStateChange((s: GameState) => {
@@ -42,7 +43,7 @@ export class Net {
       this.lastAt = performance.now();
       this.patches++;
     });
-    room.onMessage('event', () => {}); // sim events: FX/sounds later
+    room.onMessage('event', (e: SimEvent) => { for (const cb of this.eventListeners) cb(e); });
     // Leave promptly on navigation; a page kept in the back/forward cache would otherwise hold its seat.
     addEventListener('pagehide', () => { void room.leave(); });
     const ping = () => room.ping((ms) => { this.ping = ms; });
@@ -71,6 +72,9 @@ export class Net {
       this.patchWindow = now;
     }
   }
+
+  /** Sim events broadcast by the server (key, death, respawn, win). */
+  onEvent(cb: (e: SimEvent) => void): void { this.eventListeners.push(cb); }
 
   sendInput(input: Input): void { this.room.send('input', input); }
   sendReady(): void { this.room.send('ready'); }

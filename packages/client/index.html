@@ -5,12 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kulaworld</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2b; }
+    :root { --fs: clamp(13px, 0.95vw + 4px, 20px); --panel: #0b0e1acc; --ok: #3ddc6f; --warn: #ff6b5b; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2b; color: #fff; font: var(--fs) system-ui, sans-serif; }
     canvas { display: block; }
+    [hidden] { display: none !important; }
     .labels { position: fixed; top: 0; left: 0; pointer-events: none; }
-    .label { color: #fff; font: 12px system-ui, sans-serif; background: #0009; padding: 1px 6px; border-radius: 8px; border: 2px solid; }
-    #hud { position: fixed; top: 8px; left: 8px; color: #fff; font: 15px system-ui, sans-serif; background: #0008; padding: 6px 10px; border-radius: 6px; }
-    #debug { position: fixed; top: 8px; right: 8px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
+    .label { color: #fff; font-size: 0.75em; background: #0009; padding: 1px 6px; border-radius: 8px; border: 2px solid; }
+    .dot { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; margin-right: 0.5em; vertical-align: -0.05em; box-shadow: 0 0 0 2px #0006; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .dim { color: #9aa0b8; }
+    .muted { color: #ffb347; }
+    kbd { background: #fff2; border: 1px solid #fff5; border-radius: 4px; padding: 0 0.35em; font: inherit; }
+
+    #hud-top, #hud-board, #hud-status, #hud-center .panel { background: var(--panel); border-radius: 10px; backdrop-filter: blur(4px); }
+    #hud-top { position: fixed; top: 12px; left: 12px; padding: 0.4em 0.8em; font-size: 1.05em; }
+    #hud-top .timer { font-variant-numeric: tabular-nums; font-size: 1.5em; font-weight: 700; }
+    #hud-top .timer.warn { color: var(--warn); }
+    #hud-board { position: fixed; top: 12px; right: 12px; padding: 0.4em 0.8em; min-width: 12em; }
+    #hud-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 0.5em 1.1em; font-size: 1.1em; white-space: nowrap; }
+    #hud-center { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; }
+    #hud-center .panel { padding: 1em 1.6em; min-width: 18em; max-width: 90vw; text-align: center; }
+    #hud-center h1 { margin: 0 0 0.2em; font-size: 2em; }
+    #hud-center .sub { color: #c8cce0; margin-bottom: 0.6em; }
+    #hud-center .hint { margin-top: 0.7em; font-size: 1.1em; }
+    #hud-center .big { font-size: clamp(90px, 18vh, 220px); font-weight: 800; text-shadow: 0 4px 24px #000a; }
+    .list { list-style: none; margin: 0; padding: 0; text-align: left; }
+    .list li { display: flex; align-items: center; gap: 0.2em; padding: 0.15em 0; }
+    .list li.me .name { font-weight: 700; }
+    .list .name { flex: 1; }
+    .list .val { margin-left: 1.2em; font-variant-numeric: tabular-nums; }
+    #hud-toasts { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+    .toast { background: var(--panel); padding: 0.35em 0.9em; border-radius: 8px; transition: opacity 0.4s; }
+    .toast.out { opacity: 0; }
+    #debug { position: fixed; bottom: 12px; right: 12px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
   </style>
 </head>
 <body>

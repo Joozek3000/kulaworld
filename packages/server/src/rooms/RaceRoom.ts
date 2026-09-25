@@ -23,6 +23,9 @@ export function loadLevelFile(id: string): Level {
   return level;
 }
 
+/** LEVEL may be a comma list (e.g. "race-01,test-cube"); rooms rotate through it each round. */
+export const levelIds = (): string[] => config.level.split(',').map((s) => s.trim()).filter(Boolean);
+
 /** Validates an `input` message at the trust boundary. */
 export function parseInput(m: unknown): Input | null {
   if (typeof m !== 'object' || m === null) return null;
@@ -35,6 +38,8 @@ export function parseInput(m: unknown): Input | null {
 export class RaceRoom extends Room<{ state: GameState }> {
   maxClients = 8;
   state = new GameState();
+  /** Levels from LEVEL (comma list), rotated each round. */
+  private levels: Level[] = [];
   private level!: Level;
   private world: World | null = null;
   private round = 0;
@@ -43,7 +48,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private warned = new Set<string>();
 
   onCreate() {
-    this.level = loadLevelFile(config.level);
+    this.levels = levelIds().map(loadLevelFile);
+    this.level = this.levels[0];
     this.state.levelId = this.level.id;
     this.onMessage('input', (client, msg) => this.onInput(client, msg));
     this.onMessage('ready', (client) => this.onReady(client));
@@ -137,6 +143,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
         break;
       case 'countdown': {
         // Fresh world with everyone at their spawns; not stepped until playing, so the timer starts with the round.
+        this.level = this.levels[this.round % this.levels.length];
+        s.levelId = this.level.id;
         const world = createWorld(this.level, ++this.round);
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;

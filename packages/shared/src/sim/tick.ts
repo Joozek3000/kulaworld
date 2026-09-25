@@ -1,8 +1,7 @@
-import { INPUT_BUFFER_TICKS, KILL_MARGIN, RESPAWN_TICKS } from '../constants.ts';
-import type { Vec3 } from '../vec.ts';
+import { INPUT_BUFFER_TICKS, RESPAWN_TICKS } from '../constants.ts';
 import { previewAction, startAction, startFall } from './actions.ts';
 import { checkTimeout, onLand } from './keyRace.ts';
-import { Action, reservations, reserve, trySpawn, type Cmd, type PlayerState, type SimEvent, type World } from './world.ts';
+import { Action, outOfBounds, reservations, reserve, trySpawn, type Cmd, type PlayerState, type SimEvent, type World } from './world.ts';
 
 /** Advances the world by one tick (ARCHITECTURE §7). Returns the events of this tick. */
 export function step(world: World): SimEvent[] {
@@ -10,14 +9,19 @@ export function step(world: World): SimEvent[] {
   const events: SimEvent[] = [];
   const order = fairOrder(world.players, tick);
 
+  // Buffered pulses age only while grounded, so a turn pressed early in a jump still applies on landing.
+  for (const p of order) if (p.pulse && !AIRBORNE.has(p.action)) p.pulseAge++;
+
   for (const p of order) if (p.action !== Action.Idle && p.endTick === tick) finishAction(world, p, events);
 
-  const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(p, tick) }));
+  const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(p) }));
   resolveMoves(world, intents);
 
   checkTimeout(world, events);
   return events;
 }
+
+const AIRBORNE: ReadonlySet<Action> = new Set([Action.Hop, Action.Jump, Action.Fall]);
 
 /** Join order rotated by tick % playerCount so no player always wins contested cells. */
 function fairOrder(players: PlayerState[], tick: number): PlayerState[] {
@@ -33,8 +37,8 @@ const jumpCmds = (forward: boolean): Cmd[] => (forward ? ['jump', 'hop'] : ['hop
  * 1. buffered jump pulse or forward latch, 2. buffered turn, 3. jumpHeld, 4. fwdHeld.
  * The latch is cleared at every decision.
  */
-function commands(p: PlayerState, tick: number): Cmd[] {
-  if (p.pulse && tick - p.pulseTick > INPUT_BUFFER_TICKS) p.pulse = null;
+function commands(p: PlayerState): Cmd[] {
+  if (p.pulse && p.pulseAge > INPUT_BUFFER_TICKS) p.pulse = null;
   const cmds: Cmd[] = [];
   if (p.pulse === 'jump' || p.fwdLatch) cmds.push(...jumpCmds(p.fwdHeld || p.fwdLatch));
   if (p.pulse === 'left' || p.pulse === 'right') cmds.push(p.pulse);
@@ -74,7 +78,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   p.pose = p.to;
   p.action = Action.Idle;
   if (finished === Action.Turn) return;
-  if (finished === Action.Fall && outOfBounds(world, p.pose.cell)) {
+  if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
     p.action = Action.Dead;
     p.startTick = tick;
     p.endTick = tick + RESPAWN_TICKS;
@@ -83,9 +87,4 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   }
   if ((finished === Action.Jump || finished === Action.Fall) && startFall(world, p, tick)) return;
   onLand(world, p, events);
-}
-
-function outOfBounds(world: World, c: Vec3): boolean {
-  const { min, max } = world.level, m = KILL_MARGIN;
-  return c.x < min.x - m || c.y < min.y - m || c.z < min.z - m || c.x > max.x + m || c.y > max.y + m || c.z > max.z + m;
 }

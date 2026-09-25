@@ -58,10 +58,13 @@ class PlayerView {
   readonly label: CSS2DObject | null;
   shown = false;
   action: number = Action.Idle;
+  readonly color: string;
+  private readonly top: THREE.MeshStandardMaterial;
 
   constructor(p: PlayerS, local: boolean, scene: THREE.Scene) {
-    const top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
-    this.ball.add(new THREE.Mesh(topGeo, top), new THREE.Mesh(bottomGeo, bottomMat));
+    this.color = p.color;
+    this.top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+    this.ball.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, bottomMat));
     this.ball.visible = false;
     this.shadow.visible = false;
     scene.add(this.ball, this.shadow);
@@ -112,8 +115,18 @@ class PlayerView {
     return this.newest;
   }
 
+/** Winner glow: pulses the coloured half. */
+  highlight(on: boolean, timeSec: number): void {
+    if (on) this.top.emissive.set(this.color).multiplyScalar(0.35 + 0.25 * Math.sin(timeSec * 8));
+    else this.top.emissive.setRGB(0, 0, 0);
+  }
+
+  /** True when the ball was on screen last frame and its rendered action just became Dead. */
+  vanished = false;
+
   /** Returns true when the rendered segment changed. */
   update(renderTick: number, show: boolean, solid: SolidFn | null): boolean {
+    const wasShown = this.shown;
     this.lastRenderTick = renderTick;
     const s = this.select(renderTick);
     const changed = s.serial !== this.renderedSerial;
@@ -129,6 +142,7 @@ class PlayerView {
     // Schema defaults (lobby, before the first round) are not a valid pose: up = fwd = +X.
     const valid = perpendicular(s.from.up, s.from.fwd) && perpendicular(s.to.up, s.to.fwd);
     this.shown = show && valid && s.action !== Action.Dead;
+    this.vanished = wasShown && show && s.action === Action.Dead;
     this.ball.visible = this.shown;
     if (!this.shown) this.shadow.visible = false;
     if (this.label) this.label.visible = this.shown;
@@ -184,6 +198,8 @@ export class PlayersView {
   private views = new Map<string, PlayerView>();
   private lastPhase = '';
   private solid: SolidFn | null = null;
+  /** Called with the last on-screen position when a ball dies (renders its fade at the fall point). */
+  onVanish: ((at: THREE.Vector3, color: string) => void) | null = null;
   /** Called when the local player's rendered action changes to a moving one (input→motion metric). */
   onLocalMotion: (() => void) | null = null;
 
@@ -206,6 +222,7 @@ export class PlayersView {
       v.track(p);
       const changed = v.update(id === localId ? localRenderTick : renderTick, active && !p.spectating, this.solid);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
+      if (v.vanished) this.onVanish?.(v.ball.position, v.color);
     });
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
@@ -216,6 +233,11 @@ export class PlayersView {
   localPose(localId: string): RenderPose | null {
     const v = this.views.get(localId);
     return v?.shown ? v.pose : null;
+  }
+
+  /** Glow the winner during results (id '' = nobody). */
+  highlight(winnerId: string, timeSec: number): void {
+    for (const [id, v] of this.views) v.highlight(id === winnerId, timeSec);
   }
 
   localLate(localId: string): { count: number; max: number } {

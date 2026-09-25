@@ -5,6 +5,7 @@ export interface InputHooks {
   onDebug(): void; // F3
   onScreenshot(): void; // F9
   onFreeze(): void; // F8: freeze the rendered frame (screenshots)
+  onMute(): void; // M
 }
 
 /**
@@ -38,6 +39,7 @@ export function setupInput(net: Net, hooks: InputHooks): void {
       case 'KeyD': case 'ArrowRight': if (!e.repeat) turn(1); break;
       case 'Space': setJump(true); break;
       case 'KeyR': if (!e.repeat) net.sendReady(); break;
+      case 'KeyM': if (!e.repeat) hooks.onMute(); break;
       case 'F3': if (!e.repeat) hooks.onDebug(); break;
       case 'F8': if (!e.repeat) hooks.onFreeze(); break;
       case 'F9': if (!e.repeat) hooks.onScreenshot(); break;

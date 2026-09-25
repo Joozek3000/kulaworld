@@ -1,4 +1,4 @@
-import { TICK_RATE } from '../constants.ts';
+import { KILL_MARGIN, TICK_RATE } from '../constants.ts';
 import { dirVec } from '../dir.ts';
 import { isSolid } from '../level/load.ts';
 import type { Level, Pose } from '../level/types.ts';
@@ -30,7 +30,8 @@ export interface PlayerState {
   /** Forward pressed during a Hop: the next decision is a forward jump even if W is released by then. */
   fwdLatch: boolean;
   pulse: Pulse | null;
-  pulseTick: number;
+  /** Ticks the buffered pulse has waited, not counting airborne ticks (Hop/Jump/Fall). */
+  pulseAge: number;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -85,7 +86,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
   const p: PlayerState = {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
     startTick: world.tick, endTick: world.tick + 1, keys: 0,
-    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseTick: 0,
+    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -103,7 +104,7 @@ export function setInput(world: World, id: string, input: Input): void {
   p.fwdHeld = input.fwdHeld;
   p.jumpHeld = input.jumpHeld;
   const pulse: Pulse | null = input.jump ? 'jump' : input.turn < 0 ? 'left' : input.turn > 0 ? 'right' : null;
-  if (pulse) { p.pulse = pulse; p.pulseTick = world.tick; }
+  if (pulse) { p.pulse = pulse; p.pulseAge = 0; }
 }
 
 /** Cells a player occupies: its cell plus the target (and pass-through) cells of its running action. */
@@ -115,6 +116,12 @@ export function occupiedCells(p: PlayerState): Vec3[] {
     case Action.Flip: case Action.Jump: return [cell, add(cell, dirVec(fwd)), p.to.cell];
     default: return [cell, p.to.cell];
   }
+}
+
+/** Outside the level's AABB expanded by KILL_MARGIN: a falling player here dies. */
+export function outOfBounds(level: Level, c: Vec3): boolean {
+  const { min, max } = level, m = KILL_MARGIN;
+  return c.x < min.x - m || c.y < min.y - m || c.z < min.z - m || c.x > max.x + m || c.y > max.y + m || c.z > max.z + m;
 }
 
 /** cellKey → id of the player holding it. Derived each tick, never stored in the world. */

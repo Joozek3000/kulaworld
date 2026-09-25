@@ -1,9 +1,9 @@
 import { defineServer, defineRoom } from 'colyseus';
 import { VERSION } from '@kula/shared';
 import { config } from './config.ts';
-import { loadLevelFile, RaceRoom } from './rooms/RaceRoom.ts';
+import { levelIds, loadLevelFile, RaceRoom } from './rooms/RaceRoom.ts';
 
-loadLevelFile(config.level); // fail fast on an invalid level
+levelIds().forEach(loadLevelFile); // fail fast on an invalid level
 
 const server = defineServer({ rooms: { race: defineRoom(RaceRoom) } });
 if (config.latencyMs) server.simulateLatency(config.latencyMs);
