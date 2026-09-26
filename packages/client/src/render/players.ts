@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, HOP_HEIGHT, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
+  Action, BALL_RADIUS, dirVec, HOP_HEIGHT, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
   SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
@@ -13,7 +13,7 @@ import { applySquash, Spring } from './squash.ts';
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
  * `hit` is push contact (at the victim), `pop` a death.
  */
-export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'fall' | 'hit' | 'boing' | 'pop';
+export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -70,7 +70,14 @@ const SQUASH = {
   bounce: -0.3, // the pusher against the victim on a failed push
   wobble: 0.12, // stunned
   roll: -0.03, // pulse at each tile start
+  stomp: -0.5, // a stomped victim, flattened under the attacker before it shoots out (§16)
 };
+/** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
+const STOMP_HOLD = 0.4;
+
+// Landing marker (§16): a ring on a forward jump's landing cell, in the jumper's colour; red when a ball is on it.
+const markerGeo = new THREE.TorusGeometry(0.46, 0.06, 8, 32); // wider than a ball (0.4), so it shows around one
+const MARKER_RED = new THREE.Color(0xff2a2a);
 const ANTICIPATION_TICKS = 1;
 /** Prediction (§17): a corrected or re-sourced local ball blends from where it was drawn over this long. */
 const BLEND_MS = 100;
@@ -104,6 +111,12 @@ class PlayerView {
   /** A bounce started on screen; the hard squash + boing fire at the lunge's peak. */
   private boingPending = false;
   readonly local: boolean;
+  /** Knock segments (serials) that are stomps, not pushes: set by PlayersView each frame. */
+  stompSerials = new Set<number>();
+  /** Landing marker, and the cell it marks ('' when hidden). */
+  private readonly markerMat: THREE.MeshBasicMaterial;
+  private readonly marker: THREE.Mesh;
+  markerCell = '';
   /** The segment on screen, and the tick it rendered at (last update). */
   current: Seg = newSeg();
   get renderTickNow(): number { return this.lastRenderTick; }
@@ -139,6 +152,10 @@ class PlayerView {
     this.color = p.color;
     this.top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
     this.local = local;
+    this.markerMat = new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
+    this.marker = new THREE.Mesh(markerGeo, this.markerMat);
+    this.marker.visible = false;
+    scene.add(this.marker);
     this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
     this.ball.visible = false;
@@ -236,6 +253,7 @@ class PlayerView {
     this.shown = show && valid && s.action !== Action.Dead;
     this.vanished = wasShown && show && s.action === Action.Dead;
     this.ball.visible = this.shown;
+    this.placeMarker(s, renderTick);
     if (!this.shown) this.shadow.visible = false;
     this.ring.visible = false;
     if (this.label) this.label.visible = this.shown;
@@ -289,12 +307,33 @@ class PlayerView {
     this.hasLast = true;
   }
 
+  /** The landing marker of a forward jump: flat on L's face, shrinking toward the landing. */
+  private placeMarker(s: Seg, renderTick: number): void {
+    const { from, to } = s;
+    const forward = this.shown && s.action === Action.Jump
+      && (from.cell.x !== to.cell.x || from.cell.y !== to.cell.y || from.cell.z !== to.cell.z);
+    this.marker.visible = forward;
+    this.markerCell = forward ? `${to.cell.x},${to.cell.y},${to.cell.z}|${to.up}` : '';
+    if (!forward) return;
+    const u = dirVec(to.up);
+    probe.set(u.x, u.y, u.z);
+    this.marker.position.set(to.cell.x - u.x * 0.47, to.cell.y - u.y * 0.47, to.cell.z - u.z * 0.47);
+    this.marker.quaternion.setFromUnitVectors(Z_AXIS, probe);
+    const p = Math.min(1, Math.max(0, (renderTick - s.startTick) / Math.max(1, s.endTick - s.startTick)));
+    this.marker.scale.setScalar(1.25 - 0.45 * p);
+  }
+
+  /** The marker turns red when a ball stands on it (a stomp is coming), else it's the jumper's colour. */
+  setMarkerTaken(taken: boolean): void {
+    this.markerMat.color.set(taken ? MARKER_RED : this.color);
+  }
+
   /** Feel on a change of on-screen action: sounds, plus the squash kicks that happen at a moment (not over time). */
   private transition(prev: number, s: Seg, solid: SolidFn | null, feel: FeelFn): void {
     const sq = tuning.squash;
-    const airborne = prev === Action.Hop || prev === Action.Jump || prev === Action.Fall;
-    if (airborne && s.action !== Action.Fall && s.action !== Action.Dead) {
-      const i = prev === Action.Hop ? 0.35 : prev === Action.Jump ? 0.55 : Math.min(1, 0.5 + 0.1 * this.fallCells);
+    const airborne = prev === Action.Hop || prev === Action.Jump || prev === Action.Fall || prev === Action.Rebound;
+    if (airborne && s.action !== Action.Fall && s.action !== Action.Dead && s.action !== Action.Rebound) {
+      const i = prev === Action.Hop || prev === Action.Rebound ? 0.35 : prev === Action.Jump ? 0.55 : Math.min(1, 0.5 + 0.1 * this.fallCells);
       this.kick(tmpUp, (SQUASH.landMin + (SQUASH.landMax - SQUASH.landMin) * i) * sq);
       feel('land', i);
     }
@@ -307,6 +346,7 @@ class PlayerView {
       case Action.Jump: this.kick(tmpUp, Math.min(this.spring.x, SQUASH.anticipation * sq)); feel('takeoff'); break;
       case Action.Roll: if (this.spring.x > SQUASH.roll * sq) this.kick(tmpUp, SQUASH.roll * sq); feel('roll'); break; // don't cut a jiggle short
       case Action.Flip: feel('flip'); break;
+      case Action.Rebound: this.kick(tmpUp, SQUASH.contact * sq); feel('clash'); break; // bounced off a high hop
       case Action.Knocked: this.contactPending = true; break;
       case Action.Stunned: this.boingPending = s.bounce; break;
       case Action.Fall:
@@ -366,7 +406,14 @@ class PlayerView {
       case Action.Knocked: {
         knockDir.set(s.to.cell.x - s.from.cell.x, s.to.cell.y - s.from.cell.y, s.to.cell.z - s.from.cell.z).normalize();
         this.knockAxis.copy(knockDir);
-        if (this.contactPending && p >= hold) {
+        if (this.stompSerials.has(s.serial) && p < hold) {
+          // Stomped: flat under the attacker (contact fires at once), then it slides out below.
+          if (this.contactPending) { this.contactPending = false; feel('hit'); }
+          this.squashAxis.copy(tmpUp);
+          this.spring.x = SQUASH.stomp * sq;
+          this.spring.v = 0;
+          driven = true;
+        } else if (this.contactPending && p >= hold) {
           this.contactPending = false;
           this.kick(knockDir, SQUASH.contact * sq);
           feel('hit');
@@ -375,7 +422,8 @@ class PlayerView {
           // drive it, squash → stretch over the first third, then hold the stretch until the stop kick.
           const k = (p - hold) / (1 - hold);
           this.squashAxis.copy(knockDir);
-          this.spring.x = (k < 0.35 ? SQUASH.contact + (SQUASH.slide - SQUASH.contact) * (k / 0.35) : SQUASH.slide) * sq;
+          const from = this.stompSerials.has(s.serial) ? SQUASH.stomp : SQUASH.contact;
+          this.spring.x = (k < 0.35 ? from + (SQUASH.slide - from) * (k / 0.35) : SQUASH.slide) * sq;
           this.spring.v = 0;
           driven = true;
         }
@@ -447,7 +495,8 @@ class PlayerView {
   }
 
   dispose(scene: THREE.Scene): void {
-    scene.remove(this.ball, this.shadow, this.ring);
+    scene.remove(this.ball, this.shadow, this.ring, this.marker);
+    this.markerMat.dispose();
     this.shadowMat.dispose();
     this.top.dispose();
     this.bottom.dispose();
@@ -456,6 +505,7 @@ class PlayerView {
 }
 
 const ACTIVE = new Set(['countdown', 'playing', 'results']);
+const cellOf = (p: Pose) => `${p.cell.x},${p.cell.y},${p.cell.z}`;
 
 export class PlayersView {
   private views = new Map<string, PlayerView>();
@@ -500,6 +550,10 @@ export class PlayersView {
       }
       v.track(id === localId && local ? local : p);
     });
+    for (const [id, v] of this.views) {
+      v.stompSerials.clear();
+      for (const q of v.segs) if (q.action === Action.Knocked && this.stomperOf(q, id)) v.stompSerials.add(q.serial);
+    }
     state.players.forEach((p, id) => {
       const v = this.views.get(id)!;
       const hold = (s: Seg) => this.knockHold(s, id, localId, localRenderTick - renderTick);
@@ -509,6 +563,7 @@ export class PlayersView {
       else this.frozen.delete(id);
       const feel: FeelFn = (kind, intensity = 0.5) => {
         if (kind === 'hit') this.contact(id, v, localId, nowMs);
+        else if (kind === 'clash') this.clash(v);
         else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
       };
       const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
@@ -521,6 +576,36 @@ export class PlayersView {
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
+    // Markers go red over a ball (a stomp is coming): anyone else on screen standing in the marked cell.
+    const standing = new Set<string>();
+    for (const v of this.views.values()) if (v.shown) standing.add(`${cellOf(v.current.from)}|${v.current.from.up}`);
+    for (const v of this.views.values()) if (v.markerCell) v.setMarkerTaken(standing.has(v.markerCell));
+  }
+
+  /** Clash (§16): the rebounding attacker squashed itself; the hopping victim at its landing cell squashes too. */
+  private clash(attacker: PlayerView): void {
+    const L = attacker.current.from; // a rebound starts at the landing cell it bounced off
+    for (const v of this.views.values()) {
+      if (v === attacker || !v.shown || cellOf(v.current.from) !== cellOf(L)) continue;
+      const u = dirVec(v.current.from.up);
+      v.contact(probe.set(u.x, u.y, u.z));
+      this.onFeel?.({ kind: 'clash', at: attacker.ball.position, local: attacker.local || v.local, intensity: 0.6 });
+      return;
+    }
+    this.onFeel?.({ kind: 'clash', at: attacker.ball.position, local: attacker.local, intensity: 0.6 });
+  }
+
+  /**
+   * The player whose landing stomped this knock: a Jump (or a Fall, §16 fall stomp) ending on the knock's start tick
+   * in the victim's cell.
+   */
+  private stomperOf(knock: Seg, victimId: string): string | null {
+    for (const [id, v] of this.views) {
+      if (id === victimId) continue;
+      if (v.segs.some((q) => (q.action === Action.Jump || q.action === Action.Fall) && q.endTick === knock.startTick
+        && q.to.cell.x === knock.from.cell.x && q.to.cell.y === knock.from.cell.y && q.to.cell.z === knock.from.cell.z)) return id;
+    }
+    return null;
   }
 
   /**
@@ -528,17 +613,18 @@ export class PlayersView {
    * and the THWACK plays at the victim.
    */
   private contact(victimId: string, victim: PlayerView, localId: string, nowMs: number): void {
-    const pusherId = this.pusherOf(victim.current, victimId);
+    const stomperId = this.stomperOf(victim.current, victimId);
+    const pusherId = stomperId ?? this.pusherOf(victim.current, victimId);
     const pusher = pusherId ? this.views.get(pusherId) : undefined;
-    pusher?.contact(victim.knockAxis);
+    if (!stomperId) pusher?.contact(victim.knockAxis); // a stomper squashes from its own landing instead
     if (tuning.hitStopMs > 0) {
       for (const [id, v] of [[victimId, victim], [pusherId, pusher]] as const) {
         if (id && v) this.frozen.set(id, { until: nowMs + tuning.hitStopMs, tick: v.renderTickNow });
       }
     }
     this.onFeel?.({
-      kind: 'hit', at: victim.ball.position, local: victim.local || !!pusher?.local, intensity: victim.local ? 1 : 0.6,
-      victimLocal: victimId === localId,
+      kind: stomperId ? 'stomp' : 'hit', at: victim.ball.position, local: victim.local || !!pusher?.local,
+      intensity: victim.local ? 1 : 0.6, victimLocal: victimId === localId,
     });
   }
 
@@ -569,6 +655,7 @@ export class PlayersView {
    */
   private knockHold(s: Seg, victimId: string, localId: string, lead: number): number {
     if (s.action !== Action.Knocked) return KNOCK_HOLD;
+    if (this.stomperOf(s, victimId)) return STOMP_HOLD; // the attacker lands on it: no gap to close
     let ticks = 1 + (victimId === localId ? lead : 0);
     if (this.pusherOf(s, victimId) === localId) ticks -= lead;
     return Math.min(KNOCK_TICKS - 1, Math.max(0, ticks)) / KNOCK_TICKS;

@@ -2,9 +2,15 @@ import { FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } f
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, sub, type Vec3 } from '../vec.ts';
-import { Action, isFree, isSolid, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
+import { Action, isFree, isSolid, outOfBounds, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
 
-export interface Plan { action: Action; to: Pose; ticks: number }
+/** `over`: a forward jump over a player on A1. `bump`: a stomp jump's bump cell B (§16). */
+export interface Plan { action: Action; to: Pose; ticks: number; over?: boolean; bump?: Vec3 }
+
+/** A live player standing in `cell` on face `up` (the stomp target of a jump landing there). */
+export const standingAt = (world: World, cell: Vec3, up: Dir, selfId: string): PlayerState | undefined =>
+  world.players.find((v) => v.id !== selfId && v.action !== Action.Dead && v.pose.up === up
+    && v.pose.cell.x === cell.x && v.pose.cell.y === cell.y && v.pose.cell.z === cell.z);
 
 /** left = cross(U, F), right = cross(F, U). With U=+Y, F=+Z: right is -X. */
 export const turnFwd = (up: Dir, fwd: Dir, turn: -1 | 1): Dir => (turn < 0 ? cross(up, fwd) : cross(fwd, up));
@@ -36,10 +42,21 @@ export function previewAction(
       return { action: Action.Flip, to: { cell: below, up: fwd, fwd: opposite(up) }, ticks: FLIP_TICKS };
     }
     case 'jump': {
+      // §16: a player on A1 doesn't block (the ball passes over); a block does. Landing L is A2, else A1 (short
+      // jump). A player standing in L makes it a stomp jump if the bump cell L + F is free; otherwise L isn't free.
       const A1 = add(C, F);
-      if (!free(A1)) return null;
-      const A2 = add(A1, F);
-      return { action: Action.Jump, to: { cell: free(A2) ? A2 : A1, up, fwd }, ticks: JUMP_TICKS };
+      if (isSolid(world, A1)) return null;
+      const over = !free(A1);
+      for (const L of [add(A1, F), A1]) {
+        if (isSolid(world, L)) continue;
+        if (free(L)) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
+        const B = add(L, F);
+        // With push rules off there are no stomps: a player in L just makes it not free (the old fallback).
+        if (world.rules.push && standingAt(world, L, up, self.id) && free(B)) {
+          return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
+        }
+      }
+      return null;
     }
     case 'hop':
       if (isSolid(world, add(C, U))) return null; // low ceiling
@@ -47,9 +64,31 @@ export function previewAction(
   }
 }
 
+export interface StompPreview { victimId: string; bumpCell: Vec3; lethal: boolean }
+
+/**
+ * Would a forward jump from `pose` right now be a stomp (§16)? Who it hits, where they'd be bumped, and whether that
+ * bump is lethal (no block below B until the ball leaves the level). For bots; the landing itself is resolved later,
+ * so the victim may still escape or clash.
+ */
+export function stompPreview(world: World, pose: Pose, selfId = ''): StompPreview | null {
+  const plan = previewAction(world, { id: selfId, pose }, 'jump');
+  if (!plan?.bump) return null;
+  const victim = standingAt(world, plan.to.cell, plan.to.up, selfId)!;
+  const down = dirVec(plan.to.up);
+  let c = plan.bump, lethal = false;
+  while (!isSolid(world, sub(c, down))) {
+    c = sub(c, down);
+    if (outOfBounds(world.level, c)) { lethal = true; break; }
+  }
+  return { victimId: victim.id, bumpCell: plan.bump, lethal };
+}
+
 export function startAction(p: PlayerState, plan: Plan, tick: number): void {
   p.action = plan.action;
   p.to = plan.to;
+  p.jumpOver = plan.over ?? false;
+  p.stompBump = plan.bump ?? null;
   p.startTick = tick;
   p.endTick = tick + plan.ticks;
   // Reset a stale mid-air turn record, but keep one that is still spinning (e.g. a turn on the landing tick of a

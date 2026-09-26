@@ -1,0 +1,16 @@
+{
+  "id": "test-stomp",
+  "name": "Test Stomp (beam)",
+  "version": 1,
+  "mode": "knockout",
+  "lives": 9,
+  "timeLimitSec": 600,
+  "crumble": { "startSec": 590, "intervalSec": 10, "warnSec": 2 },
+  "boxes": [{ "min": [0, 0, 0], "max": [9, 0, 0] }],
+  "spawns": [
+    { "cell": [1, 1, 0], "up": "+Y", "fwd": "+X" },
+    { "cell": [3, 1, 0], "up": "+Y", "fwd": "-X" },
+    { "cell": [6, 1, 0], "up": "+Y", "fwd": "+X" },
+    { "cell": [8, 1, 0], "up": "+Y", "fwd": "-X" }
+  ]
+}

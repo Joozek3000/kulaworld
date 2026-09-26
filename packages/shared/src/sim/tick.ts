@@ -1,7 +1,7 @@
-import { INPUT_BUFFER_TICKS, KNOCK_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
-import { dirVec } from '../dir.ts';
-import { add, eq } from '../vec.ts';
-import { previewAction, startAction, startFall, turnFwd, type Plan } from './actions.ts';
+import { INPUT_BUFFER_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
+import { cross, dirVec, opposite, type Dir } from '../dir.ts';
+import { add, eq, type Vec3 } from '../vec.ts';
+import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepKnockout } from './knockout.ts';
 import {
@@ -39,7 +39,7 @@ export function step(world: World): SimEvent[] {
   return events;
 }
 
-const AIRBORNE: ReadonlySet<Action> = new Set([Action.Hop, Action.Jump, Action.Fall]);
+const AIRBORNE: ReadonlySet<Action> = new Set([Action.Hop, Action.Jump, Action.Fall, Action.Rebound]);
 /** Pushed around: buffered pulses wait (don't age) until the player is back in control. */
 const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned]);
 
@@ -156,19 +156,69 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
     events.push({ type: 'bounce', playerId: p.id });
     return false;
   }
-  // Knocking cancels a Turn (keep its start facing) or a Hop (keep any mid-air turn).
-  const fwd = v.action === Action.Turn ? v.pose.fwd : v.to.fwd;
-  v.pose = { ...v.pose, fwd };
-  startAction(v, { action: Action.Knocked, to: { cell: dest, up: v.pose.up, fwd }, ticks: KNOCK_TICKS }, tick);
-  v.bounce = false;
-  v.lastKnockedBy = p.id;
-  v.lastKnockedTick = tick;
+  knock(v, dest, p.id, tick);
   startAction(p, { action: Action.Roll, to: { ...p.pose, cell: A }, ticks: ROLL_TICKS }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick; // pushing ends your own spawn protection
   reserve(res, v);
   reserve(res, p);
   events.push({ type: 'push', pusherId: p.id, victimId: v.id });
   return true;
+}
+
+/** V is knocked one cell to `dest` by `byId` (push or stomp): it cancels a Turn (keeping its start facing) or a Hop. */
+function knock(v: PlayerState, dest: Vec3, byId: string, tick: number): void {
+  const fwd = v.action === Action.Turn ? v.pose.fwd : v.to.fwd;
+  v.pose = { ...v.pose, fwd };
+  startAction(v, { action: Action.Knocked, to: { cell: dest, up: v.pose.up, fwd }, ticks: KNOCK_TICKS }, tick);
+  v.bounce = false;
+  v.lastKnockedBy = byId;
+  v.lastKnockedTick = tick;
+}
+
+/**
+ * A stomp jump lands (§16). Returns true when the attacker's landing is fully handled (stomp done, or a rebound
+ * started); false for a normal landing (the victim escaped, or L is empty).
+ * - V still in L and stompable (the same helper as pushes): stomp. V is knocked to B, the attacker lands in L.
+ * - V still in L but not stompable (high in a hop, staggered, spawn-protected): clash. The attacker rebounds to C.
+ * - V in L but its action is taking it elsewhere: it escaped.
+ */
+function landStomp(world: World, p: PlayerState, events: SimEvent[]): boolean {
+  const tick = world.tick, L = p.to.cell, B = p.stompBump!;
+  const v = standingAt(world, L, p.to.up, p.id);
+  if (!v) return false;
+  const leaving = v.action !== Action.Idle && v.action !== Action.Turn && v.action !== Action.Hop
+    && v.action !== Action.Stunned && !eq(v.to.cell, L);
+  if (leaving) return false;
+  if (isPushable(v, tick)) {
+    knock(v, B, p.id, tick);
+    events.push({ type: 'stomp', attackerId: p.id, victimId: v.id });
+    return false; // the attacker lands in L as usual
+  }
+  // Clash: back along the jump to the takeoff cell (C stayed reserved during the jump), from L.
+  const C = p.pose.cell;
+  p.pose = { ...p.to };
+  startAction(p, { action: Action.Rebound, to: { cell: C, up: p.to.up, fwd: p.to.fwd }, ticks: REBOUND_TICKS }, tick);
+  events.push({ type: 'clash', attackerId: p.id, victimId: v.id });
+  return true;
+}
+
+/**
+ * A fall lands on a grounded, stompable player (§16): it's knocked one cell, in the first free direction of the
+ * faller's fwd, left, right, back. None free: the MVP overlap rule.
+ */
+function fallStomp(world: World, p: PlayerState, events: SimEvent[]): void {
+  const v = standingAt(world, p.pose.cell, p.pose.up, p.id);
+  if (!v || !isPushable(v, world.tick)) return;
+  const { up, fwd } = p.pose;
+  const res = reservations(world);
+  const dirs: Dir[] = [fwd, cross(up, fwd), cross(fwd, up), opposite(fwd)];
+  for (const d of dirs) {
+    const dest = add(v.pose.cell, dirVec(d));
+    if (!isFree(world, res, v.id, dest) || !isFree(world, res, p.id, dest)) continue;
+    knock(v, dest, p.id, world.tick);
+    events.push({ type: 'stomp', attackerId: p.id, victimId: v.id });
+    return;
+  }
 }
 
 function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
@@ -182,9 +232,12 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     return;
   }
   const finished = p.action;
+  if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
   p.pose = p.to;
   p.action = Action.Idle;
   p.bounce = false;
+  p.jumpOver = false;
+  p.stompBump = null;
   if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
     p.action = Action.Dead;
     p.startTick = tick;
@@ -196,6 +249,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   }
   // Nothing below: a jump or knock into air, a fall step, or ground that crumbled during the action.
   if (startFall(world, p, tick)) return;
+  if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
   if (finished === Action.Turn || finished === Action.Stunned) return;
   if (finished === Action.Knocked) stun(p, tick, false); // stagger: not pushable (§14)
   onLand(world, p, events);

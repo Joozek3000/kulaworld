@@ -6,7 +6,7 @@ import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */
@@ -53,6 +53,10 @@ export interface PlayerState {
   eliminatedBy: string | null;
   /** Unpushable while tick < protectedUntil (knockout respawn). Ends early when this player pushes. */
   protectedUntil: number;
+  /** Forward jump over a player on A1: A1 isn't reserved by the jumper (§16). */
+  jumpOver: boolean;
+  /** Stomp jump: the bump cell B = L + F, reserved for the whole jump; null otherwise (§16). */
+  stompBump: Vec3 | null;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -104,7 +108,9 @@ export type SimEvent =
   | { type: 'lifeLost'; playerId: string; livesLeft: number }
   | { type: 'eliminated'; playerId: string; byId?: string }
   | { type: 'crumbleWarn'; band: number }
-  | { type: 'crumble'; band: number };
+  | { type: 'crumble'; band: number }
+  | { type: 'stomp'; attackerId: string; victimId: string }
+  | { type: 'clash'; attackerId: string; victimId: string };
 
 /** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
@@ -188,6 +194,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
+    jumpOver: false, stompBump: null,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -214,13 +221,18 @@ export function occupiedCells(p: PlayerState): Vec3[] {
   switch (p.action) {
     case Action.Dead: return [];
     case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: return [cell];
-    case Action.Flip: case Action.Jump: return [cell, add(cell, dirVec(fwd)), p.to.cell];
+    case Action.Flip: return [cell, add(cell, dirVec(fwd)), p.to.cell];
+    case Action.Jump: {
+      // Over a player on A1: A1 stays theirs. A stomp jump also holds the bump cell B.
+      const cells = p.jumpOver ? [cell, p.to.cell] : [cell, add(cell, dirVec(fwd)), p.to.cell];
+      return p.stompBump ? [...cells, p.stompBump] : cells;
+    }
     default: return [cell, p.to.cell];
   }
 }
 
 /**
- * Can a push land on `v` at `tick` (ARCHITECTURE §14)? Idle, Turning, Stunned by a bounce (not the stagger after a
+ * Can a push or a stomp land on `v` at `tick` (ARCHITECTURE §14, §16)? One helper for both. Idle, Turning, Stunned by a bounce (not the stagger after a
  * knock), or Hopping while low: the first HOP_PUSH_WINDOW ticks after the hop's start tick or the last HOP_PUSH_WINDOW
  * before its end. A hop on its start tick is an escape, not pushable. Never while spawn-protected (§15).
  * The same-face check is the pusher's (v.pose.up === pusher up).

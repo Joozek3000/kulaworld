@@ -23,6 +23,8 @@ export const BALL_RADIUS = 0.4;
 export const SPIN_PER_CELL = 1 / BALL_RADIUS;
 export const JUMP_HEIGHT = 1.2;
 export const HOP_HEIGHT = 1.0;
+/** Clash rebound (§16): a lower arc back to the takeoff cell. */
+export const REBOUND_HEIGHT = 0.8;
 /** A knock waits this fraction of KNOCK_TICKS (1 tick: the pusher closing the 0.2-cell gap), then slides fast. */
 export const KNOCK_HOLD = 0.25;
 /** Rolling spin (rad) a knocked ball picks up while it skids one cell. */
@@ -134,9 +136,10 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
       break;
     }
     case Action.Jump:
-    case Action.Hop: {
+    case Action.Hop:
+    case Action.Rebound: { // a rebound: from = the landing cell it bounced off, to = the takeoff cell, facing kept
       lerp(); // a hop has to = from, so this is a no-op
-      const h = 4 * (action === Action.Hop ? HOP_HEIGHT : JUMP_HEIGHT) * p * (1 - p);
+      const h = 4 * (action === Action.Hop ? HOP_HEIGHT : action === Action.Rebound ? REBOUND_HEIGHT : JUMP_HEIGHT) * p * (1 - p);
       pos[0] += U.x * h; pos[1] += U.y * h; pos[2] += U.z * h;
       out.lift = h;
       break;
@@ -151,7 +154,7 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
       break;
     }
   }
-  if (airTurn && airTurn.fromFwd !== to.fwd && (action === Action.Hop || action === Action.Jump || action === Action.Fall)) {
+  if (airTurn && airTurn.fromFwd !== to.fwd && (action === Action.Hop || action === Action.Jump || action === Action.Fall || action === Action.Rebound)) {
     const t = Math.min(1, Math.max(0, airTurn.progress));
     slerp(frameQuat(from.up, airTurn.fromFwd, qa), frameQuat(from.up, to.fwd, qb), t, out.quat);
   }

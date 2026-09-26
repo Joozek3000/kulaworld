@@ -108,11 +108,11 @@ describe('predictor', () => {
     expect(h.pred.mispredictions).toBe(0);
   });
 
-  test('a jump blocked by a player the client did not know about: one misprediction, then it converges', () => {
-    const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[1, 1, 0], '+Y', '+X']]), 1, { push: false });
+  test('a jump shortened by a player the client did not know about: one misprediction, then it converges', () => {
+    const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[2, 1, 0], '+Y', '+X']]), 1, { push: false });
     w.spawnOrder = [0, 1];
     addPlayer(w, 'me', 'me');
-    addPlayer(w, 'other', 'other'); // on A1: the forward jump is blocked and becomes a hop
+    addPlayer(w, 'other', 'other'); // on A2, push off: no stomp, so the jump is cut short to A1
     const h = new Harness(w);
     h.run(2);
     h.send({ fwdHeld: true, jump: true });
@@ -121,7 +121,7 @@ describe('predictor', () => {
     h.run(40);
     expect(h.pred.mispredictions).toBe(1);
     expect(h.results.slice(-20).every((r) => r === 'match')).toBe(true);
-    expect(h.local.pose.cell).toEqual({ x: 0, y: 1, z: 0 }); // hopped in place
+    expect(h.local.pose.cell).toEqual({ x: 1, y: 1, z: 0 }); // short jump
     expect(h.pred.local.pose).toEqual(h.local.pose);
   });
 
@@ -172,5 +172,24 @@ describe('predictor', () => {
     h.run(30);
     expect(h.results.slice(-20).every((r) => r === 'match')).toBe(true);
     expect(h.pred.local.pose).toEqual(h.local.pose);
+  });
+
+  test('a jump with a player on A1 or L is not predicted (§16, §17): deferred to the server', () => {
+    for (const x of [1, 2]) { // over the player, and onto it
+      const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[x, 1, 0], '+Y', '+X']]), 1);
+      w.spawnOrder = [0, 1];
+      addPlayer(w, 'me', 'me');
+      const other = addPlayer(w, 'other', 'other');
+      const h = new Harness(w);
+      h.pred.setOthers([{ id: 'other', ...toServer(other) }]);
+      h.run(1);
+      h.send({ fwdHeld: true, jump: true });
+      h.run(4);
+      h.send({});
+      h.run(30);
+      expect(h.pred.deferrals).toBeGreaterThan(0);
+      expect(h.pred.mispredictions).toBe(0);
+      expect(h.results).toContain('deferred'); // the server jumped; the client waited for it
+    }
   });
 });

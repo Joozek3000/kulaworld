@@ -335,7 +335,16 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
 - **Stomp vs push:**
   - A stomped victim is staggered (unpushable) for `STUN_TICKS`, so there are no stomp→push or push→stomp instant combos.
   - After the stagger, the victim's escape precedence applies as for pushes.
-- **Prediction (§17):** jumps with a player on A1 or L are not predicted.
+- **Prediction (§17):** jumps with a player on A1 or L are not predicted. `Rebound` is a server-only state (prediction pauses, like Knocked).
+- **Clarifications (phase 10):**
+  - **Stompable = pushable.** It's the same helper, `isPushable`: Idle, Turning, Stunned by a *bounce*, or Hop in the low window, and not spawn-protected.
+    - A victim that's still in L but not stompable **clashes**. That covers high in a hop, but also staggered or spawn-protected: the attacker can't land on top of it, so it rebounds.
+  - **"Leaving"** means the victim's action targets another cell: Roll, Flip, Jump, Knocked away, Rebound, Fall. A Turn, Hop or Stun stays in L.
+  - **A1 "held by a player"** covers anyone standing there or moving into it. The ball flies over either way, and A1 then isn't reserved by the jumper.
+  - **L counts as a stomp target** only when a live player *stands* there on the same face. If L is merely reserved (someone moving in), it's not free, and the short-jump/hop fallback applies.
+  - **Fall stomp direction:** the bump cell must be free (not solid, not reserved), but it needs no ground; the victim then falls.
+  - **Rebound:** from L back to C, facing kept, `REBOUND_TICKS` = 6. Pose: the jump parabola in reverse at `REBOUND_HEIGHT` 0.8. It's airborne, so mid-air turns apply.
+  - **Push rules off:** jump-over stays; stomps and fall stomps are off. A player in L makes L not free (the old short-jump/hop fallback), and a fall onto a player overlaps as in the MVP.
 - **Readability:** during a forward jump, a landing marker (ring in the attacker's colour) is drawn on L, visible to everyone. It turns red when L holds a player (a stomp is incoming).
 
 ## 17. Client prediction (phase 09)

@@ -12,5 +12,7 @@ export const KNOCK_TICKS = 4;
 export const STUN_TICKS = 6;
 export const HOP_PUSH_WINDOW = 2; // a hop is pushable this many ticks after its start and before its end
 export const KNOCKOUT_CREDIT_TICKS = 60;
+// Stomp (ARCHITECTURE §16)
+export const REBOUND_TICKS = 6; // clash: the attacker arcs back to its takeoff cell
 // Knockout (ARCHITECTURE §15)
 export const SPAWN_PROTECT_TICKS = 40;

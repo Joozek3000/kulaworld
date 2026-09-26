@@ -46,6 +46,8 @@ players.onFeel = (e) => {
     case 'fall': audio.play('fall', { at }); break;
     case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
     case 'boing': audio.play('boing', { at }); break;
+    case 'stomp': audio.play('stomp', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
+    case 'clash': audio.play('boing', { at, gain: 1.2 }); break;
     case 'pop': audio.play('pop', { at }); break;
   }
 };
@@ -82,6 +84,7 @@ net.onEvent((e) => {
       audio.play('key', { mine: e.playerId === net.sessionId }, 'ui');
       break;
     case 'win': audio.play(e.winnerId === net.sessionId ? 'win' : 'lose', {}, 'ui'); break;
+    case 'stomp': hud.toast(`${nameOf(e.attackerId)} stomped ${nameOf(e.victimId)}!`, colorOf(e.attackerId)); break;
     case 'knockout': hud.toast(`${nameOf(e.pusherId)} knocked ${nameOf(e.victimId)} off!`, colorOf(e.pusherId)); break;
     case 'keyDrop': hud.toast(`${nameOf(e.playerId)} dropped a key`, colorOf(e.playerId)); break;
     case 'eliminated':

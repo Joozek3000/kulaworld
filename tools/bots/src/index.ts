@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, loadLevel, perpendicular, sub, turnFwd,
+  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, loadLevel, perpendicular, previewAction,
+  stompPreview, sub, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type World,
 } from '@kula/shared';
 
@@ -29,6 +30,7 @@ const between = (a: number, b: number) => a + Math.random() * (b - a);
 interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
+  stomps: number; stomped: number; clashes: number; dodges: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -57,6 +59,35 @@ function planWorld(state: { levelId: string; crumbled: number; warnBand: number 
   }
   if (w.knockout) w.removed = new Set(w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat());
   return w;
+}
+
+type SchemaPlayer = PlayerLike & { fromUp: number; fromFwd: number; toUp: number; toFwd: number; protectedUntil: number; spectating: boolean };
+const poseOf2 = (x: number, y: number, z: number, up: number, fwd: number): Pose => ({ cell: { x, y, z }, up: up as Dir, fwd: fwd as Dir });
+
+/**
+ * The plan world plus the other players at their current server state (for stompPreview / jump previews). A shallow
+ * copy: the shared plan world keeps no players.
+ */
+function withPlayers(world: World, state: { players: { forEach(cb: (p: SchemaPlayer, id: string) => void): void } }, selfId: string): World {
+  const players: PlayerState[] = [];
+  state.players.forEach((o, id) => {
+    if (id === selfId || o.spectating || o.action === Action.Dead) return;
+    const from = poseOf2(o.fromX, o.fromY, o.fromZ, o.fromUp, o.fromFwd);
+    players.push({
+      id, action: o.action, pose: from, to: poseOf2(o.toX, o.toY, o.toZ, o.toUp, o.toFwd),
+      startTick: o.startTick, endTick: o.endTick, protectedUntil: o.protectedUntil, jumpOver: false, stompBump: null,
+    } as PlayerState);
+  });
+  return { ...world, players };
+}
+
+/** Someone's forward jump is coming down on my cell (the landing marker is on my tile). */
+function jumpingOnto(state: { players: { forEach(cb: (p: SchemaPlayer, id: string) => void): void } }, me: SchemaPlayer, selfId: string): boolean {
+  let hit = false;
+  state.players.forEach((o, id) => {
+    if (id !== selfId && o.action === Action.Jump && o.toUp === me.fromUp && o.toX === me.fromX && o.toY === me.fromY && o.toZ === me.fromZ) hit = true;
+  });
+  return hit;
 }
 
 /** Empty cells next to a remaining block (any face): where a ball can stand. */
@@ -258,6 +289,21 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     const hunter = bully || s.mode === 'knockout';
     // Standing on a warned (or already crumbled) tile: get off it before anything else.
     const unsafe = !!world.knockout && !isSolid(world, sub(pose.cell, dirVec(pose.up)));
+    // bully: a stomp that kills, or leaves the victim one push from a ledge, beats walking over to push (§16).
+    if (bully && !unsafe) {
+      const pw = withPlayers(world, s, me);
+      for (const turn of ['jump', 'left', 'right'] as const) {
+        const fwd = turn === 'jump' ? pose.fwd : turnFwd(pose.up, pose.fwd, turn === 'left' ? -1 : 1);
+        const sp = stompPreview(pw, { ...pose, fwd }, me);
+        if (!sp) continue;
+        const beyond = add(sp.bumpCell, dirVec(fwd));
+        if (sp.lethal || !isSolid(world, sub(beyond, dirVec(pose.up)))) {
+          replan();
+          facing = null;
+          return press(turn, p.startTick, p.action, s.tick, true);
+        }
+      }
+    }
     if (!unsafe && pushable(s, me, pose, world, !bully)) {
       replan();
       facing = null;
@@ -298,13 +344,20 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       ctx.stats.replans++;
     }
     const cmd = path[0].cmd;
-    // A player on A1/A2 blocks or shortens a forward jump (a short jump can drop into a gap): wait for them.
+    const F = dirVec(pose.fwd), a1 = add(pose.cell, F), a2 = add(a1, F);
+    // seek: a player blocking the way (say on a 1-wide beam) is jumped over, if the landing is safe ground (§16).
+    if (cmd === 'fwd' && !bully && occupiedByOther(s, me, cellKey(a1))) {
+      const plan = previewAction(withPlayers(world, s, me), { id: me, pose }, 'jump');
+      if (plan?.action === Action.Jump && !plan.bump && isSolid(world, sub(plan.to.cell, dirVec(pose.up)))) {
+        replan();
+        return press('jump', p.startTick, p.action, s.tick, true);
+      }
+    }
     if (cmd === 'jump') {
-      const F = dirVec(pose.fwd);
-      const a1 = add(pose.cell, F), a2 = add(a1, F);
       // Someone standing right in front can be shoved out of the way instead.
       if (pushable(s, me, pose, world, false)) { replan(); return press('fwd', p.startTick, p.action, s.tick, true); }
-      if (occupiedByOther(s, me, cellKey(a1)) || occupiedByOther(s, me, cellKey(a2))) return;
+      // A player on A1 is jumped over now; one on the landing cell would shorten the jump (or be stomped): wait.
+      if (occupiedByOther(s, me, cellKey(a2)) && !bully) return;
     }
     press(cmd, p.startTick, p.action, s.tick);
   };
@@ -312,7 +365,10 @@ function seekBrain(ctx: Ctx, bully: boolean) {
 
 async function runBot(client: Client, name: string, behaviour: Behaviour): Promise<Stats> {
   const room = await connect(client, name);
-  const stats: Stats = { rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0, eliminated: 0 };
+  const stats: Stats = {
+    rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
+    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0,
+  };
   let seq = 0;
   const ctx: Ctx = {
     name, room, stats,
@@ -329,6 +385,9 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     const me = room.sessionId;
     if (e.type === 'push' && e.pusherId === me) stats.pushes++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
+    if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
+    if (e.type === 'stomp' && e.victimId === me) stats.stomped++;
+    if (e.type === 'clash' && e.victimId === me) stats.clashes++; // clashes this bot's hop caused
     if (!('playerId' in e) || e.playerId !== me) return;
     if (e.type === 'key') stats.keys++;
     if (e.type === 'death') stats.deaths++;
@@ -338,12 +397,20 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (e.type === 'eliminated') stats.eliminated++;
   });
 
+  let dodging = false;
   const timer = setInterval(() => {
     const p = room.state.players?.get(room.sessionId);
     if (!p) return;
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
-    brain(room.state.phase === 'playing' && !p.spectating);
-  }, behaviour === 'wander' ? 100 : 20);
+    const playing = room.state.phase === 'playing' && !p.spectating;
+    // Every bot: an enemy's landing marker on my tile → hold jump (a hop high at their landing clashes, §16).
+    if (playing && jumpingOnto(room.state, p, room.sessionId)) {
+      if (!dodging) { ctx.send({ jump: true, jumpHeld: true }); stats.dodges++; dodging = true; }
+      return;
+    }
+    if (dodging) { ctx.send({}); dodging = false; }
+    brain(playing);
+  }, 20);
 
   await new Promise<void>((resolve) => {
     room.onLeave(() => resolve());
@@ -365,7 +432,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

@@ -116,6 +116,14 @@ export const RECIPES: Record<string, Recipe> = {
     vibrato(c, tail.frequency, t + 0.04, 0.27, 14, 30);
     return 0.32;
   },
+  /** Stomp (§16): a heavy low rubber thump (sine 90 → 40 Hz, a low-passed slap) and a deep boing tail. */
+  stomp(c, out, t, { pitch, intensity: i }) {
+    osc(c, env(c, out, t, 0.8 + 0.2 * i, 0.002, 0.3), t, 0.32, 'sine', 90 * pitch, 40 * pitch, 0.18);
+    noise(c, env(c, out, t, 0.35 + 0.2 * i, 0.001, 0.05), t, 0.06, 'lowpass', 900, 0.8);
+    const tail = osc(c, env(c, out, t + 0.06, 0.16, 0.01, 0.35), t + 0.06, 0.37, 'sine', 170 * pitch, 210 * pitch, 0.35);
+    vibrato(c, tail.frequency, t + 0.06, 0.37, 11, 35);
+    return 0.45;
+  },
   /** Cartoon boing: sine ~250 Hz with a 12 Hz vibrato, both decaying over 300 ms. */
   boing(c, out, t, { pitch }) {
     const o = osc(c, env(c, out, t, 0.28, 0.005, 0.3), t, 0.32, 'sine', 250 * pitch, 300 * pitch, 0.3);

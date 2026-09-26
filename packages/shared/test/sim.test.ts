@@ -4,7 +4,7 @@ import {
   opposite, perpendicular, previewAction, removePlayer, RESPAWN_TICKS, ROLL_TICKS, setInput, step, TURN_TICKS, vec,
   Dir,
 } from '../src/index.ts';
-import { input, makeWorld, player, row, run, type Spawn } from './util.ts';
+import { input, makeWorld, player, row, rules, run, type Spawn } from './util.ts';
 
 const onRow = (): Spawn => [[0, 1, 0], '+Y', '+X'];
 
@@ -91,10 +91,10 @@ describe('jump', () => {
     expect(player(w).to.cell).toEqual(vec(1, 1, 0));
   });
 
-  test('short jump when A2 is taken by a player', () => {
+  test('A2 taken by a player: a stomp jump onto it with push rules (§16), else a short jump', () => {
     const w = makeWorld(row(0, 4), [onRow(), [[2, 1, 0], '+Y', '+X']]);
     jump(w);
-    expect(player(w).to.cell).toEqual(vec(1, 1, 0));
+    expect(player(w).to.cell).toEqual(rules.push ? vec(2, 1, 0) : vec(1, 1, 0));
   });
 
   test('forward jump into a wall (A1 solid) hops instead', () => {
