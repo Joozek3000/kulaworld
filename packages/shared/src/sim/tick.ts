@@ -1,11 +1,11 @@
-import { CHAIN_MAX, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS } from '../constants.ts';
+import { CHAIN_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
-import { add, eq, type Vec3 } from '../vec.ts';
+import { add, eq, sub, type Vec3 } from '../vec.ts';
 import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
 import {
-  Action, isFree, isPushable, outOfBounds, reservations, reserve, transmits, trySpawn,
+  Action, isFree, isPushable, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
   type Cmd, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
@@ -88,7 +88,8 @@ type Intent = { p: PlayerState; cmds: Cmd[] };
 
 /**
  * The single place where all Idle players' intended moves are resolved against each other (ARCHITECTURE §7, §14).
- * Each player's intent is its first viable command, or a push when that is a roll into a same-face player.
+ * Each player's intent is its first viable command, or a push when that is a roll into a same-face player, or an
+ * edge push when it is a flip onto a player standing on the face being flipped onto.
  * Order: 1. targeted victims escaping (any move but a turn), 2. mutual pushes bounce, 3. other pushes, 4. the rest.
  * Within each stage players go in fair order; a later player sees earlier claims as reserved.
  * With push rules off there are no push intents, so only stage 4 runs: the MVP rules.
@@ -96,14 +97,17 @@ type Intent = { p: PlayerState; cmds: Cmd[] };
 function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void {
   const res = reservations(world);
   const victimOf = new Map<PlayerState, PlayerState>();
+  const edge = new Set<PlayerState>();
   const plans = new Map<PlayerState, Plan>();
   for (const { p, cmds } of intents) {
     const choice = choose(world, p, cmds, res);
-    if (choice && 'victim' in choice) victimOf.set(p, choice.victim);
-    else if (choice) plans.set(p, choice);
+    if (choice && 'victim' in choice) {
+      victimOf.set(p, choice.victim);
+      if (choice.edge) edge.add(p);
+    } else if (choice) plans.set(p, choice);
   }
   // Every ball in a pushed line may escape first (cradle push, §14); one that does breaks the line there.
-  const targeted = new Set([...victimOf].flatMap(([p, v]) => chainLine(world, p, v)));
+  const targeted = new Set([...victimOf].flatMap(([p, v]) => (edge.has(p) ? [v] : chainLine(world, p, v))));
   const done = new Set<PlayerState>();
   const act = ({ p, cmds }: Intent) => { done.add(p); tryCmds(world, p, cmds, res); };
 
@@ -118,20 +122,26 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
     if (done.has(p)) continue;
     done.add(p);
     spendPulse(intents, p);
-    const knocked = push(world, p, v, res, events);
+    const knocked = edge.has(p) ? edgePush(world, p, v, res, events) : push(world, p, v, res, events);
     if (knocked) done.add(knocked);
   }
 
   for (const it of intents) if (!done.has(it.p)) act(it);
 }
 
-/** The first command that would start, or the victim when that is a roll into a player on the same face. */
-function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): Plan | { victim: PlayerState } | null {
+/**
+ * The first command that would start, or the victim when that is a roll into a player on the same face, or (`edge`)
+ * a flip whose target cell T holds a player standing on the face flipped onto (§14 edge push).
+ */
+function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): Plan | { victim: PlayerState; edge?: true } | null {
   for (const cmd of cmds) {
     if (cmd === 'fwd' && world.rules.push) {
       const A = add(p.pose.cell, dirVec(p.pose.fwd));
       const victim = world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.up && eq(v.pose.cell, A));
       if (victim) return { victim };
+      const T = flipTarget(world, p, res);
+      const onT = T && world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.fwd && eq(v.pose.cell, T));
+      if (onT) return { victim: onT, edge: true };
     }
     const plan = previewAction(world, p, cmd, res);
     if (plan) return plan;
@@ -203,6 +213,36 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
   return last;
 }
 
+/** The cell a forward roll from P's pose would flip into (A free, nothing below it), or null. */
+function flipTarget(world: World, p: PlayerState, res: Reservations): Vec3 | null {
+  const A = add(p.pose.cell, dirVec(p.pose.fwd));
+  if (isSolid(world, A) || !isFree(world, res, p.id, A)) return null;
+  const T = sub(A, dirVec(p.pose.up));
+  return isSolid(world, T) ? null : T;
+}
+
+/**
+ * Edge push (§14, phase 12c): P flips over its edge into T, where V stands on P's new face. V is pushed along
+ * D = −U (P's old up reversed: down the side face, or across the top away from the edge) to T + D.
+ * V not pushable: P is blocked. T + D blocked: P bounces. Else V is knocked and P completes its flip into T.
+ */
+function edgePush(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): PlayerState | null {
+  const tick = world.tick, D = opposite(p.pose.up), dest = add(v.pose.cell, dirVec(D));
+  if (!isPushable(v, tick)) return null;
+  if (!isFree(world, res, v.id, dest)) {
+    stun(p, tick, true);
+    events.push({ type: 'bounce', playerId: p.id });
+    return null;
+  }
+  knock(v, dest, p.id, tick);
+  startAction(p, { action: Action.Flip, to: { cell: v.pose.cell, up: p.pose.fwd, fwd: D }, ticks: FLIP_TICKS }, tick);
+  if (p.protectedUntil > tick) p.protectedUntil = tick;
+  reserve(res, v);
+  reserve(res, p);
+  events.push({ type: 'push', pusherId: p.id, victimId: v.id, edge: true });
+  return v;
+}
+
 /** A death (off the map, or burnt): Dead for RESPAWN_TICKS, key drop and knockout credit, a life in knockout. */
 function die(world: World, p: PlayerState, events: SimEvent[]): void {
   p.action = Action.Dead;
@@ -216,23 +256,29 @@ function die(world: World, p: PlayerState, events: SimEvent[]): void {
 }
 
 /**
- * Hot tiles (phase 12): heat counts the ticks a ball spends on the same (cell, up) while Idle, Turning or Hopping
- * (hops at half rate, every even tick, since phase 12b).
- * Stuns, knocks and other actions don't count (a victim isn't camping); any change of cell or up resets it. At the
- * level's burn threshold the ball pops (a death).
+ * Hot tiles (phase 12, per tile since 12c): a tile (cell, up) heats 1 per tick while a ball on it is Idle, Turning or
+ * Hopping (hops at half rate, every even tick), and cools 1 per 2 ticks while no ball is on it. A ball that is on it
+ * but stunned, knocked or leaving holds its heat. At the level's burn threshold the ball pops (a death) and the tile
+ * resets.
  */
 function updateHeat(world: World, events: SimEvent[]): void {
   const h = world.heat;
   if (!h) return;
+  const hot = world.hot, occupied = new Set<string>();
   for (const p of world.players) {
-    if (p.action === Action.Dead || p.eliminated) { p.heat = 0; p.heatKey = ''; continue; }
-    const key = `${p.pose.cell.x},${p.pose.cell.y},${p.pose.cell.z}|${p.pose.up}`;
-    if (key !== p.heatKey) { p.heatKey = key; p.heat = 0; }
+    if (p.action === Action.Dead || p.eliminated) { p.heat = 0; continue; }
+    const key = tileKey(p.pose.cell, p.pose.up);
+    occupied.add(key);
+    p.heat = hot.get(key) ?? 0;
     if (p.action !== Action.Idle && p.action !== Action.Turn && p.action !== Action.Hop) continue;
     if (p.action === Action.Hop && world.tick % 2) continue; // hopping in place (the stomp defence) heats at half rate
-    if (++p.heat < h.burnTicks) continue;
+    if (++p.heat < h.burnTicks) { hot.set(key, p.heat); continue; }
+    hot.delete(key);
     events.push({ type: 'burn', playerId: p.id });
     die(world, p, events);
+  }
+  if (world.tick % 2 === 0) {
+    for (const [key, heat] of hot) if (!occupied.has(key)) { if (heat > 1) hot.set(key, heat - 1); else hot.delete(key); }
   }
 }
 

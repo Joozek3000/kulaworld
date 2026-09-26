@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, CLIMB_SPIN, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
-  SPIN_PER_CELL, STRIKE_TICKS, STUN_TICKS, TURN_TICKS,
+  Action, ALL_DIRS, BALL_RADIUS, CLIMB_SPIN, cross, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
+  SPIN_PER_CELL, STRIKE_TICKS, STUN_TICKS, TICK_RATE, tileKey, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
@@ -47,10 +47,12 @@ const WOBBLE_CYCLES = 3;
 const LUNGE_CELLS = 0.25;
 const LUNGE_TICKS = 4;
 // Cradle strike (phase 12b): the striker lunges into the line, peaking at contact after STRIKE_CONTACT_TICKS, and
-// recoils. The middle balls then shudder along F one frame apart, and the last ball's slide waits for them.
+// recoils. The middle balls then shudder along F in turn, spaced so the last clack lands before the last ball's slide
+// (the hold) for any line length (phase 12c).
 const STRIKE_CELLS = 0.2;
 const STRIKE_CONTACT_TICKS = 1;
 const CRADLE_HOLD_TICKS = 2;
+const CLACK_WINDOW_MS = (CRADLE_HOLD_TICKS - STRIKE_CONTACT_TICKS) * 1000 / TICK_RATE; // from contact to the end of the hold
 const ringGeo = new THREE.TorusGeometry(0.28, 0.04, 8, 24);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
 
@@ -363,7 +365,7 @@ class PlayerView {
   }
 
   /**
-   * The hot tile under a heated ball (phase 12). `heat` is the server's count on the ball's current tile; the glow
+   * The hot tile under a heated ball (phase 12). `heat` is the server's heat of the tile the ball is on; the glow
    * follows the settled pose (the tile it stands on), so it vanishes as soon as the ball moves.
    */
   placeHot(heat: number, cfg: { warnTicks: number; burnTicks: number } | null, timeSec: number): void {
@@ -602,10 +604,17 @@ export class PlayersView {
   onFeel: ((e: Feel) => void) | null = null;
   /** Hit-stop: a ball's render tick is held at `tick` until `until` (performance.now ms). Local and visual only. */
   private frozen = new Map<string, { until: number; tick: number }>();
-  /** Cradle shudders waiting for their frame: one middle ball per frame, down the line (phase 12b). */
-  private shudders: { view: PlayerView; axis: THREE.Vector3; step: number; of: number }[] = [];
+  /** Cradle shudders waiting for their time (`at`, performance.now ms), down the line (phase 12b/12c). */
+  private shudders: { view: PlayerView; axis: THREE.Vector3; step: number; of: number; at: number }[] = [];
 
-  constructor(private scene: THREE.Scene) {}
+  /** Edge-proximity glow (phase 12c): a thin line on the local ball's edge when an enemy is just around it. */
+  private readonly edgeMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  private readonly edgeGlow = new THREE.Mesh(new THREE.BoxGeometry(1, 0.05, 0.05), this.edgeMat);
+
+  constructor(private scene: THREE.Scene) {
+    this.edgeGlow.visible = false;
+    scene.add(this.edgeGlow);
+  }
 
   /** Solid test for blob shadows (the level minus crumbled blocks), or null without a level. */
   setSolid(solid: SolidFn | null): void {
@@ -663,7 +672,7 @@ export class PlayersView {
       const feel: FeelFn = (kind, intensity = 0.5) => {
         if (kind === 'hit') this.contact(id, v, localId, nowMs);
         else if (kind === 'clash') this.clash(v);
-        else if (kind === 'strike') this.strike(v);
+        else if (kind === 'strike') this.strike(v, nowMs);
         else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
       };
       const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
@@ -676,13 +685,18 @@ export class PlayersView {
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
-    const sh = this.shudders.shift();
-    if (sh?.view.shown) {
+    while (this.shudders.length && this.shudders[0].at <= nowMs) {
+      const sh = this.shudders.shift()!;
+      if (!sh.view.shown) continue;
       sh.view.shudder(sh.axis);
       this.onFeel?.({ kind: 'clack', at: sh.view.ball.position, local: sh.view.local, intensity: sh.of > 1 ? sh.step / (sh.of - 1) : 0 });
     }
+    this.placeEdgeGlow(localId, dt);
     const cfg = this.heat;
-    state.players.forEach((p, id) => this.views.get(id)?.placeHot(p.heat, cfg, nowMs / 1000));
+    for (const v of this.views.values()) {
+      const { cell, up } = v.current.from;
+      v.placeHot(state.hot.get(tileKey(cell, up)) ?? 0, cfg, nowMs / 1000);
+    }
     // Markers go red over a ball (a stomp is coming): anyone else on screen standing in the marked cell.
     const standing = new Set<string>();
     for (const v of this.views.values()) if (v.shown) standing.add(`${cellOf(v.current.from)}|${v.current.from.up}`);
@@ -691,9 +705,9 @@ export class PlayersView {
 
   /**
    * Cradle strike contact (§14): the balls lined up in front of the striker on its face. All but the last shudder in
-   * turn, one per frame, each with a clack; the last one's knock plays the normal hit when its slide starts.
+   * turn, each with a clack, spaced hold / (n − 1) so all n − 1 fit before the last one's knock plays the normal hit.
    */
-  private strike(striker: PlayerView): void {
+  private strike(striker: PlayerView, nowMs: number): void {
     const { cell, up, fwd } = striker.current.from, F = dirVec(fwd);
     const line: PlayerView[] = [];
     for (let k = 1; ; k++) {
@@ -703,7 +717,8 @@ export class PlayersView {
       line.push(q);
     }
     const middle = line.slice(0, -1), axisV = new THREE.Vector3(F.x, F.y, F.z);
-    middle.forEach((view, step) => this.shudders.push({ view, axis: axisV, step, of: middle.length }));
+    const spacing = CLACK_WINDOW_MS / Math.max(1, line.length - 1);
+    middle.forEach((view, step) => this.shudders.push({ view, axis: axisV, step, of: middle.length, at: nowMs + step * spacing }));
   }
 
   /** The cradle strike behind a knock: a Strike starting on the knock's tick, on the same face. */
@@ -760,14 +775,43 @@ export class PlayersView {
     });
   }
 
-  /** The player whose roll pushed this knock: a Roll starting on the same tick into the victim's cell. */
+  /** The player whose roll pushed this knock: a Roll (or an edge push's Flip) starting on the same tick into the victim's cell. */
   private pusherOf(knock: Seg, victimId: string): string | null {
     for (const [id, v] of this.views) {
       if (id === victimId) continue;
-      if (v.segs.some((q) => q.action === Action.Roll && q.startTick === knock.startTick
+      if (v.segs.some((q) => (q.action === Action.Roll || q.action === Action.Flip) && q.startTick === knock.startTick
         && q.to.cell.x === knock.from.cell.x && q.to.cell.y === knock.from.cell.y && q.to.cell.z === knock.from.cell.z)) return id;
     }
     return null;
+  }
+
+  /**
+   * Edge push readability (§14): an enemy standing on the adjacent face of the local ball's block, right past an open
+   * edge (in T, where a roll over that edge would push it). The shared edge glows in the enemy's colour, fading in.
+   */
+  private placeEdgeGlow(localId: string, dt: number): void {
+    const me = this.views.get(localId);
+    let enemy: PlayerView | null = null;
+    if (me?.shown && this.solid) {
+      const { cell: c, up } = me.current.from, U = dirVec(up);
+      for (const d of ALL_DIRS) {
+        if (!perpendicular(d, up)) continue;
+        const D = dirVec(d), T = { x: c.x + D.x - U.x, y: c.y + D.y - U.y, z: c.z + D.z - U.z };
+        if (this.solid(c.x + D.x, c.y + D.y, c.z + D.z) || this.solid(T.x, T.y, T.z)) continue; // no open edge that way
+        const key = `${T.x},${T.y},${T.z}`;
+        enemy = [...this.views.values()].find((v) => v !== me && v.shown && v.current.from.up === d && cellOf(v.current.from) === key) ?? null;
+        if (!enemy) continue;
+        const along = dirVec(cross(up, d));
+        this.edgeGlow.position.set(c.x + (D.x - U.x) / 2, c.y + (D.y - U.y) / 2, c.z + (D.z - U.z) / 2);
+        this.edgeGlow.quaternion.setFromUnitVectors(X_AXIS, probe.set(along.x, along.y, along.z));
+        this.edgeMat.color.set(enemy.color);
+        break;
+      }
+    }
+    const k = Math.min(1, dt * 8);
+    this.edgeMat.opacity += ((enemy ? 0.9 : 0) - this.edgeMat.opacity) * k;
+    if (!enemy && this.edgeMat.opacity < 0.02) this.edgeMat.opacity = 0;
+    this.edgeGlow.visible = this.edgeMat.opacity > 0;
   }
 
   /** Last correction blend of the local ball (cells), for F3. */

@@ -3,8 +3,8 @@ import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
-  previewAction, reservations, stompPreview, sub, turnFwd,
-  type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type World,
+  previewAction, reservations, stompPreview, sub, tileKey, turnFwd,
+  type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
 
 const { values } = parseArgs({
@@ -42,7 +42,7 @@ interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
-  cradles: number;
+  cradles: number; edgePushes: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -167,22 +167,36 @@ function occupiedByOther(state: { players: { forEach(cb: (p: PlayerLike, id: str
 }
 
 /**
- * An opponent a roll forward would push right now: standing in A = C + F on the same face and pushable next tick.
- * With `voidOnly`, only if the knock would drop it into air (A + F − U not solid).
+ * Where a roll forward from `pose` would push an opponent: V standing in A = C + F on the same face (knocked along F),
+ * or, over an open edge, V standing in T = A − U on face F (an edge push, §14: knocked along −U).
+ */
+function pushSpot(world: World, pose: Pose): { cell: Vec3; up: Dir; dest: Vec3 } {
+  const F = dirVec(pose.fwd), U = dirVec(pose.up), A = add(pose.cell, F);
+  if (isSolid(world, A) || isSolid(world, sub(A, U))) return { cell: A, up: pose.up, dest: add(A, F) };
+  const T = sub(A, U);
+  return { cell: T, up: pose.fwd, dest: sub(T, U) };
+}
+
+/**
+ * An opponent a roll forward would push right now (pushSpot), pushable next tick. With `voidOnly`, only if the knock
+ * would drop it into air (nothing under the destination along the victim's gravity).
  */
 function pushable(state: { tick: number; players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, pose: Pose, world: World, voidOnly: boolean): boolean {
-  const F = dirVec(pose.fwd), A = add(pose.cell, F), dest = add(A, F);
+  const { cell, up, dest } = pushSpot(world, pose);
   if (isSolid(world, dest)) return false; // would bounce
-  if (voidOnly && isSolid(world, sub(dest, dirVec(pose.up)))) return false;
+  if (voidOnly && isSolid(world, sub(dest, dirVec(up)))) return false;
   let hit = false;
   state.players.forEach((o, id) => {
-    if (id === selfId || o.fromUp !== pose.up || `${o.fromX},${o.fromY},${o.fromZ}` !== cellKey(A)) return;
+    if (id === selfId || o.fromUp !== up || `${o.fromX},${o.fromY},${o.fromZ}` !== cellKey(cell)) return;
     if (isPushable({ action: o.action, startTick: o.startTick, endTick: o.endTick } as PlayerState, state.tick + 1)) hit = true;
   });
   return hit;
 }
 
-/** Standable cells next to each opponent on its own face (where a bully can push from), cellKey → opponent id. */
+/**
+ * Cells a bully can push each opponent from, cellKey → opponent id: next to it on its own face, or around an edge
+ * (phase 12c): on the adjacent face of its block, one cell over the shared edge (C = O − Uo + U, with C + Uo open).
+ */
 function besideOpponents(state: { players: { forEach(cb: (p: PlayerLike & { toUp: number }, id: string) => void): void } }, selfId: string, world: World, skip: (id: string) => boolean): Map<string, string> {
   const cells = new Map<string, string>();
   state.players.forEach((o, id) => {
@@ -190,21 +204,25 @@ function besideOpponents(state: { players: { forEach(cb: (p: PlayerLike & { toUp
     const U = dirVec(o.toUp as Dir);
     for (const d of ALL_DIRS) {
       if (!perpendicular(d, o.toUp as Dir)) continue;
-      const c = add({ x: o.toX, y: o.toY, z: o.toZ }, dirVec(d));
+      const O = { x: o.toX, y: o.toY, z: o.toZ }, c = add(O, dirVec(d));
       if (!isSolid(world, c) && isSolid(world, sub(c, U))) cells.set(cellKey(c), id);
+      const e = sub(c, U); // around the edge: the flip from e along +Uo lands on O
+      if (!isSolid(world, e) && !isSolid(world, c) && isSolid(world, sub(e, dirVec(d)))) cells.set(cellKey(e), id);
     }
   });
   return cells;
 }
 
-/** An opponent standing right next to `pose` on the same face: its id and the direction to it. */
-function adjacentOpponent(state: { players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, pose: Pose, skip: (id: string) => boolean): { id: string; dir: Dir } | null {
+/**
+ * An opponent `pose` could push by rolling in some direction d (pushSpot with fwd d): right next to it on the same
+ * face, or just around the edge on the adjacent face (phase 12c). Its id and d.
+ */
+function adjacentOpponent(state: { players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, pose: Pose, skip: (id: string) => boolean, world: World): { id: string; dir: Dir } | null {
   let hit: { id: string; dir: Dir } | null = null;
+  const spots = ALL_DIRS.filter((d) => perpendicular(d, pose.up)).map((d) => ({ d, ...pushSpot(world, { ...pose, fwd: d }) }));
   state.players.forEach((o, id) => {
-    if (id === selfId || o.action === Action.Dead || skip(id) || o.fromUp !== pose.up) return;
-    for (const d of ALL_DIRS) {
-      if (perpendicular(d, pose.up) && cellKey(add(pose.cell, dirVec(d))) === `${o.fromX},${o.fromY},${o.fromZ}`) hit = { id, dir: d };
-    }
+    if (id === selfId || o.action === Action.Dead || skip(id)) return;
+    for (const s of spots) if (o.fromUp === s.up && cellKey(s.cell) === `${o.fromX},${o.fromY},${o.fromZ}`) hit = { id, dir: s.d };
   });
   return hit;
 }
@@ -342,7 +360,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       return press('fwd', p.startTick, p.action, s.tick, true);
     }
     if (hunter && !unsafe) {
-      const adj = adjacentOpponent(s, me, pose, skip);
+      const adj = adjacentOpponent(s, me, pose, skip, world);
       if (adj && adj.dir !== pose.fwd) {
         replan();
         return press(adj.dir === turnFwd(pose.up, pose.fwd, -1) ? 'left' : 'right', p.startTick, p.action, s.tick, true);
@@ -445,6 +463,8 @@ const POST_REFRESH_MS = 2_000;
  * (knockout: the arena centre), or failing that the nearest corridor cell. It goes there, faces along the corridor
  * toward the nearest opponent, and sits. It only moves to step off a hot tile (the shared heat escape, then back) or
  * to return after being pushed. Defensive hops come from the shared runBot loop.
+ * Phase 12c: on its way it waits rather than push anyone in its path; it pushes only at its post, when someone is
+ * right in front (on its face, or just around the edge).
  */
 function blockerBrain(ctx: Ctx) {
   let post: { cell: string; up: Dir; along: Dir } | null = null;
@@ -503,6 +523,7 @@ function blockerBrain(ctx: Ctx) {
     if (cellKey(pose.cell) !== post.cell || pose.up !== post.up) {
       const path = findPath(world, pose, new Set([post.cell]));
       if (!path?.length) { post = null; return; }
+      if (path[0].cmd === 'fwd' && occupiedByOther(s, me, cellKey(pushSpot(world, pose).cell))) return; // wait, don't push
       return press(path[0].cmd, p, s.tick);
     }
     // At the post: face along the corridor toward the nearest opponent (where they'll come from).
@@ -511,6 +532,7 @@ function blockerBrain(ctx: Ctx) {
     const A = dirVec(post.along), d = sub(cellOf(o), pose.cell);
     const want = A.x * d.x + A.y * d.y + A.z * d.z >= 0 ? post.along : opposite(post.along);
     if (pose.fwd !== want) press(turnFwd(pose.up, pose.fwd, -1) === want ? 'left' : 'right', p, s.tick);
+    else if (pushable(s, me, pose, world, false)) press('fwd', p, s.tick);
   };
 }
 
@@ -518,7 +540,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const room = await connect(client, name);
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
-    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0,
+    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0, edgePushes: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
@@ -534,7 +556,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
       return;
     }
     const me = room.sessionId;
-    if (e.type === 'push' && e.pusherId === me) stats.pushes++;
+    if (e.type === 'push' && e.pusherId === me) { stats.pushes++; if (e.edge) stats.edgePushes++; }
     if (e.type === 'cradle' && e.pusherId === me) stats.cradles++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
     if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
@@ -561,7 +583,8 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     const playing = room.state.phase === 'playing' && !p.spectating;
     // Hot tile (phase 12): past the warn threshold, step off (any legal move: W rolls, flips or climbs).
     const heat = planWorld(room.state).level.heat;
-    if (playing && heat && p.heat >= heat.warnTicks && p.action === Action.Idle) {
+    const tileHeat = room.state.hot?.get(tileKey({ x: p.fromX, y: p.fromY, z: p.fromZ }, p.fromUp)) ?? 0;
+    if (playing && heat && tileHeat >= heat.warnTicks && p.action === Action.Idle) {
       if (!cooling) { ctx.send({ fwdHeld: true }); stats.heatEscapes++; cooling = true; }
       return;
     }
@@ -607,7 +630,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

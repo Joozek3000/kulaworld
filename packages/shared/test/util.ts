@@ -52,4 +52,4 @@ export const input = (i: Partial<Input>): Input => ({ seq: 0, fwdHeld: false, tu
 
 /** JSON of everything but the static level, for determinism comparisons. */
 export const serialize = (w: World): string =>
-  JSON.stringify({ ...w, level: w.level.id }, (_, v) => (v instanceof Set ? [...v] : v));
+  JSON.stringify({ ...w, level: w.level.id }, (_, v) => (v instanceof Set || v instanceof Map ? [...v] : v));

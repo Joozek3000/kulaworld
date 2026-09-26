@@ -26,8 +26,6 @@ export const PlayerS = schema({
   /** Prediction (§17): the last input applied (its seq) and the tick it was applied at. */
   ackSeq: t.int32().default(-1),
   ackTick: t.int32().default(-1),
-  /** Hot tiles (phase 12): ticks on the current tile; the client glows it from the level's warn threshold. */
-  heat: t.uint16().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
 }, 'PlayerS');
@@ -56,6 +54,8 @@ export const GameState = schema({
   winnerId: t.string(), // '' = none / draw
   players: t.map(PlayerS),
   items: t.map(ItemS),
+  /** Hot tiles (phase 12c): tileKey → heat in ticks, only tiles with heat > 0. The client glows them from warn. */
+  hot: t.map('uint16'),
 }, 'GameState');
 export type GameState = SchemaType<typeof GameState>;
 
@@ -92,7 +92,6 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'eliminatedBy', p.eliminatedBy ?? '');
     set(s, 'protectedUntil', p.protectedUntil);
     set(s, 'knockouts', p.knockouts);
-    set(s, 'heat', p.heat);
   }
   for (const k of world.keys) {
     const id = `key-${k.id}`;
@@ -104,6 +103,8 @@ export function syncSchema(world: World, state: GameState): void {
   }
   const exit = world.level.exit;
   if (exit && !state.items.has('exit')) state.items.set('exit', new ItemS({ id: 'exit', kind: 'exit', ...exit.cell, up: exit.up }));
+  for (const [k, h] of world.hot) if (state.hot.get(k) !== h) state.hot.set(k, h);
+  for (const k of [...state.hot.keys()]) if (!world.hot.has(k)) state.hot.delete(k);
   set(state, 'mode', world.mode);
   set(state, 'crumbled', world.knockout?.next ?? 0);
   set(state, 'warnBand', world.knockout?.warn ?? -1);

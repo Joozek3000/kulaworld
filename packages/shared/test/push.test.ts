@@ -93,7 +93,7 @@ describe('push', () => {
     expect(p0.bounce).toBe(true);
     expect(p0.endTick - p0.startTick).toBe(STUN_TICKS);
     expect(p0.pose.cell).toEqual(vec(0, 1, 0));
-    expect({ ...p1, heat: 0, heatKey: '' }).toEqual({ ...before, heat: 0, heatKey: '' }); // only its hot-tile clock moved
+    expect({ ...p1, heat: 0 }).toEqual({ ...before, heat: 0 }); // only its hot-tile clock moved
     setInput(w, 'p0', input({})); // still holding W would bounce again
     run(w, STUN_TICKS);
     expect(p0.bounce).toBe(false);

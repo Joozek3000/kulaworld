@@ -59,9 +59,8 @@ export interface PlayerState {
   stompBump: Vec3 | null;
   /** Jump grace (§6): a Roll started from rest can still turn into a standing jump until this tick; -1 otherwise. */
   graceUntil: number;
-  /** Hot tiles (phase 12): ticks spent Idle/Turning/Hopping on `heatKey` (cell|up); any move there resets it. */
+  /** Hot tiles: the heat of the tile under this player (a copy of `world.hot` at its tile, 0 while dead). */
   heat: number;
-  heatKey: string;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -95,6 +94,8 @@ export interface World {
   knockout: KnockoutState | null;
   /** Hot tiles, in ticks (from the level; the predictor turns them off). */
   heat: { warnTicks: number; burnTicks: number } | null;
+  /** Tile heat (phase 12c), by tileKey; only tiles with heat > 0. */
+  hot: Map<string, number>;
   tick: number;
   timeLimitTick: number;
   /** Join order; step() iterates it rotated by tick for fairness. */
@@ -110,7 +111,7 @@ export type SimEvent =
   | { type: 'win'; winnerId: string | null; reason: RaceResult['reason'] }
   | { type: 'death'; playerId: string; cell: Vec3 }
   | { type: 'respawn'; playerId: string; cell: Vec3 }
-  | { type: 'push'; pusherId: string; victimId: string }
+  | { type: 'push'; pusherId: string; victimId: string; edge?: true }
   | { type: 'bounce'; playerId: string }
   | { type: 'keyDrop'; playerId: string; keyId: number }
   | { type: 'knockout'; pusherId: string; victimId: string }
@@ -135,6 +136,7 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     removed: new Set(),
     knockout: level.crumble ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
     heat: level.heat,
+    hot: new Map(),
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
     players: [],
@@ -206,7 +208,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
-    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, heatKey: '',
+    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -296,13 +298,16 @@ export function reserve(res: Reservations, p: PlayerState): void {
   for (const c of occupiedCells(p)) res.set(cellKey(c), p.id);
 }
 
-/** Not solid, and not reserved by another player. */
+/** A tile: the face a ball stands on, as its cell and up (the key of `world.hot`). */
+export const tileKey = (cell: Vec3, up: Dir): string => `${cellKey(cell)}|${up}`;
+
 /** A block here: in the level and not crumbled. Every sim/BFS ground check goes through this. */
 export const isSolid = (world: World, v: Vec3): boolean => {
   const k = cellKey(v);
   return world.level.solid.has(k) && !world.removed.has(k);
 };
 
+/** Not solid, and not reserved by another player. */
 export function isFree(world: World, res: Reservations, selfId: string, v: Vec3): boolean {
   if (isSolid(world, v)) return false;
   const owner = res.get(cellKey(v));

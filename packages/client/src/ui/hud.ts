@@ -1,4 +1,4 @@
-import { TICK_RATE, type Level } from '@kula/shared';
+import { TICK_RATE, tileKey, type Dir, type Level } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -69,7 +69,8 @@ export function createHud() {
       const maxLives = level?.lives ?? 3;
       const goal = ko ? `last ball rolling wins · ${maxLives} lives` : `collect ${required} keys, then reach the exit`;
       // Hot tile (phase 12): the local ball has stood still long enough to glow.
-      const hot = !!mine && !!level?.heat && s.phase === 'playing' && !mine.spectating && mine.heat >= level.heat.warnTicks;
+      const hot = !!mine && !!level?.heat && s.phase === 'playing' && !mine.spectating
+        && (s.hot.get(tileKey({ x: mine.fromX, y: mine.fromY, z: mine.fromZ }, mine.fromUp as Dir)) ?? 0) >= level.heat.warnTicks;
 
       switch (s.phase) {
         case 'lobby': {

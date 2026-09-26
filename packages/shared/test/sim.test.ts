@@ -194,12 +194,12 @@ describe('reservations', () => {
     expect(contest(0).winner).not.toBe(contest(1).winner);
   });
 
-  test("can't flip into an occupied cell", () => {
+  test("can't flip into an occupied cell (with push rules it's an edge push, §14)", () => {
     // p1 stands on the +X face of the block, exactly where p0's flip would land.
     const w = makeWorld([[0, 0, 0]], [onRow(), [[1, 0, 0], '+X', '+Y']]);
     setInput(w, 'p0', input({ fwdHeld: true }));
     step(w);
-    expect(player(w).action).toBe(Action.Idle);
+    expect(player(w).action).toBe(rules.push ? Action.Flip : Action.Idle);
   });
 
   test("can't roll into a cell another player is leaving", () => {

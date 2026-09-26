@@ -234,7 +234,7 @@ Required test levels:
    - `wander`: random inputs.
    - `seek`: BFS over `(cell, up, fwd)` states using the shared move rules to reach the nearest key, then the exit.
    - `bully`: hunts the nearest opponent and pushes it (knockout play).
-   - `blocker` (phase 12b): sits in a 1-wide corridor on the others' route to the keys/exit (knockout: the arena centre), facing the approach. It moves only to step off a hot tile and back, or to return after being pushed.
+   - `blocker` (phase 12b): sits in a 1-wide corridor on the others' route to the keys/exit (knockout: the arena centre), facing the approach. It moves only to step off a hot tile and back, or to return after being pushed. On its way it waits rather than push anyone in its path; it pushes only at its post, when someone is right in front (phase 12c).
 4. **Latency**: set `LATENCY_MS=150` in `.env`, run `npm run dev`, then check that motion is still smooth.
 5. **LAN**: join from a phone or a second PC.
 
@@ -270,6 +270,15 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - Escape precedence still applies to every ball in the line. An escaping ball breaks the line at that point.
 - Stomps don't chain (§16).
 - `rules.chain: false` → a player behind the victim means P bounces (phase 11 rules).
+
+**Edge push** (phase 12c, around corners):
+- A Flip whose target cell T holds a player V standing on the face being flipped onto (`V.up === F`, the flipper's new up) pushes V (event `push` with `edge: true`) along the flipper's arrival direction `D = −U` (its old up reversed, i.e. down or along V's face, away from the edge).
+- **Success** (V pushable, `T + D` not solid and not reserved): V is Knocked to `T + D`, then staggers, or falls if there's no ground. The flipper completes its flip into T. Knockout credit and a `push` event as usual.
+- **Fail** (V pushable but `T + D` blocked): the flipper bounces (Stunned with bounce, stays in C).
+- **V not pushable** (moving, staggered, high hop): the flip is blocked, as today.
+- It works both ways: top → side and side → top. On a climb (concave), the ball ends on the same face as anyone above it, so the normal push already applies.
+- Opposite faces (top vs underside of a plate) never interact.
+- Readability: when an enemy is on an adjacent face within 1 cell of the shared edge (in T, where a roll over that edge would push it), that edge glows faintly in the enemy's colour for the local player.
 
 **Same-tick precedence.** Collect all Idle players' intents first, then resolve:
 1. **Escape first.** Victims whose own intent this tick is a Roll, Flip, Jump or Hop start it, and pushes aimed at them are blocked with no stun. A victim whose intent is a Turn is still pushed.
@@ -326,10 +335,10 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 **Events**: `lifeLost {playerId, livesLeft}`, `eliminated {playerId, byId?}`, `crumbleWarn {band}`, `crumble {band}`.
 
 **Hot tiles** (phase 12, anti-camping, both modes):
-- Each player has `heat`: the ticks spent on the same (cell, up) while Idle, Turning or Hopping. Hopping counts at half rate, on even ticks only (phase 12b: the hop is the stomp defence). Stunned, Striking, Knocked and moving ticks don't count (being a victim isn't camping), and any change of cell or up resets it.
-- At `warnTicks` (default 50 = 2.5 s) the tile glows. At `burnTicks` (default 80 = 4 s) the ball **pops**: a death with the usual consequences (a life in knockout, a key drop and knockout credit in race), plus event `burn {playerId}`.
+- Heat belongs to the **tile** (cell, up), not the player (phase 12c). A tile heats 1 per tick while a ball on it is Idle, Turning or Hopping. Hopping counts at half rate, on even ticks only (phase 12b: the hop is the stomp defence). A ball on it that is Stunned, Striking, Knocked or leaving holds the heat (being a victim isn't camping). A tile with no ball on it cools 1 per 2 ticks. So stepping off at the warning and straight back resumes near the old heat, and players taking turns on one tile share it.
+- At `warnTicks` (default 50 = 2.5 s) the tile glows. At `burnTicks` (default 80 = 4 s) the ball **pops**: a death with the usual consequences (a life in knockout, a key drop and knockout credit in race), plus event `burn {playerId}`. A burn resets its tile to 0.
 - Level config: `"heat": { "warnSec": 2.5, "burnSec": 4 }`, or `false` to turn it off. Default on for race and knockout levels. Race levels warn later: race-01 has `{ "warnSec": 3, "burnSec": 5 }` (phase 12b).
-- `heat` is synced per player. Clients glow the tile under a heated ball (orange → flickering red), play a sizzle, show "MOVE!" to the local player, and puff on a burn. The predictor ignores heat: burns are the server's call.
+- The world keeps `hot` (tileKey → heat, only tiles above 0), synced as the `hot` map in the room state. Clients glow the tile under a heated ball (orange → flickering red), play a sizzle, show "MOVE!" to the local player, and puff on a burn. The predictor ignores heat: burns are the server's call.
 
 **Sudden death in race** (phase 12): race levels may define `crumble` too; race-01 crumbles over its last 30 s (`startSec` 90 of 120). Crumble bands never include the block under a key or the exit, in any mode.
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, crumbleBands, HEAT_BURN_TICKS, HEAT_WARN_TICKS, loadLevel, setInput, step, STUN_TICKS, TICK_RATE,
-  type SimEvent,
+  Action, crumbleBands, Dir, HEAT_BURN_TICKS, HEAT_WARN_TICKS, loadLevel, setInput, step, STUN_TICKS, TICK_RATE, tileKey, vec,
+  type SimEvent, type World,
 } from '../src/index.ts';
 import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
 
@@ -76,6 +76,54 @@ describe('hot tiles', () => {
     const custom = makeWorld(row(0, 8), [at(2)], { heat: { warnSec: 1, burnSec: 2 } });
     run(custom, 2 * TICK_RATE);
     expect(player(custom).action).toBe(Action.Dead);
+  });
+
+  // Tile heat (phase 12c): the heat belongs to the tile, and an empty tile cools at 1 per 2 ticks.
+  const tile2 = tileKey(vec(2, 1, 0), Dir.PY);
+  /** One command, then wait until p's action is done. */
+  const act = (w: World, id: string, i: Parameters<typeof input>[0]) => {
+    setInput(w, id, input(i));
+    step(w);
+    setInput(w, id, input({}));
+    while (player(w, id).action !== Action.Idle) step(w);
+  };
+
+  test('step off at the warning and straight back: burns sooner than a fresh tile', () => {
+    const w = makeWorld(row(0, 8), [at(2)]);
+    const p = player(w);
+    run(w, HEAT_WARN_TICKS);
+    act(w, 'p0', { fwdHeld: true }); // to x=3
+    const left = w.tick; // the tile is empty from here
+    act(w, 'p0', { turn: 1 });
+    act(w, 'p0', { turn: 1 });
+    act(w, 'p0', { fwdHeld: true }); // back to x=2
+    const back = w.tick;
+    expect([p.pose.cell, back - left < TICK_RATE]).toEqual([vec(2, 1, 0), true]);
+    expect(p.heat).toBeGreaterThan(HEAT_WARN_TICKS - 10);
+    while (p.action !== Action.Dead) step(w);
+    expect(w.tick - back).toBeLessThan(HEAT_BURN_TICKS - HEAT_WARN_TICKS + 10);
+  });
+
+  test('an empty tile cools at 1 per 2 ticks, to 0', () => {
+    const w = makeWorld(row(0, 8), [at(2)]);
+    run(w, 20);
+    act(w, 'p0', { fwdHeld: true });
+    const h = w.hot.get(tile2)!;
+    expect(h).toBeGreaterThan(15);
+    run(w, 10);
+    expect(w.hot.get(tile2)).toBe(h - 5);
+    run(w, 2 * h);
+    expect(w.hot.has(tile2)).toBe(false);
+  });
+
+  test('two players alternating on one tile share its heat', () => {
+    const w = makeWorld(row(0, 8), [at(2), at(1)]);
+    run(w, 30);
+    act(w, 'p0', { fwdHeld: true }); // p0 leaves x=2
+    act(w, 'p1', { fwdHeld: true }); // p1 rolls in
+    step(w);
+    expect(player(w, 'p1').pose.cell).toEqual(vec(2, 1, 0));
+    expect(player(w, 'p1').heat).toBeGreaterThan(25);
   });
 
   test('determinism with burns', () => {
