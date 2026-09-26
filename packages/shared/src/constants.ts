@@ -21,7 +21,9 @@ export const JUMP_GRACE_TICKS = 2;
 /** Hot tiles: a ball standing on the same tile this long glows, and pops at HEAT_BURN_TICKS (level-configurable). */
 export const HEAT_WARN_TICKS = 50;
 export const HEAT_BURN_TICKS = 80;
-/** Chain push: at most this many balls in a line move together. */
-export const CHAIN_MAX = 4;
+/** Cradle push (phase 12b): the longest line of balls that transmits a strike to its last ball. */
+export const CHAIN_MAX = 6;
+/** A cradle strike: the pusher lunges and recoils in place. */
+export const STRIKE_TICKS = 4;
 // Knockout (ARCHITECTURE §15)
 export const SPAWN_PROTECT_TICKS = 40;

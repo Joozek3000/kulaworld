@@ -30,5 +30,6 @@
   "exit": { "cell": [3, 1, 9], "up": "+Y" },
   "keysRequired": 3,
   "timeLimitSec": 120,
-  "crumble": { "startSec": 90, "intervalSec": 1.25, "warnSec": 1 }
+  "crumble": { "startSec": 75, "intervalSec": 1.25, "warnSec": 1 },
+  "heat": { "warnSec": 3, "burnSec": 5 }
 }

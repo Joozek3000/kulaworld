@@ -202,3 +202,14 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - `ANTI_STALEMATE=off` (server env) restores the phase 11 rules (no chain push, no hot tiles, no race crumble) for before/after soaks.
 - 2026-09-26, phase 12: Level lint reports every 1-wide run of at least 4 tiles with the length of its way round, and warns only when there's none. None of the current levels has a corridor without a way round: since the climb (phase 11), undersides, side faces and wall climbs always offer one, at most 3-6 moves longer.
 
+- 2026-09-26, phase 12b: Cradle push (§14).
+  - `push()` builds the line as before (up to `CHAIN_MAX` 6, or 1 with `rules.chain: false`). A line of 1 is the normal push. A 7th ball, a wall, or a player past the line leaves the last ball's next cell blocked, so P bounces.
+  - "No push immunity change" is read as: a Striking ball is pushable and stompable like an Idle one, and it transmits as a middle ball. `Strike` reserves only its own cell. A cradle still ends P's own spawn protection, as any push does.
+  - A spawn-protected middle ball still transmits (it isn't moved). A protected last ball isn't pushable, so P bounces.
+  - Only the `cradle` event is sent for the strike, not `push`. The last ball then gets the usual knock, stagger/fall, death and knockout events.
+  - `Strike` is in `UNPREDICTED` (a server-only state, like Stunned). The move into a line was already deferred to the server (tested).
+- 2026-09-26, phase 12b: Cradle rendering. The striker's lunge peaks after 1 tick (contact), then recoils over the other 3. At contact, the balls between striker and last ball get one shudder each (squash along F, one render frame apart) with a `clack` whose pitch rises down the line. The last ball's knock holds 2 of its 4 ticks (a push holds 1), so its slide and `hit` come after the clacks. In headless Chrome the two clacks were 11 ms apart and the hit came 90 ms later.
+- 2026-09-26, phase 12b: Hopping in place heats on even ticks only (`world.tick % 2 === 0`): half rate, deterministic.
+- 2026-09-26, phase 12b: The predictor test harness now syncs crumbled blocks and collected keys each tick (`setWorld`), as the client does. With race-01's sudden death at 75 s, the 2000-tick determinism test on race-01 would otherwise mispredict on crumbled ground.
+- 2026-09-26, phase 12b: `lintCorridors(level, min)` takes the minimum run length (default `CORRIDOR_MIN` 4). The blocker bot uses 2, because race-01's connecting beams are only 3 tiles long.
+- 2026-09-26, phase 12b: Blocker bot. Every 2 s it picks a post: the nearest corridor cell on any opponent's shortest route to the keys/exit (knockout: standable cells within 3 of the level's centre), or else the nearest corridor cell. It paths there, turns along the corridor toward the nearest opponent, and sits. Moving into a player on the way is a push (it doesn't avoid that). Bully detours last 1.5 s when the nearest opponent is within 2 cells (Manhattan), else 3 s.

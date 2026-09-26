@@ -124,6 +124,16 @@ export const RECIPES: Record<string, Recipe> = {
     vibrato(c, tail.frequency, t + 0.06, 0.37, 11, 35);
     return 0.45;
   },
+  /**
+   * Cradle clack (phase 12b): a hard rubber click, a 10 ms high-passed tick plus a short sine knock. `intensity` is the
+   * ball's place down the line (0..1): each one clicks higher.
+   */
+  clack(c, out, t, { pitch, intensity: i }) {
+    const f = 900 * pitch * (1 + 0.5 * i);
+    noise(c, env(c, out, t, 0.35, 0.0005, 0.012), t, 0.015, 'highpass', 3000, 0.8);
+    osc(c, env(c, out, t, 0.3, 0.001, 0.045), t, 0.05, 'sine', f * 1.3, f, 0.02);
+    return 0.06;
+  },
   /** Cartoon boing: sine ~250 Hz with a 12 Hz vibrato, both decaying over 300 ms. */
   boing(c, out, t, { pitch }) {
     const o = osc(c, env(c, out, t, 0.28, 0.005, 0.3), t, 0.32, 'sine', 250 * pitch, 300 * pitch, 0.3);

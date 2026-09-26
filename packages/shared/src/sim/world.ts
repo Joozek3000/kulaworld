@@ -6,7 +6,7 @@ import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */
@@ -68,7 +68,7 @@ export interface KeyItem { id: number; cell: Vec3; collected: boolean }
 /** 'lastAlive': one knockout player left; 'allOut': the last ones were eliminated together (a draw). */
 export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' | 'lastAlive' | 'allOut' }
 
-/** `chain: false` limits a push to a single ball (the pre-phase-12 rule; used for soak comparisons). */
+/** `chain: false` turns the cradle push off: a player behind the victim bounces the pusher (phase 11 rules; soak comparisons). */
 export interface Rules { push: boolean; chain?: boolean }
 
 /** Knockout crumble progress (ARCHITECTURE §15). Bands are block cellKeys, furthest from the centre first. */
@@ -120,7 +120,8 @@ export type SimEvent =
   | { type: 'crumble'; band: number }
   | { type: 'stomp'; attackerId: string; victimId: string }
   | { type: 'clash'; attackerId: string; victimId: string }
-  | { type: 'burn'; playerId: string };
+  | { type: 'burn'; playerId: string }
+  | { type: 'cradle'; pusherId: string; victimId: string; length: number };
 
 /** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
@@ -231,7 +232,7 @@ export function occupiedCells(p: PlayerState): Vec3[] {
   const { cell, fwd } = p.pose;
   switch (p.action) {
     case Action.Dead: return [];
-    case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: return [cell];
+    case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: case Action.Strike: return [cell];
     case Action.Flip: return [cell, add(cell, dirVec(fwd)), p.to.cell];
     case Action.Jump: {
       // Over a player on A1: A1 stays theirs. A stomp jump also holds the bump cell B.
@@ -251,12 +252,27 @@ export function occupiedCells(p: PlayerState): Vec3[] {
 export function isPushable(v: PlayerState, tick: number): boolean {
   if (tick < v.protectedUntil) return false; // knockout spawn protection
   switch (v.action) {
-    case Action.Idle: case Action.Turn: return true;
+    case Action.Idle: case Action.Turn: case Action.Strike: return true;
     case Action.Stunned: return v.bounce; // a knocked victim staggers; a bounced pusher is fair game
-    case Action.Hop: {
-      const since = tick - v.startTick;
-      return (since >= 1 && since <= HOP_PUSH_WINDOW) || v.endTick - tick <= HOP_PUSH_WINDOW;
-    }
+    case Action.Hop: return lowHop(v, tick);
+    default: return false;
+  }
+}
+
+/** A hop is low (touching the ground) in its first HOP_PUSH_WINDOW ticks after the start tick and its last ones. */
+function lowHop(v: PlayerState, tick: number): boolean {
+  const since = tick - v.startTick;
+  return (since >= 1 && since <= HOP_PUSH_WINDOW) || v.endTick - tick <= HOP_PUSH_WINDOW;
+}
+
+/**
+ * A middle ball of a cradle line passes the strike on (§14, phase 12b): grounded and not moving. Idle, Turning,
+ * Striking, Stunned (bounce or stagger) or a low Hop. Spawn protection doesn't matter: a middle ball isn't moved.
+ */
+export function transmits(v: PlayerState, tick: number): boolean {
+  switch (v.action) {
+    case Action.Idle: case Action.Turn: case Action.Strike: case Action.Stunned: return true;
+    case Action.Hop: return lowHop(v, tick);
     default: return false;
   }
 }

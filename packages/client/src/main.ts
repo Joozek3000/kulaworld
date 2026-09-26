@@ -51,6 +51,7 @@ players.onFeel = (e) => {
     case 'stomp': audio.play('stomp', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
     case 'clash': audio.play('boing', { at, gain: 1.2 }); break;
     case 'pop': audio.play('pop', { at }); break;
+    case 'clack': audio.play('clack', { at, intensity: e.intensity }); break;
   }
 };
 

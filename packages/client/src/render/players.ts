@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
   Action, BALL_RADIUS, CLIMB_SPIN, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
-  SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
+  SPIN_PER_CELL, STRIKE_TICKS, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
@@ -11,9 +11,9 @@ import { applySquash, Spring } from './squash.ts';
 
 /**
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
- * `hit` is push contact (at the victim), `pop` a death.
+ * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
  */
-export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash';
+export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -45,6 +45,11 @@ const WOBBLE_RAD = 0.35;
 const WOBBLE_CYCLES = 3;
 const LUNGE_CELLS = 0.25;
 const LUNGE_TICKS = 4;
+// Cradle strike (phase 12b): the striker lunges into the line, peaking at contact after STRIKE_CONTACT_TICKS, and
+// recoils. The middle balls then shudder along F one frame apart, and the last ball's slide waits for them.
+const STRIKE_CELLS = 0.2;
+const STRIKE_CONTACT_TICKS = 1;
+const CRADLE_HOLD_TICKS = 2;
 const ringGeo = new THREE.TorusGeometry(0.28, 0.04, 8, 24);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
 
@@ -72,6 +77,7 @@ const SQUASH = {
   roll: -0.03, // pulse at each tile start
   climb: -0.12, // rolling into a wall's corner
   stomp: -0.5, // a stomped victim, flattened under the attacker before it shoots out (§16)
+  shudder: -0.18, // a middle ball of a cradle, along the strike
 };
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
 const STOMP_HOLD = 0.4;
@@ -116,6 +122,8 @@ class PlayerView {
   private contactPending = false;
   /** A bounce started on screen; the hard squash + boing fire at the lunge's peak. */
   private boingPending = false;
+  /** A cradle strike started on screen; the line shudders from the lunge's peak (contact). */
+  private strikePending = false;
   readonly local: boolean;
   /** Knock segments (serials) that are stomps, not pushes: set by PlayersView each frame. */
   stompSerials = new Set<number>();
@@ -285,6 +293,7 @@ class PlayerView {
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
       orient.copy(tmpQ.fromArray(this.pose.quat));
       if (s.action === Action.Stunned) this.stunned(s, renderTick);
+      if (s.action === Action.Strike) this.strike(s, renderTick, feel);
       const ghost = renderTick < this.protectedUntil;
       for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
       orient.multiply(spinQ);
@@ -377,6 +386,7 @@ class PlayerView {
     // A contact or boing moment that a slow frame skipped past still fires, late rather than never.
     if (this.contactPending && s.action !== Action.Knocked) { this.contactPending = false; feel('hit'); }
     if (this.boingPending && s.action !== Action.Stunned) { this.boingPending = false; feel('boing'); }
+    if (this.strikePending && s.action !== Action.Strike) { this.strikePending = false; feel('strike'); }
     if (prev === Action.Knocked && s.action !== Action.Knocked) this.kick(this.knockAxis, SQUASH.stop * sq);
     switch (s.action) {
       case Action.Hop:
@@ -395,6 +405,7 @@ class PlayerView {
       case Action.Rebound: this.kick(tmpUp, SQUASH.contact * sq); feel('clash'); break; // bounced off a high hop
       case Action.Knocked: this.contactPending = true; break;
       case Action.Stunned: this.boingPending = s.bounce; break;
+      case Action.Strike: this.strikePending = true; break;
       case Action.Fall:
         if (prev !== Action.Fall) {
           this.fallCells = 0;
@@ -516,6 +527,19 @@ class PlayerView {
     this.ring.quaternion.copy(tmpQ).multiply(RING_TILT); // lies flat, facing up
   }
 
+  /** Cradle strike: a lunge like a bounce's (no stun ring), peaking at contact, then the recoil. */
+  private strike(s: Seg, renderTick: number, feel: FeelFn): void {
+    const t = Math.max(0, renderTick - s.startTick);
+    const k = t < STRIKE_CONTACT_TICKS ? t / STRIKE_CONTACT_TICKS : Math.max(0, (STRIKE_TICKS - t) / (STRIKE_TICKS - STRIKE_CONTACT_TICKS));
+    this.ball.position.addScaledVector(tmpFwd.set(0, 0, 1).applyQuaternion(tmpQ), STRIKE_CELLS * k);
+    if (this.strikePending && t >= STRIKE_CONTACT_TICKS) { this.strikePending = false; feel('strike'); }
+  }
+
+  /** A middle ball of a cradle passing the strike on: a quick squash along it. */
+  shudder(axisV: THREE.Vector3): void {
+    this.kick(axisV, SQUASH.shudder * tuning.squash);
+  }
+
   /** Projects the shadow along the dominant axis of up (diagonal mid-flip) onto the first block within reach. */
   private placeShadow(solid: SolidFn): boolean {
     const [ux, uy, uz] = this.pose.up;
@@ -566,6 +590,8 @@ export class PlayersView {
   onFeel: ((e: Feel) => void) | null = null;
   /** Hit-stop: a ball's render tick is held at `tick` until `until` (performance.now ms). Local and visual only. */
   private frozen = new Map<string, { until: number; tick: number }>();
+  /** Cradle shudders waiting for their frame: one middle ball per frame, down the line (phase 12b). */
+  private shudders: { view: PlayerView; axis: THREE.Vector3; step: number; of: number }[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -625,6 +651,7 @@ export class PlayersView {
       const feel: FeelFn = (kind, intensity = 0.5) => {
         if (kind === 'hit') this.contact(id, v, localId, nowMs);
         else if (kind === 'clash') this.clash(v);
+        else if (kind === 'strike') this.strike(v);
         else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
       };
       const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
@@ -637,12 +664,42 @@ export class PlayersView {
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
+    const sh = this.shudders.shift();
+    if (sh?.view.shown) {
+      sh.view.shudder(sh.axis);
+      this.onFeel?.({ kind: 'clack', at: sh.view.ball.position, local: sh.view.local, intensity: sh.of > 1 ? sh.step / (sh.of - 1) : 0 });
+    }
     const cfg = this.heat;
     state.players.forEach((p, id) => this.views.get(id)?.placeHot(p.heat, cfg, nowMs / 1000));
     // Markers go red over a ball (a stomp is coming): anyone else on screen standing in the marked cell.
     const standing = new Set<string>();
     for (const v of this.views.values()) if (v.shown) standing.add(`${cellOf(v.current.from)}|${v.current.from.up}`);
     for (const v of this.views.values()) if (v.markerCell) v.setMarkerTaken(standing.has(v.markerCell));
+  }
+
+  /**
+   * Cradle strike contact (§14): the balls lined up in front of the striker on its face. All but the last shudder in
+   * turn, one per frame, each with a clack; the last one's knock plays the normal hit when its slide starts.
+   */
+  private strike(striker: PlayerView): void {
+    const { cell, up, fwd } = striker.current.from, F = dirVec(fwd);
+    const line: PlayerView[] = [];
+    for (let k = 1; ; k++) {
+      const key = `${cell.x + F.x * k},${cell.y + F.y * k},${cell.z + F.z * k}`;
+      const q = [...this.views.values()].find((v) => v !== striker && v.shown && v.current.from.up === up && cellOf(v.current.from) === key);
+      if (!q) break;
+      line.push(q);
+    }
+    const middle = line.slice(0, -1), axisV = new THREE.Vector3(F.x, F.y, F.z);
+    middle.forEach((view, step) => this.shudders.push({ view, axis: axisV, step, of: middle.length }));
+  }
+
+  /** The cradle strike behind a knock: a Strike starting on the knock's tick, on the same face. */
+  private strikerOf(knock: Seg): boolean {
+    for (const v of this.views.values()) {
+      if (v.segs.some((q) => q.action === Action.Strike && q.startTick === knock.startTick && q.from.up === knock.from.up)) return true;
+    }
+    return false;
   }
 
   /** Clash (§16): the rebounding attacker squashed itself; the hopping victim at its landing cell squashes too. */
@@ -719,6 +776,7 @@ export class PlayersView {
   private knockHold(s: Seg, victimId: string, localId: string, lead: number): number {
     if (s.action !== Action.Knocked) return KNOCK_HOLD;
     if (this.stomperOf(s, victimId)) return STOMP_HOLD; // the attacker lands on it: no gap to close
+    if (this.strikerOf(s)) return CRADLE_HOLD_TICKS / KNOCK_TICKS; // the impulse travels down the line first
     let ticks = 1 + (victimId === localId ? lead : 0);
     if (this.pusherOf(s, victimId) === localId) ticks -= lead;
     return Math.min(KNOCK_TICKS - 1, Math.max(0, ticks)) / KNOCK_TICKS;

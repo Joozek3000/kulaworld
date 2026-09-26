@@ -233,6 +233,8 @@ Required test levels:
 3. **Bots** (`npm run bots -- --count N --behaviour wander|seek`): headless Colyseus clients.
    - `wander`: random inputs.
    - `seek`: BFS over `(cell, up, fwd)` states using the shared move rules to reach the nearest key, then the exit.
+   - `bully`: hunts the nearest opponent and pushes it (knockout play).
+   - `blocker` (phase 12b): sits in a 1-wide corridor on the others' route to the keys/exit (knockout: the arena centre), facing the approach. It moves only to step off a hot tile and back, or to return after being pushed.
 4. **Latency**: set `LATENCY_MS=150` in `.env`, run `npm run dev`, then check that motion is still smooth.
 5. **LAN**: join from a phone or a second PC.
 
@@ -257,14 +259,17 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - **Fail** when `A + F` is solid or reserved (a wall or another player behind V): P gets `Stunned` in place for `STUN_TICKS` with a *bounce* flag, rendered as a short lunge and recoil. V is unaffected, so pinning against a wall doesn't work.
 - **Not pushable:** if V is in a non-pushable state, P is simply blocked (MVP behaviour, no stun) and retries next tick if fwd is still held. So holding W against a bouncing player pushes them the moment they're low.
 
-**Chain push** (phase 12, "Newton's cradle"):
-- When P pushes V1, look along F for a contiguous line V1..Vn (n ≤ `CHAIN_MAX` = 4) of live players on P's face, each in the next cell.
-- If **every** Vi is pushable and the cell after Vn (`A + n·F`) is not solid and not reserved, all of them are Knocked one cell along F on the same tick. Each lands staggered, or falls if there's no ground (the last one usually does). P rolls into A.
-- If any Vi isn't pushable, or the cell after Vn is solid or reserved, P bounces, as before. A 5th ball right behind the 4th is "reserved" after the line, so a line of 5 bounces. V1 itself not pushable still just blocks P (no stun).
-- Every knocked ball credits P for knockouts, and there's one `push` event per ball.
-- Every ball in a pushed line gets the escape precedence (stage 1 below). One that escapes breaks the line: it's now moving, so it isn't pushable, and P bounces.
+**Cradle push** (phase 12b, replaces the phase 12 "whole line moves" chain push, per Jakub: like the kinetic toy, only the **last** ball flies):
+- When P's fwd targets V1 and there's a contiguous line V1..Vn (n ≥ 2, n ≤ `CHAIN_MAX` = 6) of live players on P's face, each in the next cell, it's a **cradle strike**:
+  - **P doesn't move.** It gets `Strike` (appended action, `STRIKE_TICKS` = 4): a lunge-and-recoil in place, with no stun and no push immunity change.
+  - **Middle balls V1..Vn−1 don't move** and aren't stunned (render-only shudder). They transmit if they're grounded and not moving: Idle, Turning, Stunned (bounce or stagger), or a low Hop.
+  - **The last ball Vn** is Knocked one cell along F if it's pushable and `cell(Vn) + F` is not solid and not reserved. Then stagger, or a fall if there's no ground. P gets knockout credit. Events: `cradle {pusherId, victimId, length}`.
+  - If the last ball isn't pushable, or its next cell is blocked, **P bounces** (as a failed push).
+  - If any middle ball is moving (not transmitting), the line is broken: P is **blocked** (no stun) and retries.
+- n = 1 (a single victim, nothing behind it) is the normal push: P rolls in and V is knocked.
+- Escape precedence still applies to every ball in the line. An escaping ball breaks the line at that point.
 - Stomps don't chain (§16).
-- `rules.chain: false` restores single-ball pushes (the server's `ANTI_STALEMATE=off`, for soak comparisons).
+- `rules.chain: false` → a player behind the victim means P bounces (phase 11 rules).
 
 **Same-tick precedence.** Collect all Idle players' intents first, then resolve:
 1. **Escape first.** Victims whose own intent this tick is a Roll, Flip, Jump or Hop start it, and pushes aimed at them are blocked with no stun. A victim whose intent is a Turn is still pushed.
@@ -321,9 +326,9 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 **Events**: `lifeLost {playerId, livesLeft}`, `eliminated {playerId, byId?}`, `crumbleWarn {band}`, `crumble {band}`.
 
 **Hot tiles** (phase 12, anti-camping, both modes):
-- Each player has `heat`: the ticks spent on the same (cell, up) while Idle, Turning or Hopping. Stunned, Knocked and moving ticks don't count (being a victim isn't camping), and any change of cell or up resets it.
+- Each player has `heat`: the ticks spent on the same (cell, up) while Idle, Turning or Hopping. Hopping counts at half rate, on even ticks only (phase 12b: the hop is the stomp defence). Stunned, Striking, Knocked and moving ticks don't count (being a victim isn't camping), and any change of cell or up resets it.
 - At `warnTicks` (default 50 = 2.5 s) the tile glows. At `burnTicks` (default 80 = 4 s) the ball **pops**: a death with the usual consequences (a life in knockout, a key drop and knockout credit in race), plus event `burn {playerId}`.
-- Level config: `"heat": { "warnSec": 2.5, "burnSec": 4 }`, or `false` to turn it off. Default on for race and knockout levels.
+- Level config: `"heat": { "warnSec": 2.5, "burnSec": 4 }`, or `false` to turn it off. Default on for race and knockout levels. Race levels warn later: race-01 has `{ "warnSec": 3, "burnSec": 5 }` (phase 12b).
 - `heat` is synced per player. Clients glow the tile under a heated ball (orange → flickering red), play a sizzle, show "MOVE!" to the local player, and puff on a burn. The predictor ignores heat: burns are the server's call.
 
 **Sudden death in race** (phase 12): race levels may define `crumble` too; race-01 crumbles over its last 30 s (`startSec` 90 of 120). Crumble bands never include the block under a key or the exit, in any mode.

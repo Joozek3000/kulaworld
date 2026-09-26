@@ -1,11 +1,11 @@
-import { CHAIN_MAX, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
+import { CHAIN_MAX, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import { add, eq, type Vec3 } from '../vec.ts';
 import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
 import {
-  Action, isFree, isPushable, outOfBounds, reservations, reserve, trySpawn,
+  Action, isFree, isPushable, outOfBounds, reservations, reserve, transmits, trySpawn,
   type Cmd, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
@@ -102,7 +102,7 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
     if (choice && 'victim' in choice) victimOf.set(p, choice.victim);
     else if (choice) plans.set(p, choice);
   }
-  // Every ball in a pushed line may escape first (chain push, phase 12); one that does breaks the line there.
+  // Every ball in a pushed line may escape first (cradle push, §14); one that does breaks the line there.
   const targeted = new Set([...victimOf].flatMap(([p, v]) => chainLine(world, p, v)));
   const done = new Set<PlayerState>();
   const act = ({ p, cmds }: Intent) => { done.add(p); tryCmds(world, p, cmds, res); };
@@ -118,7 +118,8 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
     if (done.has(p)) continue;
     done.add(p);
     spendPulse(intents, p);
-    if (push(world, p, v, res, events)) done.add(v);
+    const knocked = push(world, p, v, res, events);
+    if (knocked) done.add(knocked);
   }
 
   for (const it of intents) if (!done.has(it.p)) act(it);
@@ -174,29 +175,32 @@ function chainLine(world: World, p: PlayerState, v: PlayerState): PlayerState[] 
 }
 
 /**
- * P rolls into V's cell A (§14, chain push since phase 12). V not pushable: P is blocked (stays Idle, retries next
- * tick). Otherwise V and the line behind it (V1..Vn, n ≤ CHAIN_MAX) all move one cell along F if every one of them is
- * pushable and the cell after Vn is free; else P bounces (Stunned). Each knocked ball credits P. Returns true when V
- * was knocked.
+ * P rolls into V's cell A (§14). Returns the knocked ball, or null.
+ * - V alone (nothing behind it): the normal push. V not pushable: P is blocked (stays Idle, retries next tick). V's
+ *   next cell blocked (a wall, or a player past CHAIN_MAX / with chain off): P bounces. Else V is knocked, P rolls in.
+ * - A line V1..Vn (n ≥ 2): a cradle strike. P and the middle balls stay put; only Vn is knocked. A middle ball that
+ *   isn't transmitting (moving) blocks P; Vn not pushable, or its next cell blocked, bounces P.
  */
-function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): boolean {
+function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): PlayerState | null {
   const tick = world.tick;
-  if (!isPushable(v, tick)) return false;
-  const F = dirVec(p.pose.fwd), A = v.pose.cell;
+  const F = dirVec(p.pose.fwd);
   const line = chainLine(world, p, v);
   const last = line[line.length - 1], dest = add(last.pose.cell, F);
-  if (!line.every((q) => isPushable(q, tick)) || !isFree(world, res, last.id, dest)) {
+  const cradle = line.length > 1;
+  if (cradle ? !line.slice(0, -1).every((q) => transmits(q, tick)) : !isPushable(v, tick)) return null;
+  if (!isPushable(last, tick) || !isFree(world, res, last.id, dest)) {
     stun(p, tick, true);
     events.push({ type: 'bounce', playerId: p.id });
-    return false;
+    return null;
   }
-  for (const q of line) knock(q, add(q.pose.cell, F), p.id, tick);
-  startAction(p, { action: Action.Roll, to: { ...p.pose, cell: A }, ticks: ROLL_TICKS }, tick);
+  knock(last, dest, p.id, tick);
+  if (cradle) startAction(p, { action: Action.Strike, to: p.pose, ticks: STRIKE_TICKS }, tick);
+  else startAction(p, { action: Action.Roll, to: { ...p.pose, cell: v.pose.cell }, ticks: ROLL_TICKS }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick; // pushing ends your own spawn protection
-  for (const q of line) reserve(res, q);
+  reserve(res, last);
   reserve(res, p);
-  for (const q of line) events.push({ type: 'push', pusherId: p.id, victimId: q.id });
-  return true;
+  events.push(cradle ? { type: 'cradle', pusherId: p.id, victimId: last.id, length: line.length } : { type: 'push', pusherId: p.id, victimId: v.id });
+  return last;
 }
 
 /** A death (off the map, or burnt): Dead for RESPAWN_TICKS, key drop and knockout credit, a life in knockout. */
@@ -212,7 +216,8 @@ function die(world: World, p: PlayerState, events: SimEvent[]): void {
 }
 
 /**
- * Hot tiles (phase 12): heat counts the ticks a ball spends on the same (cell, up) while Idle, Turning or Hopping.
+ * Hot tiles (phase 12): heat counts the ticks a ball spends on the same (cell, up) while Idle, Turning or Hopping
+ * (hops at half rate, every even tick, since phase 12b).
  * Stuns, knocks and other actions don't count (a victim isn't camping); any change of cell or up resets it. At the
  * level's burn threshold the ball pops (a death).
  */
@@ -224,6 +229,7 @@ function updateHeat(world: World, events: SimEvent[]): void {
     const key = `${p.pose.cell.x},${p.pose.cell.y},${p.pose.cell.z}|${p.pose.up}`;
     if (key !== p.heatKey) { p.heatKey = key; p.heat = 0; }
     if (p.action !== Action.Idle && p.action !== Action.Turn && p.action !== Action.Hop) continue;
+    if (p.action === Action.Hop && world.tick % 2) continue; // hopping in place (the stomp defence) heats at half rate
     if (++p.heat < h.burnTicks) continue;
     events.push({ type: 'burn', playerId: p.id });
     die(world, p, events);
@@ -252,7 +258,7 @@ function landStomp(world: World, p: PlayerState, events: SimEvent[]): boolean {
   const v = standingAt(world, L, p.to.up, p.id);
   if (!v) return false;
   const leaving = v.action !== Action.Idle && v.action !== Action.Turn && v.action !== Action.Hop
-    && v.action !== Action.Stunned && !eq(v.to.cell, L);
+    && v.action !== Action.Stunned && v.action !== Action.Strike && !eq(v.to.cell, L);
   if (leaving) return false;
   if (isPushable(v, tick)) {
     knock(v, B, p.id, tick);
@@ -310,7 +316,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   // Nothing below: a jump or knock into air, a fall step, or ground that crumbled during the action.
   if (startFall(world, p, tick)) return;
   if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
-  if (finished === Action.Turn || finished === Action.Stunned) return;
+  if (finished === Action.Turn || finished === Action.Stunned || finished === Action.Strike) return;
   if (finished === Action.Knocked) stun(p, tick, false); // stagger: not pushable (§14)
   onLand(world, p, events);
 }

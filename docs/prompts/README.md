@@ -26,6 +26,7 @@ Workflow:
 | 10b | Stomp polish | Human-like bot reactions, W+Space jump grace, marker tuning |
 | 11 | Climb + latency | Rolling into a wall makes it the floor (Kula gravity); measure and remove input lag |
 | 12 | Anti-stalemate | Bots route around blockers, chain push, hot tiles, race sudden death, level lint |
+| 12b | Cradle push | Only the last ball in a line flies; heat tuning; blocker bot |
 | 13 | Tiles & traps (planned) | Spikes, fire, crumbling, ice, arrows, boost pads, teleporters, lasers + switches, invisible blocks |
 | 14 | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15 | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |

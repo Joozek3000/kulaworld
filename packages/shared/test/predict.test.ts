@@ -47,6 +47,8 @@ class Harness {
       this.ack = { seq: input.seq, tick: s.tick + 1 };
     }
     step(s);
+    // Crumbled blocks and collected keys: the latest server view, as the client syncs them (race-01 crumbles from 75 s).
+    this.pred.setWorld(s.removed, new Set(s.keys.filter((k) => k.collected).map((k) => k.id)));
     this.pred.advanceTo(s.tick + this.lead);
     this.results.push(this.pred.reconcile(s.tick, toServer(this.local), this.ack));
   }

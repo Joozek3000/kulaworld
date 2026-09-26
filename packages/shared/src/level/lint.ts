@@ -19,8 +19,9 @@ const standable = (w: World, c: Vec3, up: Dir) => !isSolid(w, c) && isSolid(w, s
  * Straight runs of ≥ CORRIDOR_MIN standable tiles on one face where no tile has a standable same-face neighbour to
  * either side (1 wide), with the length of the way round: a BFS (climbs, flips onto other faces, jumps) from one end
  * to the other with the run's interior blocked. Report-only: `npm run level:check` warns when there's no way round.
+ * `min` lets the blocker bot (phase 12b) find shorter runs too.
  */
-export function lintCorridors(level: Level): Corridor[] {
+export function lintCorridors(level: Level, min = CORRIDOR_MIN): Corridor[] {
   const w = createWorld(level, 0);
   const narrow = (c: Vec3, up: Dir, along: Dir) =>
     standable(w, c, up) && ALL_DIRS.filter((s) => s !== along && s !== (along ^ 1) && perpendicular(s, up))
@@ -39,7 +40,7 @@ export function lintCorridors(level: Level): Corridor[] {
         if (narrow(sub(start, dirVec(along)), up, along)) continue;
         const run: Vec3[] = [];
         for (let c = start; narrow(c, up, along); c = add(c, dirVec(along))) { run.push(c); seen.add(`${cellKey(c)}|${up}|${along}`); }
-        if (run.length < CORRIDOR_MIN) continue;
+        if (run.length < min) continue;
         const interior = new Map(run.slice(1, -1).map((c) => [cellKey(c), 'wall']));
         const a = run[0], b = run[run.length - 1];
         const round = findPath(w, { cell: a, up, fwd: along }, new Set([cellKey(b)]), interior);

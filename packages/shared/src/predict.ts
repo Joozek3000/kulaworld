@@ -108,7 +108,7 @@ function applyServer(p: PlayerState, s: ServerPlayer): void {
 export type ReconcileResult = 'match' | 'mispredict' | 'deferred' | 'reset' | 'paused';
 
 /** Server-only states: while the local player is in one (on the server or in our prediction), prediction pauses. */
-export const UNPREDICTED: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, Action.Dead, Action.Rebound]);
+export const UNPREDICTED: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, Action.Dead, Action.Rebound, Action.Strike]);
 
 /**
  * The local player's predicted timeline (§17). A private World holds the local player plus the other players frozen

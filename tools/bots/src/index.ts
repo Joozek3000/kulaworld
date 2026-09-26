@@ -2,21 +2,21 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, loadLevel, perpendicular, previewAction, reservations,
-  stompPreview, sub, turnFwd,
+  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
+  previewAction, reservations, stompPreview, sub, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type World,
 } from '@kula/shared';
 
 const { values } = parseArgs({
   options: {
     count: { type: 'string', default: '1' },
-    behaviour: { type: 'string', default: 'wander' }, // comma list, assigned round-robin: seek,wander,bully
+    behaviour: { type: 'string', default: 'wander' }, // comma list, assigned round-robin: seek,wander,bully,blocker
     duration: { type: 'string' }, // seconds; default: run until Ctrl+C
     server: { type: 'string', default: 'ws://localhost:2567' },
     skill: { type: 'string', default: '0.5' }, // 0..1: reaction speed and reliability; 1 = instant, never misses
   },
 });
-const BEHAVIOURS = ['wander', 'seek', 'bully'] as const;
+const BEHAVIOURS = ['wander', 'seek', 'bully', 'blocker'] as const;
 type Behaviour = (typeof BEHAVIOURS)[number];
 const count = Number(values.count);
 const duration = values.duration === undefined ? Infinity : Number(values.duration);
@@ -42,6 +42,7 @@ interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
+  cradles: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -149,6 +150,9 @@ const BULLY_IGNORE_MS = 3_000;
 const BOUNCE_JITTER_MS = 500;
 const AVOID_AFTER_MS = 500;
 const AVOID_MS = 3_000;
+/** A bully whose target is this close (cells) detours for AVOID_NEAR_MS instead (phase 12b): back to the shove sooner. */
+const AVOID_NEAR_CELLS = 2;
+const AVOID_NEAR_MS = 1_500;
 
 type PlayerLike = {
   fromX: number; fromY: number; fromZ: number; fromUp: number; toX: number; toY: number; toZ: number;
@@ -243,7 +247,12 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   // while, to find a way round (underside, side faces, climbs, jump-overs); no such route → the old path (wait/push).
   let firstBlockAt = 0;
   let avoidUntil = 0;
-  const avoidPlayers = () => { avoidUntil = Date.now() + AVOID_MS; firstBlockAt = 0; replan(); };
+  const avoidPlayers = () => {
+    const near = bully && nearestOpponent(ctx.room.state, ctx.room.sessionId).dist <= AVOID_NEAR_CELLS;
+    avoidUntil = Date.now() + (near ? AVOID_NEAR_MS : AVOID_MS);
+    firstBlockAt = 0;
+    replan();
+  };
   const onBlocked = () => {
     if (!firstBlockAt) firstBlockAt = Date.now();
     else if (Date.now() - firstBlockAt >= AVOID_AFTER_MS && Date.now() >= avoidUntil) avoidPlayers();
@@ -396,18 +405,127 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   };
 }
 
+type Players = { players: { forEach(cb: (p: SchemaPlayer, id: string) => void): void } };
+const cellOf = (o: PlayerLike) => ({ x: o.fromX, y: o.fromY, z: o.fromZ });
+const manhattan = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+  Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
+
+/** The closest live opponent to this bot (Manhattan cells), or dist Infinity when there's none. */
+function nearestOpponent(state: Players, selfId: string): { o: SchemaPlayer | null; dist: number } {
+  let me: SchemaPlayer | null = null;
+  state.players.forEach((o, id) => { if (id === selfId) me = o; });
+  let best: { o: SchemaPlayer | null; dist: number } = { o: null, dist: Infinity };
+  if (!me) return best;
+  state.players.forEach((o, id) => {
+    if (id === selfId || o.spectating || o.action === Action.Dead) return;
+    const d = manhattan(cellOf(me!), cellOf(o));
+    if (d < best.dist) best = { o, dist: d };
+  });
+  return best;
+}
+
+/** 1-wide runs (≥ 2 tiles) per level, cellKey → its face and axis. */
+const corridorCells = new Map<string, Map<string, { up: Dir; along: Dir }>>();
+function corridorsOf(world: World): Map<string, { up: Dir; along: Dir }> {
+  let m = corridorCells.get(world.level.id);
+  if (m) return m;
+  m = new Map();
+  for (const c of lintCorridors(world.level, 2)) {
+    for (let k = 0, cell = c.from; k < c.length; k++, cell = add(cell, dirVec(c.along))) m.set(cellKey(cell), { up: c.up, along: c.along });
+  }
+  corridorCells.set(world.level.id, m);
+  return m;
+}
+
+const POST_REFRESH_MS = 2_000;
+
+/**
+ * blocker (phase 12b): holds a 1-wide corridor like a human camper, so soaks see corridor stalemates. Every
+ * POST_REFRESH_MS it picks its post: the nearest corridor cell on an opponent's shortest route to the keys/exit
+ * (knockout: the arena centre), or failing that the nearest corridor cell. It goes there, faces along the corridor
+ * toward the nearest opponent, and sits. It only moves to step off a hot tile (the shared heat escape, then back) or
+ * to return after being pushed. Defensive hops come from the shared runBot loop.
+ */
+function blockerBrain(ctx: Ctx) {
+  let post: { cell: string; up: Dir; along: Dir } | null = null;
+  let postAt = 0;
+  let pending: { prevStart: number; prevAction: number; sentTick: number; fwd: boolean } | null = null;
+  const press = (cmd: string, p: SchemaPlayer, tick: number) => {
+    pending = { prevStart: p.startTick, prevAction: p.action, sentTick: tick, fwd: cmd === 'fwd' || cmd === 'jump' };
+    if (cmd === 'fwd') ctx.send({ fwdHeld: true });
+    else if (cmd === 'jump') ctx.send({ fwdHeld: true, jump: true });
+    else ctx.send({ turn: cmd === 'left' ? -1 : 1 });
+  };
+
+  const choosePost = (world: World, s: Players & { items: { forEach(cb: (it: { kind: string; x: number; y: number; z: number }) => void): void } }, pose: Pose, me: string) => {
+    const corridors = corridorsOf(world);
+    if (!corridors.size) return null;
+    const goals = new Set<string>();
+    if (world.mode === 'knockout') {
+      const { min, max } = world.level;
+      const mid = { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2, z: (min.z + max.z) / 2 };
+      for (const k of standable(world)) {
+        const [x, y, z] = k.split(',').map(Number);
+        if (manhattan({ x, y, z }, mid) <= 3) goals.add(k);
+      }
+    } else {
+      s.items.forEach((it) => goals.add(`${it.x},${it.y},${it.z}`));
+      if (world.level.exit) goals.add(cellKey(world.level.exit.cell));
+    }
+    const onRoutes = new Set<string>();
+    s.players.forEach((o, id) => {
+      if (id === me || o.spectating || o.action === Action.Dead) return;
+      const route = findPath(world, poseOf(o.fromX, o.fromY, o.fromZ, o.fromUp, o.fromFwd), goals) ?? [];
+      for (const st of route) if (corridors.has(cellKey(st.to.cell))) onRoutes.add(cellKey(st.to.cell));
+    });
+    const path = findPath(world, pose, onRoutes.size ? onRoutes : new Set(corridors.keys()));
+    if (!path) return null;
+    const cell = path.length ? cellKey(path[path.length - 1].to.cell) : cellKey(pose.cell);
+    const c = corridors.get(cell);
+    return c ? { cell, ...c } : null;
+  };
+
+  return (playing: boolean) => {
+    const s = ctx.room.state;
+    const me = ctx.room.sessionId;
+    const p: SchemaPlayer | undefined = s.players?.get(me);
+    if (!playing || !p || p.action === Action.Dead) { pending = null; post = null; return; }
+    if (pending) {
+      if (p.startTick !== pending.prevStart || p.action !== pending.prevAction) { if (pending.fwd) ctx.send({}); pending = null; }
+      else if (s.tick - pending.sentTick > 4) { ctx.send({}); pending = null; } // blocked: try again next decision
+      return;
+    }
+    if (p.action !== Action.Idle) return;
+    const world = planWorld(s);
+    const pose = poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd);
+    if (!post || Date.now() >= postAt) { post = choosePost(world, s, pose, me); postAt = Date.now() + POST_REFRESH_MS; }
+    if (!post) return;
+    if (cellKey(pose.cell) !== post.cell || pose.up !== post.up) {
+      const path = findPath(world, pose, new Set([post.cell]));
+      if (!path?.length) { post = null; return; }
+      return press(path[0].cmd, p, s.tick);
+    }
+    // At the post: face along the corridor toward the nearest opponent (where they'll come from).
+    const { o } = nearestOpponent(s, me);
+    if (!o) return;
+    const A = dirVec(post.along), d = sub(cellOf(o), pose.cell);
+    const want = A.x * d.x + A.y * d.y + A.z * d.z >= 0 ? post.along : opposite(post.along);
+    if (pose.fwd !== want) press(turnFwd(pose.up, pose.fwd, -1) === want ? 'left' : 'right', p, s.tick);
+  };
+}
+
 async function runBot(client: Client, name: string, behaviour: Behaviour): Promise<Stats> {
   const room = await connect(client, name);
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
-    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0,
+    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
     name, room, stats,
     send: (i) => room.send('input', { seq: ++seq, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, ...i }),
   };
-  const brain = behaviour === 'wander' ? wanderBrain(ctx) : seekBrain(ctx, behaviour === 'bully');
+  const brain = behaviour === 'wander' ? wanderBrain(ctx) : behaviour === 'blocker' ? blockerBrain(ctx) : seekBrain(ctx, behaviour === 'bully');
 
   room.onMessage('event', (e: SimEvent) => {
     if (e.type === 'win') {
@@ -417,6 +535,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     }
     const me = room.sessionId;
     if (e.type === 'push' && e.pusherId === me) stats.pushes++;
+    if (e.type === 'cradle' && e.pusherId === me) stats.cradles++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
     if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
     if (e.type === 'stomp' && e.victimId === me) stats.stomped++;
@@ -488,7 +607,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

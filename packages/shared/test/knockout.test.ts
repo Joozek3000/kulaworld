@@ -227,7 +227,7 @@ describe('knockout rules', () => {
     const sudden = createWorld(loadLevel({ ...readLevelJson('race-01.json'), heat: false }), 1); // phase 12: sudden death
     addPlayer(sudden, 'a', 'a');
     expect(sudden.knockout).not.toBe(null);
-    run(sudden, 90 * TICK_RATE - 1);
+    run(sudden, readLevelJson('race-01.json').crumble!.startSec * TICK_RATE - 1);
     expect(sudden.removed.size).toBe(0);
     run(sudden, 2);
     expect(sudden.removed.size).toBeGreaterThan(0);

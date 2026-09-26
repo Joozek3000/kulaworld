@@ -5,7 +5,7 @@ import {
 } from '../src/index.ts';
 import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
 
-// Hot tiles (phase 12): heat counts ticks on the same (cell, up) while Idle, Turning or Hopping.
+// Hot tiles (phase 12): heat counts ticks on the same (cell, up) while Idle, Turning or Hopping (half rate, 12b).
 const at = (x: number): Spawn => [[x, 1, 0], '+Y', '+X'];
 const knockout = { mode: 'knockout' as const, lives: 3, crumble: { startSec: 600, intervalSec: 10, warnSec: 2 }, keys: [], exit: undefined, keysRequired: undefined };
 
@@ -20,7 +20,7 @@ describe('hot tiles', () => {
     expect(p.heat).toBe(15); // turning in place still counts
     setInput(w, 'p0', input({ jump: true }));
     run(w, 5);
-    expect([p.action, p.heat]).toEqual([Action.Hop, 20]); // so does hopping in place
+    expect([p.action, p.heat]).toEqual([Action.Hop, 18]); // hopping in place counts at half rate: even ticks 16, 18, 20
     setInput(w, 'p0', input({}));
     while (p.action !== Action.Idle) step(w);
     const before = p.heat;
@@ -28,7 +28,7 @@ describe('hot tiles', () => {
     step(w);
     setInput(w, 'p0', input({}));
     while (p.action !== Action.Idle) step(w);
-    expect(before).toBeGreaterThan(20);
+    expect(before).toBeGreaterThan(18);
     expect(p.heat).toBeLessThanOrEqual(1); // a new tile
   });
 
