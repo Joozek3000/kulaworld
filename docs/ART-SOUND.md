@@ -27,7 +27,7 @@ GLBs use +Y up, embedded PBR colours, no textures. Exit origins sit on their sup
 The user accepted Pretzl's **RubberBallBouncing** on Pixabay as a temporary free bounce:
 https://pixabay.com/sound-effects/film-special-effects-rubberballbouncing-251948/
 
-The original MP3 and source/license record are in `assets/audio/temporary-bounce/`. It has been decoded successfully but is not yet trimmed into a single impact or installed as a runtime override. The earlier generated sound study is exploratory, not the selected bounce. No paid samples are used.
+The original MP3 and source/license record are in `assets/audio/temporary-bounce/`. Edited soft, regular and hard cuts, 24-bit edit masters, processing settings and an audition strip are in its `bounce-v01/` folder. The regular cut is installed as `packages/client/public/sfx/bounce.wav`. The soft and hard files are alternatives for comparison: the existing engine does not automatically choose them by landing intensity. The earlier generated sound study is exploratory, not the selected bounce. No paid samples are used.
 
 The existing audio engine supports `.ogg`/`.wav` overrides in `packages/client/public/sfx/`; retain render-time sound timing when preparing the selected recording for the game.
 

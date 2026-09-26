@@ -6,5 +6,5 @@
   "license_url": "https://pixabay.com/service/license-summary/",
   "selected": "2026-09-26",
   "file": "pretzl-rubberballbouncing-original.mp3",
-  "status": "User-approved temporary bounce. Unmodified original MP3. Not integrated into game."
+  "status": "User-approved temporary bounce. Original MP3 retained unchanged; edited variants in bounce-v01. Regular cut installed as packages/client/public/sfx/bounce.wav."
 }
