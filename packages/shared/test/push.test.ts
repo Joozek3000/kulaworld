@@ -80,9 +80,9 @@ describe('push', () => {
     expect(of(events, 'knockout')).toEqual([]);
   });
 
+  // A player behind the victim is a chain push since phase 12 (chain.test.ts); with a wall it's still a bounce.
   test.each([
     ['a wall', [[2, 1, 0]], [pusher(), victim()]],
-    ['another player', [], [pusher(), victim(), [[2, 1, 0], '+Y', '+Z']]],
   ] as const)('%s behind the victim: pusher Stunned with bounce, victim unchanged', (_, extra, spawns) => {
     const w = makeWorld([...row(0, 4), ...extra] as ReturnType<typeof row>, [...spawns] as Spawn[]);
     const p0 = player(w), p1 = player(w, 'p1');
@@ -93,7 +93,7 @@ describe('push', () => {
     expect(p0.bounce).toBe(true);
     expect(p0.endTick - p0.startTick).toBe(STUN_TICKS);
     expect(p0.pose.cell).toEqual(vec(0, 1, 0));
-    expect(p1).toEqual(before);
+    expect({ ...p1, heat: 0, heatKey: '' }).toEqual({ ...before, heat: 0, heatKey: '' }); // only its hot-tile clock moved
     setInput(w, 'p0', input({})); // still holding W would bounce again
     run(w, STUN_TICKS);
     expect(p0.bounce).toBe(false);

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, loadLevel, perpendicular, previewAction,
+  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, loadLevel, perpendicular, previewAction, reservations,
   stompPreview, sub, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type World,
 } from '@kula/shared';
@@ -41,7 +41,7 @@ const between = (a: number, b: number) => a + Math.random() * (b - a);
 interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
-  stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number;
+  stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -147,6 +147,8 @@ const STUCK_MS = 10_000;
 const BULLY_PATIENCE_MS = 1_000;
 const BULLY_IGNORE_MS = 3_000;
 const BOUNCE_JITTER_MS = 500;
+const AVOID_AFTER_MS = 500;
+const AVOID_MS = 3_000;
 
 type PlayerLike = {
   fromX: number; fromY: number; fromZ: number; fromUp: number; toX: number; toY: number; toZ: number;
@@ -237,7 +239,14 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   const replan = () => { path = []; target = ''; expected = null; };
   const randomTurn = () => ctx.send({ turn: Math.random() < 0.5 ? -1 : 1 });
   /** The move didn't happen (blocked, or bounced off a push): retry, replan after two, turn randomly after 3 replans. */
+  // Phase 12: blocked by a player for AVOID_AFTER_MS (or one bounce) → replan with other players as obstacles for a
+  // while, to find a way round (underside, side faces, climbs, jump-overs); no such route → the old path (wait/push).
+  let firstBlockAt = 0;
+  let avoidUntil = 0;
+  const avoidPlayers = () => { avoidUntil = Date.now() + AVOID_MS; firstBlockAt = 0; replan(); };
   const onBlocked = () => {
+    if (!firstBlockAt) firstBlockAt = Date.now();
+    else if (Date.now() - firstBlockAt >= AVOID_AFTER_MS && Date.now() >= avoidUntil) avoidPlayers();
     if (++blocked >= 2) {
       blocked = 0;
       replan();
@@ -274,12 +283,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     if (pending) {
       if (p.startTick !== pending.prevStart || p.action !== pending.prevAction) {
         if (pending.cmd === 'fwd' || pending.cmd === 'jump') ctx.send({});
-        if (p.action === Action.Stunned) { onBlocked(); holdUntil = Date.now() + Math.random() * BOUNCE_JITTER_MS; } // bounced
+        if (p.action === Action.Stunned) { onBlocked(); avoidPlayers(); holdUntil = Date.now() + Math.random() * BOUNCE_JITTER_MS; } // bounced
         else if (pending.offPath) replan();
         else if (EXPECTED[pending.cmd].includes(p.action)) {
           expected = path.shift()!.to;
           blocked = 0;
           failedPlans = 0;
+          firstBlockAt = 0;
         } else replan();
         pending = null;
       } else if (s.tick - pending.sentTick > 4) {
@@ -343,7 +353,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
 
     const onPlan = path.length > 0 && goals.has(target) && expected !== null && samePose(pose, expected);
     if (!onPlan) {
-      const found = goals.size ? findPath(world, pose, goals) : null;
+      let found: PathStep[] | null = null;
+      if (goals.size && Date.now() < avoidUntil) {
+        const res = reservations(withPlayers(world, s, me)); // others only: withPlayers leaves this bot out
+        found = findPath(world, pose, goals, res);
+        if (found?.length) ctx.stats.detours++;
+      }
+      if (!found?.length) found = goals.size ? findPath(world, pose, goals) : null;
       if (!found?.length) {
         replan();
         // A hunter with nobody to reach (all ignored, e.g. an opponent tucked where every push bounces) roams instead
@@ -384,7 +400,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const room = await connect(client, name);
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
-    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0,
+    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
@@ -412,9 +428,11 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (e.type === 'keyDrop') stats.keyDrops++;
     if (e.type === 'lifeLost') stats.livesLost++;
     if (e.type === 'eliminated') stats.eliminated++;
+    if (e.type === 'burn') stats.burns++;
   });
 
   let dodging = false;
+  let cooling = false;
   /** The incoming jump being reacted to: when the hop goes in, or null if this bot misses it. */
   let threat: { key: string; at: number | null } | null = null;
   const timer = setInterval(() => {
@@ -422,6 +440,13 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (!p) return;
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
     const playing = room.state.phase === 'playing' && !p.spectating;
+    // Hot tile (phase 12): past the warn threshold, step off (any legal move: W rolls, flips or climbs).
+    const heat = planWorld(room.state).level.heat;
+    if (playing && heat && p.heat >= heat.warnTicks && p.action === Action.Idle) {
+      if (!cooling) { ctx.send({ fwdHeld: true }); stats.heatEscapes++; cooling = true; }
+      return;
+    }
+    if (cooling) { ctx.send({}); cooling = false; }
     // Every bot: an enemy's landing marker on my tile → hold jump (a hop high at their landing clashes, §16),
     // after a reaction delay, and sometimes not at all.
     const key = playing ? jumpingOnto(room.state, p, room.sessionId) : '';
@@ -463,7 +488,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

@@ -3,7 +3,7 @@ import {
   Action, addPlayer, cellKey, createWorld, dirVec, findPath, loadLevel, resultPose, setInput, step,
   type Cmd, type Dir, type PathStep, type Pose, type World,
 } from '../src/index.ts';
-import { inOrder, input, levelFiles, readLevelJson, rules } from './util.ts';
+import { inOrder, input, levelFiles, levelJson, readLevelJson, row, rules } from './util.ts';
 
 const worldOf = (file: string) => createWorld(loadLevel(readLevelJson(file)), 1, { ...rules });
 const MOVES: Cmd[] = ['fwd', 'left', 'right', 'jump'];
@@ -127,4 +127,19 @@ describe('every knockout level: spawns reach each other and >= 90% of standable 
       expect(got / all.size, `${file}: from ${cellKey(s.cell)}, ${got}/${all.size}`).toBeGreaterThanOrEqual(0.9);
     }
   });
+});
+
+test('findPath with other players as obstacles routes around a blocker on a beam (phase 12)', () => {
+  const w = createWorld(loadLevel(levelJson(row(0, 8), [[[0, 1, 0], '+Y', '+X'], [[4, 1, 0], '+Y', '-X'], [[8, 1, 0], '+Y', '-X'], [[7, 1, 0], '+Y', '-X']])), 1);
+  w.spawnOrder = [0, 1, 2, 3];
+  const me = addPlayer(w, 'me', 'me');
+  addPlayer(w, 'blocker', 'blocker'); // standing on x=4
+  const others = new Map([['4,1,0', 'blocker']]);
+  const goal = new Set(['6,1,0']);
+  const plain = findPath(w, me.pose, goal)!;
+  expect(plain.some((s) => cellKey(s.to.cell) === '4,1,0')).toBe(true); // straight through: players ignored
+  const around = findPath(w, me.pose, goal, others)!;
+  expect(around).not.toBe(null);
+  expect(around.some((s) => cellKey(s.to.cell) === '4,1,0')).toBe(false); // over or under it instead
+  expect(cellKey(around[around.length - 1].to.cell)).toBe('6,1,0');
 });

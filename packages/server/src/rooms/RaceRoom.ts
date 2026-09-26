@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
 import { Room, type Client } from 'colyseus';
 import {
-  addPlayer, createWorld, InputQueue, loadLevel, removePlayer, setInput, step, TICK_RATE, validateLevel,
+  Action, addPlayer, createWorld, InputQueue, loadLevel, removePlayer, setInput, step, TICK_RATE, validateLevel,
   type InputMsg, type Level, type SimEvent, type World,
 } from '@kula/shared';
 import { config } from '../config.ts';
@@ -14,6 +14,28 @@ const MAX_INPUTS_PER_SEC = 30;
 const PALETTE = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45'];
 
 type Phase = 'lobby' | 'countdown' | 'playing' | 'results';
+
+/**
+ * Soak metric (phase 12, logged with each round's result): ticks in which at least two live players have both sat in
+ * the same (cell, up) for more than 3 s while within 2 cells (Chebyshev) of each other.
+ */
+class StalemateMeter {
+  private since = new Map<string, { key: string; tick: number }>();
+  ticks = 0;
+
+  step(world: World): void {
+    const still: { x: number; y: number; z: number }[] = [];
+    for (const p of world.players) {
+      if (p.action === Action.Dead || p.eliminated) { this.since.delete(p.id); continue; }
+      const key = `${p.pose.cell.x},${p.pose.cell.y},${p.pose.cell.z}|${p.pose.up}`;
+      const prev = this.since.get(p.id);
+      if (prev?.key !== key) this.since.set(p.id, { key, tick: world.tick });
+      else if (world.tick - prev.tick > 3 * TICK_RATE) still.push(p.pose.cell);
+    }
+    const near = (a: typeof still[0], b: typeof still[0]) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z)) <= 2;
+    if (still.some((a, i) => still.some((b, j) => j > i && near(a, b)))) this.ticks++;
+  }
+}
 
 /** Loads and validates levels/<id>.json. Throws on invalid levels, so a room never starts with one. */
 export function loadLevelFile(id: string): Level {
@@ -45,6 +67,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private levels: Level[] = [];
   private level!: Level;
   private world: World | null = null;
+  private stalemate = new StalemateMeter();
   private round = 0;
   private frame = 0;
   private inputCounts = new Map<string, number>();
@@ -135,6 +158,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
           }
         }
         const events = step(world);
+        this.stalemate.step(world);
         s.tick = world.tick;
         syncSchema(world, s);
         for (const e of events) this.emit(e);
@@ -162,9 +186,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
         // Fresh world with everyone at their spawns; not stepped until playing, so the timer starts with the round.
         this.level = this.levels[this.round % this.levels.length];
         s.levelId = this.level.id;
-        const world = createWorld(this.level, ++this.round, { push: config.push });
+        const level = config.antiStalemate ? this.level : { ...this.level, heat: null, crumble: this.level.mode === 'race' ? null : this.level.crumble };
+        const world = createWorld(level, ++this.round, { push: config.push, chain: config.antiStalemate });
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;
+        this.stalemate = new StalemateMeter();
         this.queues.clear();
         for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
         s.items.clear();
@@ -187,7 +213,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const stats = w.mode === 'knockout'
           ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
           : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}`);
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s`);
         break;
       }
     }
@@ -204,6 +230,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'knockout': console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
       case 'stomp': console.log(`event stomp: ${this.nameOf(e.attackerId)} → ${this.nameOf(e.victimId)}`); break;
       case 'clash': console.log(`event clash: ${this.nameOf(e.attackerId)} ↔ ${this.nameOf(e.victimId)}`); break;
+      case 'burn': console.log(`event burn: ${who}`); break;
       case 'keyDrop': console.log(`event keyDrop: ${who} dropped key ${e.keyId}`); break;
       case 'lifeLost': console.log(`event lifeLost: ${who} has ${e.livesLeft}`); break;
       case 'eliminated': console.log(`event eliminated: ${who}${e.byId ? ` by ${this.nameOf(e.byId)}` : ''}`); break;

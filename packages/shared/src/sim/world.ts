@@ -59,13 +59,17 @@ export interface PlayerState {
   stompBump: Vec3 | null;
   /** Jump grace (§6): a Roll started from rest can still turn into a standing jump until this tick; -1 otherwise. */
   graceUntil: number;
+  /** Hot tiles (phase 12): ticks spent Idle/Turning/Hopping on `heatKey` (cell|up); any move there resets it. */
+  heat: number;
+  heatKey: string;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
 /** 'lastAlive': one knockout player left; 'allOut': the last ones were eliminated together (a draw). */
 export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' | 'lastAlive' | 'allOut' }
 
-export interface Rules { push: boolean }
+/** `chain: false` limits a push to a single ball (the pre-phase-12 rule; used for soak comparisons). */
+export interface Rules { push: boolean; chain?: boolean }
 
 /** Knockout crumble progress (ARCHITECTURE §15). Bands are block cellKeys, furthest from the centre first. */
 export interface KnockoutState {
@@ -87,7 +91,10 @@ export interface World {
   rng: number;
   /** Crumbled blocks (cellKeys). isSolid(world, v) is the level minus these. */
   removed: Set<string>;
+  /** Crumble progress (§15; race levels may crumble too since phase 12). Named for its first mode. */
   knockout: KnockoutState | null;
+  /** Hot tiles, in ticks (from the level; the predictor turns them off). */
+  heat: { warnTicks: number; burnTicks: number } | null;
   tick: number;
   timeLimitTick: number;
   /** Join order; step() iterates it rotated by tick for fairness. */
@@ -112,7 +119,8 @@ export type SimEvent =
   | { type: 'crumbleWarn'; band: number }
   | { type: 'crumble'; band: number }
   | { type: 'stomp'; attackerId: string; victimId: string }
-  | { type: 'clash'; attackerId: string; victimId: string };
+  | { type: 'clash'; attackerId: string; victimId: string }
+  | { type: 'burn'; playerId: string };
 
 /** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
@@ -124,7 +132,8 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     seed,
     rng: seed >>> 0,
     removed: new Set(),
-    knockout: knockout ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
+    knockout: level.crumble ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
+    heat: level.heat,
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
     players: [],
@@ -196,7 +205,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
-    jumpOver: false, stompBump: null, graceUntil: -1,
+    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, heatKey: '',
   };
   world.players.push(p);
   trySpawn(world, p);

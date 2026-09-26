@@ -1,6 +1,6 @@
 /** Feel tuning (phase 08): audio mix and squash/stretch. The F4 panel edits it; it persists in localStorage. */
 export const SOUND_NAMES = [
-  'bounce', 'takeoff', 'roll', 'squeak', 'hit', 'stomp', 'boing', 'bump', 'fall', 'pop',
+  'bounce', 'takeoff', 'roll', 'squeak', 'hit', 'stomp', 'boing', 'bump', 'fall', 'pop', 'sizzle',
   'key', 'exit', 'countdown', 'go', 'win', 'lose', 'crumbleWarn', 'crumble', 'eliminated',
 ] as const;
 export type SoundName = (typeof SOUND_NAMES)[number];

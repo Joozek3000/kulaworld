@@ -13,12 +13,13 @@ const NO_PLAYERS: Reservations = new Map();
 const poseKey = (p: Pose) => `${cellKey(p.cell)}|${p.up}|${p.fwd}`;
 
 /**
- * Where `cmd` leaves a player at `pose`, ignoring other players. A forward jump that lands in air
+ * Where `cmd` leaves a player at `pose`, ignoring other players (or, with `res`, treating their cells as obstacles:
+ * no pushes, jumps fly over them, landing on one isn't allowed). A forward jump that lands in air
  * follows the fall to where it lands. Returns null if the move is blocked or ends in death.
  */
-export function resultPose(world: World, pose: Pose, cmd: Cmd): Pose | null {
-  const plan = previewAction(world, { id: '', pose }, cmd, NO_PLAYERS);
-  if (!plan) return null;
+export function resultPose(world: World, pose: Pose, cmd: Cmd, res: Reservations = NO_PLAYERS): Pose | null {
+  const plan = previewAction(world, { id: '', pose }, cmd, res);
+  if (!plan || (res !== NO_PLAYERS && plan.bump)) return null; // routing around players: never through a stomp
   if (plan.action !== Action.Jump) return plan.to;
   const down = dirVec(pose.up);
   let cell = plan.to.cell;
@@ -31,9 +32,10 @@ export function resultPose(world: World, pose: Pose, cmd: Cmd): Pose | null {
 
 /**
  * Breadth-first search over (cell, up, fwd) for the fewest moves until the player stands on any cell in
- * `goals` (cellKeys). Ignores other players. Returns [] if already there, or null if unreachable.
+ * `goals` (cellKeys). Ignores other players, or with `res` (phase 12: bots routing around a blocker) routes around
+ * the cells they occupy. Returns [] if already there, or null if unreachable.
  */
-export function findPath(world: World, from: Pose, goals: ReadonlySet<string>): PathStep[] | null {
+export function findPath(world: World, from: Pose, goals: ReadonlySet<string>, res: Reservations = NO_PLAYERS): PathStep[] | null {
   if (goals.has(cellKey(from.cell))) return [];
   const parent = new Map<string, { prev: string; step: PathStep } | null>([[poseKey(from), null]]);
   let frontier: Pose[] = [from];
@@ -42,7 +44,7 @@ export function findPath(world: World, from: Pose, goals: ReadonlySet<string>): 
     for (const pose of frontier) {
       const key = poseKey(pose);
       for (const cmd of MOVES) {
-        const to = resultPose(world, pose, cmd);
+        const to = resultPose(world, pose, cmd, res);
         if (!to) continue;
         const toKey = poseKey(to);
         if (parent.has(toKey)) continue;

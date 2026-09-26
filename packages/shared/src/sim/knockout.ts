@@ -27,10 +27,10 @@ export function loseLife(world: World, p: PlayerState, creditId: string | null, 
   events.push(creditId ? { type: 'eliminated', playerId: p.id, byId: creditId } : { type: 'eliminated', playerId: p.id });
 }
 
-/** Mode logic for one tick (§7 step 4): crumble warning/removal, then win, draw and timeout checks. */
-export function stepKnockout(world: World, events: SimEvent[]): void {
-  if (world.result) return;
-  const k = world.knockout!, c = world.level.crumble!, tick = world.tick;
+/** Crumble warning and removal for one tick (§15), for any level with `crumble` (race: sudden death, phase 12). */
+export function stepCrumble(world: World, events: SimEvent[]): void {
+  const k = world.knockout, c = world.level.crumble, tick = world.tick;
+  if (!k || !c || world.result) return;
 
   if (!k.stopped && k.next < k.bands.length) {
     const removeAt = (c.startSec + k.next * c.intervalSec) * TICK_RATE;
@@ -47,7 +47,13 @@ export function stepKnockout(world: World, events: SimEvent[]): void {
       k.warn = -1;
     }
   }
+}
 
+/** Knockout mode logic for one tick (§7 step 4): crumble, then win, draw and timeout checks. */
+export function stepKnockout(world: World, events: SimEvent[]): void {
+  if (world.result) return;
+  stepCrumble(world, events);
+  const tick = world.tick;
   const left = alive(world);
   if (world.players.length && !left.length) {
     world.result = { winnerId: null, reason: 'allOut' }; // the last ones went out on the same tick

@@ -26,14 +26,16 @@ export function validateLevel(level: Level): string[] {
   if (level.sky && !(level.sky.length === 2 && level.sky.every((c) => /^#[0-9a-fA-F]{6}$/.test(c)))) {
     errors.push(`sky must be two "#rrggbb" colours, got ${JSON.stringify(level.sky)}`);
   }
+  const c = level.crumble;
+  if (c && !(c.startSec >= c.warnSec && c.intervalSec > c.warnSec && c.warnSec > 0)) {
+    errors.push(`crumble needs startSec >= warnSec > 0 and intervalSec > warnSec, got ${JSON.stringify(c)}`);
+  }
+  const h = level.heat;
+  if (h && !(h.warnTicks > 0 && h.burnTicks > h.warnTicks)) errors.push(`heat needs 0 < warnSec < burnSec, got ${JSON.stringify(h)}`);
   if (level.mode === 'knockout') {
     if (level.keys.length || level.exit || level.keysRequired) errors.push('knockout level must not have keys, an exit or keysRequired');
     if (!Number.isInteger(level.lives) || level.lives < 1) errors.push(`knockout lives must be a positive integer, got ${level.lives}`);
-    const c = level.crumble;
     if (!c) errors.push('knockout level needs crumble { startSec, intervalSec, warnSec }');
-    else if (!(c.startSec >= c.warnSec && c.intervalSec > c.warnSec && c.warnSec > 0)) {
-      errors.push(`crumble needs startSec >= warnSec > 0 and intervalSec > warnSec, got ${JSON.stringify(c)}`);
-    }
   } else if (level.mode === 'race') {
     level.keys.forEach((k, i) => checkPlacement(`key ${i}`, k));
     if (level.exit) checkPlacement('exit', level.exit);

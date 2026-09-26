@@ -67,7 +67,7 @@ describe('crumble bands', () => {
   });
 
   test('a warning precedes each removal by exactly warnSec; removals every intervalSec from startSec', () => {
-    const w = createWorld(loadLevel(readLevelJson('arena-01.json')), 1);
+    const w = createWorld(loadLevel({ ...readLevelJson('arena-01.json'), heat: false }), 1); // idle players would burn
     for (const id of ['a', 'b', 'c', 'd']) addPlayer(w, id, id);
     const c = w.level.crumble!;
     const warns: number[] = [], crumbles: number[] = [];
@@ -216,14 +216,21 @@ describe('knockout rules', () => {
     expect(w.rules.push).toBe(true);
   });
 
-  test('a race world keeps lives at 0 and never crumbles', () => {
-    const w = createWorld(loadLevel(readLevelJson('race-01.json')), 1);
+  test('a race world keeps lives at 0; without `crumble` it never crumbles, with it (race-01) only from startSec', () => {
+    const w = createWorld(loadLevel({ ...readLevelJson('test-flat.json'), heat: false }), 1);
     const p = addPlayer(w, 'a', 'a');
     expect(w.mode).toBe('race');
     expect(w.knockout).toBe(null);
     expect(p.lives).toBe(0);
     run(w, 100);
     expect(w.removed.size).toBe(0);
+    const sudden = createWorld(loadLevel({ ...readLevelJson('race-01.json'), heat: false }), 1); // phase 12: sudden death
+    addPlayer(sudden, 'a', 'a');
+    expect(sudden.knockout).not.toBe(null);
+    run(sudden, 90 * TICK_RATE - 1);
+    expect(sudden.removed.size).toBe(0);
+    run(sudden, 2);
+    expect(sudden.removed.size).toBeGreaterThan(0);
   });
 });
 

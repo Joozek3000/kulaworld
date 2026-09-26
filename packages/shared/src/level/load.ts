@@ -1,3 +1,4 @@
+import { HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
 import { parseDir } from '../dir.ts';
 import { cellKey, vec, type Vec3 } from '../vec.ts';
 import type { Level, LevelJson } from './types.ts';
@@ -32,6 +33,8 @@ export function loadLevel(json: LevelJson): Level {
     mode: json.mode ?? 'race',
     lives: json.lives ?? 0,
     crumble: json.crumble ?? null,
+    heat: json.heat === false ? null
+      : { warnTicks: Math.round((json.heat?.warnSec ?? HEAT_WARN_TICKS / TICK_RATE) * TICK_RATE), burnTicks: Math.round((json.heat?.burnSec ?? HEAT_BURN_TICKS / TICK_RATE) * TICK_RATE) },
     sky: json.sky ?? null,
     solid,
     min,

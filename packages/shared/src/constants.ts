@@ -17,5 +17,11 @@ export const KNOCKOUT_CREDIT_TICKS = 60;
 export const REBOUND_TICKS = 6; // clash: the attacker arcs back to its takeoff cell
 /** A jump pulse this soon after a roll started from rest turns it into a standing forward jump (§6). */
 export const JUMP_GRACE_TICKS = 2;
+// Anti-stalemate (phase 12)
+/** Hot tiles: a ball standing on the same tile this long glows, and pops at HEAT_BURN_TICKS (level-configurable). */
+export const HEAT_WARN_TICKS = 50;
+export const HEAT_BURN_TICKS = 80;
+/** Chain push: at most this many balls in a line move together. */
+export const CHAIN_MAX = 4;
 // Knockout (ARCHITECTURE §15)
 export const SPAWN_PROTECT_TICKS = 40;

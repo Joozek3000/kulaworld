@@ -115,6 +115,12 @@ net.onEvent((e) => {
       break;
     case 'crumbleWarn': audio.play('crumbleWarn', {}, 'ui'); break;
     case 'crumble': audio.play('crumble', {}, 'ui'); break;
+    case 'burn': {
+      const at = players.ballAt(e.playerId);
+      if (at) fx.puff(at, performance.now() / 1000);
+      hud.toast(`${nameOf(e.playerId)} ${e.playerId === net.sessionId ? 'were' : 'was'} too slow: burnt!`, colorOf(e.playerId));
+      break;
+    }
   }
 });
 
@@ -128,6 +134,7 @@ let lastPhase = '';
 let lastCount = -1;
 let wasUnlocked = false;
 let lastLocalPose = '';
+const nextSizzle = new Map<string, number>();
 let blockedSince = 0, lastBump = 0;
 
 view.renderer.setAnimationLoop((now: number) => {
@@ -143,6 +150,7 @@ view.renderer.setAnimationLoop((now: number) => {
     if (levelView) view.scene.remove(levelView.group);
     levelView = level ? new LevelView(level) : null;
     players.setSolid(levelView?.solid ?? null);
+    players.heat = level?.heat ?? null;
     rig.setSolid(levelView?.solid ?? null);
     if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
     view.setSky(level?.sky ?? undefined);
@@ -177,6 +185,12 @@ view.renderer.setAnimationLoop((now: number) => {
   rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
 
   audio.setListener(view.camera);
+  // Hot tiles sizzle, faster and louder as they heat (phase 12).
+  for (const h of players.hotBalls()) {
+    if (now < (nextSizzle.get(h.id) ?? 0)) continue;
+    nextSizzle.set(h.id, now + 320 - 200 * h.level);
+    audio.play('sizzle', { at: h.local ? null : h.at, intensity: h.level });
+  }
   const rolls = players.rolling();
   for (const r of rolls) audio.roll(r.id, r.speed, r.at, r.local);
   audio.endRolls(new Set(rolls.map((r) => r.id)));

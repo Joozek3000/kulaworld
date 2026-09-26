@@ -257,6 +257,15 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - **Fail** when `A + F` is solid or reserved (a wall or another player behind V): P gets `Stunned` in place for `STUN_TICKS` with a *bounce* flag, rendered as a short lunge and recoil. V is unaffected, so pinning against a wall doesn't work.
 - **Not pushable:** if V is in a non-pushable state, P is simply blocked (MVP behaviour, no stun) and retries next tick if fwd is still held. So holding W against a bouncing player pushes them the moment they're low.
 
+**Chain push** (phase 12, "Newton's cradle"):
+- When P pushes V1, look along F for a contiguous line V1..Vn (n ≤ `CHAIN_MAX` = 4) of live players on P's face, each in the next cell.
+- If **every** Vi is pushable and the cell after Vn (`A + n·F`) is not solid and not reserved, all of them are Knocked one cell along F on the same tick. Each lands staggered, or falls if there's no ground (the last one usually does). P rolls into A.
+- If any Vi isn't pushable, or the cell after Vn is solid or reserved, P bounces, as before. A 5th ball right behind the 4th is "reserved" after the line, so a line of 5 bounces. V1 itself not pushable still just blocks P (no stun).
+- Every knocked ball credits P for knockouts, and there's one `push` event per ball.
+- Every ball in a pushed line gets the escape precedence (stage 1 below). One that escapes breaks the line: it's now moving, so it isn't pushable, and P bounces.
+- Stomps don't chain (§16).
+- `rules.chain: false` restores single-ball pushes (the server's `ANTI_STALEMATE=off`, for soak comparisons).
+
 **Same-tick precedence.** Collect all Idle players' intents first, then resolve:
 1. **Escape first.** Victims whose own intent this tick is a Roll, Flip, Jump or Hop start it, and pushes aimed at them are blocked with no stun. A victim whose intent is a Turn is still pushed.
 2. **Mutual push.** If P and Q each target the other's cell, both are Stunned (bounce). Nobody wins through tick order.
@@ -311,10 +320,20 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 
 **Events**: `lifeLost {playerId, livesLeft}`, `eliminated {playerId, byId?}`, `crumbleWarn {band}`, `crumble {band}`.
 
+**Hot tiles** (phase 12, anti-camping, both modes):
+- Each player has `heat`: the ticks spent on the same (cell, up) while Idle, Turning or Hopping. Stunned, Knocked and moving ticks don't count (being a victim isn't camping), and any change of cell or up resets it.
+- At `warnTicks` (default 50 = 2.5 s) the tile glows. At `burnTicks` (default 80 = 4 s) the ball **pops**: a death with the usual consequences (a life in knockout, a key drop and knockout credit in race), plus event `burn {playerId}`.
+- Level config: `"heat": { "warnSec": 2.5, "burnSec": 4 }`, or `false` to turn it off. Default on for race and knockout levels.
+- `heat` is synced per player. Clients glow the tile under a heated ball (orange → flickering red), play a sizzle, show "MOVE!" to the local player, and puff on a burn. The predictor ignores heat: burns are the server's call.
+
+**Sudden death in race** (phase 12): race levels may define `crumble` too; race-01 crumbles over its last 30 s (`startSec` 90 of 120). Crumble bands never include the block under a key or the exit, in any mode.
+
 **Arenas**
 - `arena-01`: a 9×9×1 plate with 4 single-cell holes and 8 spawns around the edge. Flat brawling.
 - `arena-02` "Sky Cross" (phase 07b): a 5×5 plate with four different arms (beam to a pad, a beam with a 1-cell jump gap to a pad, a ladder of two rails, and a beam that wraps down a hanging column to a lower pad). 8 spawns, 4 on top and 4 underneath. Pads crumble first, the plate core last.
 - `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the default rotation.
+
+**Level lint** (phase 12): `npm run level:check` lists 1-wide straight runs (≥ 4 tiles on one face) with the length of the way round them. It warns when there's no way round (`lintCorridors` in `shared/src/level/lint.ts`).
 
 ## 16. Jump-over and stomp (phase 10)
 

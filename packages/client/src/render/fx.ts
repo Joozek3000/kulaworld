@@ -16,6 +16,17 @@ export class Fx {
     this.live.push({ mesh, start: timeSec });
   }
 
+  /** A small grey puff (a burnt ball, phase 12): a few spheres drifting up and fading. */
+  puff(at: THREE.Vector3, timeSec: number): void {
+    for (let i = 0; i < 5; i++) {
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x9a9a9a, transparent: true, opacity: 0.6, depthWrite: false }));
+      mesh.position.copy(at).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.3, (Math.random() - 0.5) * 0.6));
+      mesh.scale.setScalar(0.3 + Math.random() * 0.3);
+      this.scene.add(mesh);
+      this.live.push({ mesh, start: timeSec + i * 0.04 });
+    }
+  }
+
   update(timeSec: number): void {
     this.live = this.live.filter(({ mesh, start }) => {
       const t = (timeSec - start) / FADE_SEC;

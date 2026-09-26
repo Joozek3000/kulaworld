@@ -26,6 +26,8 @@ export const PlayerS = schema({
   /** Prediction (§17): the last input applied (its seq) and the tick it was applied at. */
   ackSeq: t.int32().default(-1),
   ackTick: t.int32().default(-1),
+  /** Hot tiles (phase 12): ticks on the current tile; the client glows it from the level's warn threshold. */
+  heat: t.uint16().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
 }, 'PlayerS');
@@ -90,6 +92,7 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'eliminatedBy', p.eliminatedBy ?? '');
     set(s, 'protectedUntil', p.protectedUntil);
     set(s, 'knockouts', p.knockouts);
+    set(s, 'heat', p.heat);
   }
   for (const k of world.keys) {
     const id = `key-${k.id}`;

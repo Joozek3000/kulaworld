@@ -15,6 +15,8 @@ export interface LevelJson {
   mode?: Mode;
   lives?: number;
   crumble?: Crumble;
+  /** Hot tiles (phase 12): on by default (2.5 s warn, 4 s burn); `false` turns them off. */
+  heat?: { warnSec: number; burnSec: number } | false;
   /** Optional sky gradient, top and bottom colour ("#rrggbb"). Render-only. */
   sky?: [string, string];
   blocks?: V3[];
@@ -37,6 +39,8 @@ export interface Level {
   /** Knockout: lives per player (0 in race). */
   lives: number;
   crumble: Crumble | null;
+  /** Hot-tile thresholds in ticks, or null when off. */
+  heat: { warnTicks: number; burnTicks: number } | null;
   sky: [string, string] | null;
   solid: Set<string>; // cellKeys
   min: Vec3; // AABB of all blocks, inclusive

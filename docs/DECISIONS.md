@@ -184,4 +184,21 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - Also applied: no anticipation squash on the local ball's takeoff, and precise deferral (outcome with vs without the other players, instead of "a player on A, A+F or the flip cell").
   - Not applied, as the measurements didn't justify them: front-loaded easing (the motion was already visible on the first frame) and faster action ticks (proposed in the report).
 - 2026-09-26, phase 11: F3 shows the last 4 measured presses (sent / stamp ahead / predicted start / visible, in ms after keydown), and `kula.latency.table()` returns them all as a markdown table (dev console).
+- 2026-09-26, phase 12: Chain push (§14).
+  - The line is collected from V1 along P's fwd on P's face (up to `CHAIN_MAX` 4). The balls escape in the same stage-1 pass as V1, since every ball in a pushed line is "targeted".
+  - "Re-evaluated without it" is read as: an escaped ball is moving, so it isn't pushable, and its cell stays reserved. Either way P bounces (tested). The alternative, pushing the shortened line into the escaping ball's cell, would overlap two balls.
+  - One `push` event per knocked ball.
+- 2026-09-26, phase 12: Hot tiles.
+  - `PlayerState.heat`/`heatKey`, and `World.heat` (from the level, so the predictor can turn it off). The count is updated after moves resolve each tick, and a burn goes through the same `die()` as falling off the map.
+  - It's on by default in both modes (`"heat": false` turns it off). Old tests that stand still longer than 4 s set `heat: false`.
+- 2026-09-26, phase 12: Race sudden death uses the crumble state (`World.knockout`, named for its first mode). It now exists for any level with `crumble`: `stepCrumble` runs in race too, and `stepKnockout` keeps the win logic. Crumble bands skip the blocks under keys and the exit.
+  - race-01: `crumble { startSec 90, intervalSec 1.25, warnSec 1 }` (26 bands; 1.25 is exact in binary, so the band ticks are whole).
+- 2026-09-26, phase 12: Bots route around blockers.
+  - `findPath(world, from, goals, res?)` with other players' reserved cells as obstacles: moves into them are blocked, jumps over them are allowed, and stomps never become path steps.
+  - A bot switches to it for 3 s after being blocked for 0.5 s or after one bounce. With no such route, it falls back to the old path.
+  - Bots also step off a warned hot tile (W: a roll, flip or climb).
+- 2026-09-26, phase 12: Soak metric and switch.
+  - The server logs "stalemate N s" per round: ticks where at least 2 live players have both stayed on their (cell, up) for more than 3 s, within 2 cells of each other.
+  - `ANTI_STALEMATE=off` (server env) restores the phase 11 rules (no chain push, no hot tiles, no race crumble) for before/after soaks.
+- 2026-09-26, phase 12: Level lint reports every 1-wide run of at least 4 tiles with the length of its way round, and warns only when there's none. None of the current levels has a corridor without a way round: since the climb (phase 11), undersides, side faces and wall climbs always offer one, at most 3-6 moves longer.
 

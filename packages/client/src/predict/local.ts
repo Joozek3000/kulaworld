@@ -94,7 +94,7 @@ export class LocalPrediction {
       this.lateSeen = 0;
       this.serverMode = false;
       this.levelId = s.levelId;
-      this.bands = level.mode === 'knockout' ? crumbleBands(level) : [];
+      this.bands = level.crumble ? crumbleBands(level) : [];
       // Inputs sent just before we saw play start: the acked ones set the held keys, the rest wait for their ack.
       // Only the last second counts: older ones were sent in the lobby or countdown, where the server drops input.
       const recent = this.unstamped.filter((u) => performance.now() - u.at < 1000).map((u) => u.input);
@@ -205,7 +205,7 @@ export class LocalPrediction {
     return {
       id: b.id, name: b.name, color: b.color, keys: b.keys, ready: b.ready, spectating: b.spectating, lives: b.lives,
       eliminated: b.eliminated, eliminatedTick: b.eliminatedTick, eliminatedBy: b.eliminatedBy, protectedUntil: b.protectedUntil,
-      knockouts: b.knockouts, ackSeq: b.ackSeq, ackTick: b.ackTick, action: p.action,
+      knockouts: b.knockouts, ackSeq: b.ackSeq, ackTick: b.ackTick, heat: b.heat, action: p.action,
       fromX: p.pose.cell.x, fromY: p.pose.cell.y, fromZ: p.pose.cell.z, fromUp: p.pose.up, fromFwd: p.pose.fwd,
       toX: to.cell.x, toY: to.cell.y, toZ: to.cell.z, toUp: to.up, toFwd: to.fwd,
       startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick, bounce: p.bounce,

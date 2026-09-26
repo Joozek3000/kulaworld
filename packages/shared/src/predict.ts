@@ -136,6 +136,7 @@ export class Predictor {
     this.world = createWorld(level, 0, { push: false });
     this.world.mode = 'race';
     this.world.knockout = null;
+    this.world.heat = null; // hot-tile deaths are the server's call
     this.world.timeLimitTick = Infinity;
     addPlayer(this.world, localId, localId);
   }

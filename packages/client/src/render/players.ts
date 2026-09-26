@@ -76,6 +76,11 @@ const SQUASH = {
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
 const STOMP_HOLD = 0.4;
 
+// Hot tile (phase 12): a square on the face under a ball that has stood still past the warn threshold, from orange
+// to a flickering red at the burn threshold. Double-sided and drawn over the block, so it reads on every face.
+const hotGeo = new THREE.PlaneGeometry(0.96, 0.96);
+const HOT_ORANGE = new THREE.Color(0xff8a1e), HOT_RED = new THREE.Color(0xff1a1a);
+
 // Landing marker (§16): a ring on a forward jump's landing cell, in the jumper's colour; red when a ball is on it.
 const markerGeo = new THREE.TorusGeometry(0.46, 0.06, 8, 32); // wider than a ball (0.4), so it shows around one
 const MARKER_RED = new THREE.Color(0xff2a2a);
@@ -114,6 +119,10 @@ class PlayerView {
   readonly local: boolean;
   /** Knock segments (serials) that are stomps, not pushes: set by PlayersView each frame. */
   stompSerials = new Set<number>();
+  /** Hot-tile overlay and its level (0 = cold, 0..1 = warned → burning). */
+  private readonly hotMat = new THREE.MeshBasicMaterial({ color: 0xff8a1e, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  private readonly hot = new THREE.Mesh(hotGeo, this.hotMat);
+  hotLevel = 0;
   /** Landing marker, and the cell it marks ('' when hidden). */
   private readonly markerMat: THREE.MeshBasicMaterial;
   private readonly marker: THREE.Mesh;
@@ -157,6 +166,8 @@ class PlayerView {
     this.marker = new THREE.Mesh(markerGeo, this.markerMat);
     this.marker.visible = false;
     scene.add(this.marker);
+    this.hot.visible = false;
+    scene.add(this.hot);
     this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
     this.ball.visible = false;
@@ -328,6 +339,25 @@ class PlayerView {
     this.marker.quaternion.setFromUnitVectors(Z_AXIS, probe);
     const p = Math.min(1, Math.max(0, (renderTick - s.startTick) / Math.max(1, s.endTick - s.startTick)));
     this.marker.scale.setScalar(1.25 - 0.45 * p);
+  }
+
+  /**
+   * The hot tile under a heated ball (phase 12). `heat` is the server's count on the ball's current tile; the glow
+   * follows the settled pose (the tile it stands on), so it vanishes as soon as the ball moves.
+   */
+  placeHot(heat: number, cfg: { warnTicks: number; burnTicks: number } | null, timeSec: number): void {
+    const s = this.current;
+    const still = this.shown && cfg && (s.action === Action.Idle || s.action === Action.Turn || s.action === Action.Hop);
+    this.hotLevel = still && heat >= cfg.warnTicks ? Math.min(1, (heat - cfg.warnTicks) / (cfg.burnTicks - cfg.warnTicks)) : 0;
+    this.hot.visible = this.hotLevel > 0;
+    if (!this.hot.visible) return;
+    const u = dirVec(s.from.up), c = s.from.cell;
+    this.hot.position.set(c.x - u.x * 0.49, c.y - u.y * 0.49, c.z - u.z * 0.49);
+    this.hot.quaternion.setFromUnitVectors(Z_AXIS, probe.set(u.x, u.y, u.z));
+    const t = this.hotLevel;
+    const flicker = t > 0.6 ? 0.5 + 0.5 * Math.sin(timeSec * (20 + 30 * t)) : 0;
+    this.hotMat.color.copy(HOT_ORANGE).lerp(HOT_RED, Math.min(1, t * 0.8 + flicker * 0.4));
+    this.hotMat.opacity = 0.35 + 0.5 * t;
   }
 
   /** The marker turns red when a ball stands on it (a stomp is coming), else it's the jumper's colour. */
@@ -511,8 +541,9 @@ class PlayerView {
   }
 
   dispose(scene: THREE.Scene): void {
-    scene.remove(this.ball, this.shadow, this.ring, this.marker);
+    scene.remove(this.ball, this.shadow, this.ring, this.marker, this.hot);
     this.markerMat.dispose();
+    this.hotMat.dispose();
     this.shadowMat.dispose();
     this.top.dispose();
     this.bottom.dispose();
@@ -541,6 +572,20 @@ export class PlayersView {
   /** Solid test for blob shadows (the level minus crumbled blocks), or null without a level. */
   setSolid(solid: SolidFn | null): void {
     this.solid = solid;
+  }
+
+  /** The level's hot-tile thresholds (phase 12), or null when off. */
+  heat: { warnTicks: number; burnTicks: number } | null = null;
+
+  /** Balls glowing on a hot tile, for the sizzle: level 0..1 (warned → burning). */
+  hotBalls(): { id: string; at: THREE.Vector3; local: boolean; level: number }[] {
+    return [...this.views].filter(([, v]) => v.hotLevel > 0).map(([id, v]) => ({ id, at: v.ball.position, local: v.local, level: v.hotLevel }));
+  }
+
+  /** Where a ball is drawn (for effects such as the burn puff), or null when it isn't on screen. */
+  ballAt(id: string): THREE.Vector3 | null {
+    const v = this.views.get(id);
+    return v?.shown ? v.ball.position.clone() : null;
   }
 
   /**
@@ -592,6 +637,8 @@ export class PlayersView {
     for (const [id, v] of this.views) {
       if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
     }
+    const cfg = this.heat;
+    state.players.forEach((p, id) => this.views.get(id)?.placeHot(p.heat, cfg, nowMs / 1000));
     // Markers go red over a ball (a stomp is coming): anyone else on screen standing in the marked cell.
     const standing = new Set<string>();
     for (const v of this.views.values()) if (v.shown) standing.add(`${cellOf(v.current.from)}|${v.current.from.up}`);

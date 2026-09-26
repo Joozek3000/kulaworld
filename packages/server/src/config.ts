@@ -12,5 +12,10 @@ export const config = {
   /** Round-trip ms passed to Colyseus simulateLatency; 0 = off. Ignored in production. */
   /** PvP push rules (ARCHITECTURE §14): PUSH=on|off, default on. */
   push: env.PUSH !== 'off',
+  /**
+   * Phase 12 anti-stalemate rules (chain push, hot tiles, race sudden death). ANTI_STALEMATE=off restores the phase 11
+   * rules, for before/after soaks. Default on.
+   */
+  antiStalemate: env.ANTI_STALEMATE !== 'off',
   latencyMs: prod ? 0 : Number(env.LATENCY_MS ?? 0),
 };

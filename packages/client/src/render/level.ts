@@ -33,7 +33,7 @@ export class LevelView {
     const keys = [...level.solid];
     this.cells = keys.map((k) => k.split(',').map(Number));
     const index = new Map(keys.map((k, i) => [k, i]));
-    this.bands = level.mode === 'knockout' ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
+    this.bands = level.crumble ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
 
     this.mesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ roughness: 0.85 }), this.cells.length);
     this.cells.forEach((_, i) => { this.place(i, 0); this.mesh.setColorAt(i, this.baseColor(i)); });

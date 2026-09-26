@@ -1,4 +1,6 @@
+import { dirVec } from '../dir.ts';
 import type { Level } from '../level/types.ts';
+import { cellKey, sub } from '../vec.ts';
 
 /** Smallest crumble band; thinner distance shells are merged with their neighbours. */
 export const MIN_BAND_BLOCKS = 4;
@@ -12,7 +14,10 @@ export const MIN_BAND_BLOCKS = 4;
 export function crumbleBands(level: Level): string[][] {
   const { min, max } = level;
   const byD2 = new Map<number, number[][]>();
+  // Sudden death in race (phase 12): the blocks carrying a key or the exit never crumble.
+  const kept = new Set([...level.keys, ...(level.exit ? [level.exit] : [])].map((p) => cellKey(sub(p.cell, dirVec(p.up)))));
   for (const key of level.solid) {
+    if (kept.has(key)) continue;
     const c = key.split(',').map(Number);
     const dx = 2 * c[0] - (min.x + max.x), dy = 2 * c[1] - (min.y + max.y), dz = 2 * c[2] - (min.z + max.z);
     const d2 = dx * dx + dy * dy + dz * dz;

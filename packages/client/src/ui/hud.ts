@@ -58,6 +58,7 @@ export function createHud() {
     },
 
     update(s: GameState, me: string, level: Level | null, muted: boolean) {
+      const MOVE = '<div class="big move">MOVE!</div>';
       const mine = s.players.get(me);
       const required = level?.keysRequired ?? 0;
       const secs = Math.max(0, Math.ceil((s.phaseEndTick - s.tick) / TICK_RATE));
@@ -67,6 +68,8 @@ export function createHud() {
       const ko = (level?.mode ?? s.mode) === 'knockout';
       const maxLives = level?.lives ?? 3;
       const goal = ko ? `last ball rolling wins · ${maxLives} lives` : `collect ${required} keys, then reach the exit`;
+      // Hot tile (phase 12): the local ball has stood still long enough to glow.
+      const hot = !!mine && !!level?.heat && s.phase === 'playing' && !mine.spectating && mine.heat >= level.heat.warnTicks;
 
       switch (s.phase) {
         case 'lobby': {
@@ -97,7 +100,7 @@ export function createHud() {
             const crumble = crumbleIn > 0 && crumbleIn <= CRUMBLE_COUNTDOWN_SEC ? ` · <span class="warn">Floor crumbles in ${crumbleIn}</span>` : '';
             set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${crumble}${sound}`);
             const by = mine?.eliminatedBy ? ` by ${esc(name(mine.eliminatedBy))}` : '';
-            set(center, out ? `<div class="panel"><h1 class="warn">ELIMINATED</h1><div class="sub">Knocked out${by} · spectating</div></div>` : '');
+            set(center, out ? `<div class="panel"><h1 class="warn">ELIMINATED</h1><div class="sub">Knocked out${by} · spectating</div></div>` : hot ? MOVE : '');
             set(board, `<ul class="list">${byPlace(s).map((p) => row(p, me, p.eliminated ? '<span class="dim">out</span>' : `${hearts(p.lives, maxLives)} ${p.knockouts ? `KO ${p.knockouts}` : ''}`)).join('')}</ul>`);
             set(status, spectating ? 'Spectating: you join next round' : out ? 'Spectating until the round ends'
               : `Lives ${hearts(mine!.lives, maxLives)} · Knockouts <b>${mine!.knockouts}</b>`);
@@ -105,8 +108,10 @@ export function createHud() {
           }
           const keys = mine?.keys ?? 0;
           const open = keys >= required;
-          set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${sound}`);
-          set(center, '');
+          const crumbleIn = s.nextCrumbleTick >= 0 ? Math.ceil((s.nextCrumbleTick - s.tick) / TICK_RATE) : -1; // race sudden death
+          const crumble = crumbleIn > 0 && crumbleIn <= CRUMBLE_COUNTDOWN_SEC ? ` · <span class="warn">Floor crumbles in ${crumbleIn}</span>` : '';
+          set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${crumble}${sound}`);
+          set(center, hot ? MOVE : '');
           set(board, `<ul class="list">${byKeys(s).map((p) => row(p, me, `${p.keys}/${required}`)).join('')}</ul>`);
           set(status, spectating ? 'Spectating: you join next round'
             : `Keys <b>${keys}/${required}</b> · ${open ? '<span class="ok">Exit OPEN</span>' : '<span class="dim">Exit locked</span>'}`);

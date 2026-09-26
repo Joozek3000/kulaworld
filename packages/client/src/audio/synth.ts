@@ -147,6 +147,15 @@ export const RECIPES: Record<string, Recipe> = {
     osc(c, g, t, 1, 'sine', 900 * pitch, 200 * pitch, 1);
     return 1;
   },
+  /** Hot tile (phase 12): a short hiss (high-passed noise) with crackle, louder and brighter as it heats. */
+  sizzle(c, out, t, { intensity: i }) {
+    noise(c, env(c, out, t, 0.04 + 0.12 * i, 0.02, 0.2), t, 0.24, 'highpass', 2500 + 3000 * i, 0.7);
+    for (let k = 0; k < 2 + Math.round(4 * i); k++) {
+      const at = t + Math.random() * 0.2;
+      noise(c, env(c, out, at, 0.05 + 0.1 * i, 0.001, 0.012), at, 0.015, 'bandpass', 3000 + Math.random() * 4000, 4);
+    }
+    return 0.25;
+  },
   /** Distant rubbery pop: a band-passed burst and a quick falling tone. */
   pop(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.25, 0.001, 0.06), t, 0.07, 'bandpass', 900 * pitch, 2);
