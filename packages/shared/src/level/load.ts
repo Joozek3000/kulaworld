@@ -43,6 +43,7 @@ export function loadLevel(json: LevelJson): Level {
     name: json.name,
     version: json.version,
     mode: json.mode ?? 'race',
+    pool: json.pool ?? false,
     lives: json.lives ?? 0,
     crumble: json.crumble ?? null,
     heat: json.heat === false ? null

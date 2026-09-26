@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { defineRoom, defineServer } from 'colyseus';
+import { defineRoom, defineServer, matchMaker } from 'colyseus';
 import { Client, type Room } from '@colyseus/sdk';
 import { Action, ROLL_TICKS } from '@kula/shared';
 import { config } from '../src/config.ts';
@@ -101,4 +101,48 @@ test('stamped inputs (§17): a future tick applies exactly then, a late one at t
   expect(parseInput({ seq: 12, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, tick: 1.5 })).toBe(null);
   await a.leave();
   await b.leave();
+});
+
+test('lobby vote (phase 14): counts, a leaver vote removed, the winner loads, votes cleared on the next lobby', { timeout: 20000 }, async () => {
+  Object.assign(config, { level: 'test-flat,test-cube' });
+  const client = new Client(`ws://localhost:${PORT}`);
+  const a: Room = await client.joinOrCreate('race', { name: 'A' });
+  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  await waitFor('2 players', () => a.state.players?.size === 2 && a.state.candidates?.length === 2);
+  const candidates = [...a.state.candidates];
+  expect(candidates.sort()).toEqual(['test-cube', 'test-flat']);
+  const counts = () => [...a.state.voteCounts].join(',');
+
+  a.send('vote', 1);
+  b.send('vote', 3);
+  await waitFor('votes', () => counts() === '0,1,0,1');
+  const c: Room = await client.joinOrCreate('race', { name: 'C' });
+  c.send('vote', 0);
+  await waitFor('C voted', () => counts() === '1,1,0,1');
+  await c.leave();
+  await waitFor("C's vote removed", () => counts() === '0,1,0,1');
+  for (const bad of [2, 4, -1, 'x', 1.5]) b.send('vote', bad); // slot 2 has no candidate
+  b.send('vote', 1); // change of mind
+  await waitFor('B moved', () => counts() === '0,2,0,0');
+  expect(a.state.players.get(b.sessionId).vote).toBe(1);
+
+  a.send('ready');
+  b.send('ready');
+  await waitFor('countdown', () => a.state.phase === 'countdown');
+  const played = a.state.candidates[1];
+  expect(a.state.levelId).toBe(played);
+  a.send('vote', 0); // ignored outside the lobby
+  await waitFor('playing', () => a.state.phase === 'playing', 5000);
+  expect(counts()).toBe('0,2,0,0');
+
+  // End the round now: results, then a fresh lobby.
+  const room = matchMaker.getLocalRoomById(a.roomId) as unknown as { world: { result: unknown } };
+  room.world.result = { winnerId: null, reason: 'timeout' };
+  await waitFor('lobby', () => a.state.phase === 'lobby', 8000);
+  expect(counts()).toBe('0,0,0,0');
+  expect(a.state.players.get(a.sessionId).vote).toBe(-1);
+  expect([...a.state.candidates]).toEqual(candidates.filter((id) => id !== played)); // not the last played level
+  await a.leave();
+  await b.leave();
+  Object.assign(config, { level: 'test-flat' });
 });

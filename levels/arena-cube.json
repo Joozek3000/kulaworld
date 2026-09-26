@@ -2,6 +2,7 @@
   "id": "arena-cube",
   "name": "Arena Cube",
   "version": 1,
+  "pool": false,
   "mode": "knockout",
   "lives": 3,
   "timeLimitSec": 180,

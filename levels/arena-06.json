@@ -1,0 +1,38 @@
+{
+  "id": "arena-06",
+  "name": "Pillar Field",
+  "version": 1,
+  "mode": "knockout",
+  "pool": true,
+  "lives": 3,
+  "timeLimitSec": 180,
+  "crumble": { "startSec": 45, "intervalSec": 10, "warnSec": 2 },
+  "sky": ["#a3b6e6", "#f9e0cf"],
+  "boxes": [
+    { "min": [0, 0, 0], "max": [8, 0, 8] },
+    { "min": [1, 1, 1], "max": [1, 2, 1] },
+    { "min": [1, 1, 4], "max": [1, 2, 4] },
+    { "min": [1, 1, 7], "max": [1, 2, 7] },
+    { "min": [4, 1, 1], "max": [4, 2, 1] },
+    { "min": [4, 1, 7], "max": [4, 2, 7] },
+    { "min": [7, 1, 1], "max": [7, 2, 1] },
+    { "min": [7, 1, 4], "max": [7, 2, 4] },
+    { "min": [7, 1, 7], "max": [7, 2, 7] }
+  ],
+  "spawns": [
+    { "cell": [0, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [4, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [8, 1, 0], "up": "+Y", "fwd": "-X" },
+    { "cell": [8, 1, 4], "up": "+Y", "fwd": "-X" },
+    { "cell": [8, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [4, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [0, 1, 8], "up": "+Y", "fwd": "+X" },
+    { "cell": [0, 1, 4], "up": "+Y", "fwd": "+X" }
+  ],
+  "tiles": [
+    { "block": [4, 2, 1], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
+    { "block": [4, 2, 7], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
+    { "block": [1, 2, 4], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 },
+    { "block": [7, 2, 4], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 }
+  ]
+}

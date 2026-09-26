@@ -1,0 +1,62 @@
+{
+  "id": "race-03",
+  "name": "Pillar Garden",
+  "version": 1,
+  "mode": "race",
+  "pool": true,
+  "timeLimitSec": 100,
+  "crumble": { "startSec": 70, "intervalSec": 1.5, "warnSec": 1 },
+  "heat": { "warnSec": 3, "burnSec": 5 },
+  "sky": ["#c3a6e8", "#fbe3d4"],
+  "boxes": [
+    { "min": [0, 0, 0], "max": [10, 0, 10] },
+    { "min": [2, 1, 2], "max": [2, 2, 2] },
+    { "min": [2, 1, 5], "max": [2, 2, 5] },
+    { "min": [2, 1, 8], "max": [2, 2, 8] },
+    { "min": [5, 1, 2], "max": [5, 2, 2] },
+    { "min": [5, 1, 5], "max": [5, 2, 5] },
+    { "min": [5, 1, 8], "max": [5, 2, 8] },
+    { "min": [8, 1, 2], "max": [8, 2, 2] },
+    { "min": [8, 1, 5], "max": [8, 2, 5] },
+    { "min": [8, 1, 8], "max": [8, 2, 8] }
+  ],
+  "spawns": [
+    { "cell": [5, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [10, 1, 5], "up": "+Y", "fwd": "-X" },
+    { "cell": [5, 1, 10], "up": "+Y", "fwd": "-Z" },
+    { "cell": [0, 1, 5], "up": "+Y", "fwd": "+X" }
+  ],
+  "keys": [
+    { "cell": [2, 3, 2], "up": "+Y" },
+    { "cell": [8, 3, 2], "up": "+Y" },
+    { "cell": [2, 3, 8], "up": "+Y" },
+    { "cell": [8, 3, 8], "up": "+Y" },
+    { "cell": [2, -1, 5], "up": "-Y" },
+    { "cell": [8, -1, 5], "up": "-Y" },
+    { "cell": [5, 2, 6], "up": "+Z" }
+  ],
+  "exit": { "cell": [5, 3, 5], "up": "+Y" },
+  "keysRequired": 3,
+  "tiles": [
+    { "block": [5, 2, 2], "type": "fire" },
+    { "block": [2, 2, 5], "type": "fire" },
+    { "block": [8, 2, 5], "type": "fire" },
+    { "block": [5, 2, 8], "type": "fire" },
+    { "block": [0, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [1, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [3, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [4, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [6, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [7, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [9, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [10, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
+    { "block": [0, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [1, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [3, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [4, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [6, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [7, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [9, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
+    { "block": [10, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 }
+  ]
+}

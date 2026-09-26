@@ -29,6 +29,8 @@ export const PlayerS = schema({
   /** Fire landings in a row (§18): the client inflates the ball a little per count. */
   fireCount: t.uint8().default(0),
   ready: t.boolean().default(false),
+  /** Lobby level vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
+  vote: t.int8().default(-1),
   spectating: t.boolean().default(false),
 }, 'PlayerS');
 export type PlayerS = SchemaType<typeof PlayerS>;
@@ -60,6 +62,9 @@ export const GameState = schema({
   hot: t.map('uint16'),
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). Gone once it regrows. */
   crumbling: t.map('int32'),
+  /** Lobby level vote (phase 14): up to 3 candidate level ids, and votes per option (3 candidate slots, then Random). */
+  candidates: t.array('string'),
+  voteCounts: t.array('uint8'),
 }, 'GameState');
 export type GameState = SchemaType<typeof GameState>;
 

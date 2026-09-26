@@ -2,6 +2,7 @@
   "id": "arena-01",
   "name": "Arena 01",
   "version": 1,
+  "pool": true,
   "mode": "knockout",
   "lives": 3,
   "timeLimitSec": 180,

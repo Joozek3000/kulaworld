@@ -9,6 +9,8 @@ export interface PlayerS {
   startTick: number; endTick: number; turnFromFwd: number; turnStartTick: number; bounce: boolean; keys: number; ready: boolean; spectating: boolean;
   lives: number; eliminated: boolean; eliminatedTick: number; eliminatedBy: string; protectedUntil: number; knockouts: number;
   ackSeq: number; ackTick: number; fireCount: number;
+  /** Lobby vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
+  vote: number;
 }
 export interface ItemS { id: string; kind: 'key' | 'exit'; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
@@ -20,6 +22,9 @@ export interface GameState {
   hot: MapLike<number>;
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). */
   crumbling: MapLike<number>;
+  /** Lobby vote (phase 14): candidate level ids, and votes per option (3 candidate slots, then Random). */
+  candidates: ArrayLike<string>;
+  voteCounts: ArrayLike<number>;
 }
 
 const TICK_MS = 50;
@@ -92,6 +97,7 @@ export class Net {
 
   sendInput(input: Input): void { this.room.send('input', this.stamp ? this.stamp(input) : input); }
   sendReady(): void { this.room.send('ready'); }
+  sendVote(option: number): void { this.room.send('vote', option); }
 }
 
 export async function connect(): Promise<Net> {

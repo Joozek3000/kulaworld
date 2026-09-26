@@ -45,6 +45,8 @@ export interface LevelJson {
   name: string;
   version: number;
   mode?: Mode;
+  /** In the lobby vote's level pool (phase 14). Default false. */
+  pool?: boolean;
   lives?: number;
   crumble?: Crumble;
   /** Hot tiles (phase 12): on by default (2.5 s warn, 4 s burn); `false` turns them off. */
@@ -69,6 +71,7 @@ export interface Level {
   name: string;
   version: number;
   mode: Mode;
+  pool: boolean;
   /** Knockout: lives per player (0 in race). */
   lives: number;
   crumble: Crumble | null;

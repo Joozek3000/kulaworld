@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, cellKey, createWorld, dirVec, findPath, loadLevel, resultPose, setInput, step,
+  Action, addPlayer, cellKey, createWorld, dirVec, findPath, lethalForPlanning, loadLevel, onIce, resultPose, setInput, step,
   type Cmd, type Dir, type PathStep, type Pose, type World,
 } from '../src/index.ts';
 import { inOrder, input, levelFiles, levelJson, readLevelJson, row, rules } from './util.ts';
@@ -85,14 +85,19 @@ describe('every race level: all keys and the exit are reachable from every spawn
   });
 });
 
-/** Every (cell, up) a ball can stand on: an empty cell with a block at cell - up. */
+/**
+ * Every (cell, up) a ball can stand on: an empty cell with a block at cell - up. Tiles planning can't stop on are left
+ * out (phase 14): spikes and fire (lethal for planning, §18), and ice (a roll never stops there).
+ */
 function standable(w: World): Set<string> {
   const out = new Set<string>();
   for (const key of w.level.solid) {
     const [x, y, z] = key.split(',').map(Number);
     for (let d = 0 as Dir; d < 6; d++) {
-      const v = dirVec(d), cell = `${x + v.x},${y + v.y},${z + v.z}`;
-      if (!w.level.solid.has(cell)) out.add(`${cell}|${d}`);
+      const v = dirVec(d), cell = { x: x + v.x, y: y + v.y, z: z + v.z };
+      const pose = { cell, up: d, fwd: d };
+      if (w.level.solid.has(cellKey(cell)) || lethalForPlanning(w, pose) || onIce(w, pose)) continue;
+      out.add(`${cellKey(cell)}|${d}`);
     }
   }
   return out;

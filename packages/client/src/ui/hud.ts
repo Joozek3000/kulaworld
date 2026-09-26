@@ -1,10 +1,17 @@
-import { TICK_RATE, tileKey, type Dir, type Level } from '@kula/shared';
+import { RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type TileType } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const dot = (color: string) => `<span class="dot" style="background:${esc(color)}"></span>`;
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 const CONTROLS = 'W roll · A/D turn · Space jump (hold to bounce) · R ready · M mute · F3 debug';
+const LOBBY_CONTROLS = '1–4 or click to vote · R ready · M mute';
+/** Lobby cards (phase 14): one icon per trap type a level uses. */
+const TRAP_ICONS: Record<TileType, [string, string]> = {
+  spikes: ['▲', 'spikes'], fire: ['🔥', 'fire'], crumble: ['▦', 'crumble'], ice: ['❄', 'ice'], arrow: ['➜', 'arrows'], boost: ['⏫', 'boost'],
+};
+const trapIcons = (level: Level) => [...new Set(level.tiles.map((t) => t.type))]
+  .map((t) => `<span class="trap" title="${TRAP_ICONS[t][1]}">${TRAP_ICONS[t][0]}</span>`).join('');
 const TOAST_MS = 2500;
 const CRUMBLE_COUNTDOWN_SEC = 5;
 const hearts = (lives: number, max: number) =>
@@ -18,9 +25,21 @@ function div(id: string): HTMLDivElement {
   return el;
 }
 
-/** HTML overlay per phase: lobby list, big countdown, timer + scoreboard + exit status, results banner, toasts. */
-export function createHud() {
+export interface LobbyHooks {
+  /** A vote card was clicked: a candidate index or RANDOM_VOTE. */
+  onVote(option: number): void;
+  /** Cached preview image (data URL) of a level. */
+  preview(level: Level): string;
+  findLevel(id: string): Level | null;
+}
+
+/** HTML overlay per phase: lobby vote + list, big countdown, timer + scoreboard + exit status, results banner, toasts. */
+export function createHud(lobby: LobbyHooks) {
   const top = div('hud-top'), center = div('hud-center'), board = div('hud-board'), status = div('hud-status'), toasts = div('hud-toasts');
+  center.addEventListener('click', (e) => {
+    const card = (e.target as HTMLElement).closest<HTMLElement>('[data-vote]');
+    if (card) lobby.onVote(Number(card.dataset.vote));
+  });
   top.textContent = 'connecting…';
   const cache = new Map<HTMLElement, string>();
   const set = (el: HTMLElement, html: string) => {
@@ -80,11 +99,25 @@ export function createHud() {
             if (p.ready) ready++;
             rows.push(row(p, me, p.ready ? '<span class="ok">ready</span>' : '<span class="dim">not ready</span>'));
           });
-          const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : 'Press <kbd>R</kbd> to ready';
-          set(top, `Lobby · ${levelName}${sound}`);
-          set(center, `<div class="panel"><h1>${ko ? 'Knockout' : 'Key Race'}</h1><div class="sub">${levelName} · ${goal}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
+          // Level vote (phase 14): a card per candidate, then Random. Your vote is outlined.
+          const myVote = mine?.vote ?? -1;
+          const card = (option: number, body: string) => {
+            const n = s.voteCounts?.[option] ?? 0;
+            return `<button class="card${myVote === option ? ' mine' : ''}" data-vote="${option}"><kbd>${option + 1}</kbd>${body}`
+              + `<div class="votes">${n ? `${'●'.repeat(n)} ${n}` : '<span class="dim">no votes</span>'}</div></button>`;
+          };
+          const cards = Array.from(s.candidates ?? [], (id, i) => {
+            const l = lobby.findLevel(id);
+            if (!l) return card(i, `<div class="cname">${esc(id)}</div>`);
+            return card(i, `<img src="${lobby.preview(l)}" alt=""><div class="cname">${esc(l.name)}</div>`
+              + `<div class="cmode">${l.mode === 'knockout' ? 'Knockout' : 'Race'} ${trapIcons(l)}</div>`);
+          });
+          cards.push(card(RANDOM_VOTE, '<div class="random">?</div><div class="cname">Random</div><div class="cmode dim">any level</div>'));
+          const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : myVote < 0 ? 'Vote for the next level, then press <kbd>R</kbd>' : 'Press <kbd>R</kbd> to ready';
+          set(top, `Lobby${sound}`);
+          set(center, `<div class="panel lobby"><h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
-          set(status, CONTROLS);
+          set(status, LOBBY_CONTROLS);
           break;
         }
         case 'countdown':
@@ -125,7 +158,7 @@ export function createHud() {
           const rows = ko
             ? byPlace(s).map((p, i) => row(p, me, `${ordinal(i + 1)} · ${p.eliminated ? 'out' : hearts(p.lives, maxLives)} · KO ${p.knockouts}`))
             : byKeys(s).map((p) => row(p, me, `${p.keys} key${p.keys === 1 ? '' : 's'}`));
-          set(center, `<div class="panel">${banner}<ul class="list">${rows.join('')}</ul><div class="hint">Lobby in ${secs}s</div></div>`);
+          set(center, `<div class="panel">${banner}<ul class="list">${rows.join('')}</ul><div class="hint">Next: vote in lobby (${secs}s)</div></div>`);
           set(board, '');
           set(status, '');
           break;

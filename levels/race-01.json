@@ -2,6 +2,7 @@
   "id": "race-01",
   "name": "Race 01: Four Islands",
   "version": 1,
+  "pool": true,
   "sky": ["#4f9ee8", "#d6efff"],
   "boxes": [
     { "min": [0, 0, 0], "max": [4, 0, 4] },
@@ -31,5 +32,11 @@
   "keysRequired": 3,
   "timeLimitSec": 120,
   "crumble": { "startSec": 75, "intervalSec": 1.25, "warnSec": 1 },
-  "heat": { "warnSec": 3, "burnSec": 5 }
+  "heat": { "warnSec": 3, "burnSec": 5 },
+  "tiles": [
+    { "block": [5, 0, 8], "type": "crumble", "regrowSec": 8 },
+    { "block": [6, 0, 8], "type": "crumble", "regrowSec": 8 },
+    { "block": [7, 0, 8], "type": "crumble", "regrowSec": 8 },
+    { "block": [8, 0, 4], "face": "+Y", "type": "boost", "variant": "far" }
+  ]
 }

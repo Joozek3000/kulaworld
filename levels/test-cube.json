@@ -2,6 +2,7 @@
   "id": "test-cube",
   "name": "Test Cube",
   "version": 1,
+  "pool": false,
   "boxes": [{ "min": [0, 0, 0], "max": [4, 4, 4] }],
   "spawns": [
     { "cell": [1, 5, 1], "up": "+Y", "fwd": "+Z" },

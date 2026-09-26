@@ -2,6 +2,7 @@
   "id": "traps-lab",
   "name": "Traps Lab",
   "version": 1,
+  "pool": false,
   "mode": "race",
   "timeLimitSec": 600,
   "heat": false,

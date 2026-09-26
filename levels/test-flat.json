@@ -2,6 +2,7 @@
   "id": "test-flat",
   "name": "Test Flat",
   "version": 1,
+  "pool": false,
   "blocks": [[4, 1, 4]],
   "boxes": [
     { "min": [0, 0, 0], "max": [8, 0, 2] },

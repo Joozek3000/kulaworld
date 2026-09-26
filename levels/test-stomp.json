@@ -2,6 +2,7 @@
   "id": "test-stomp",
   "name": "Test Stomp (beam)",
   "version": 1,
+  "pool": false,
   "mode": "knockout",
   "lives": 9,
   "timeLimitSec": 600,

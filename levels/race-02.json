@@ -2,6 +2,7 @@
   "id": "race-02",
   "name": "Ice Garden",
   "version": 1,
+  "pool": true,
   "mode": "race",
   "timeLimitSec": 240,
   "crumble": { "startSec": 100, "intervalSec": 8, "warnSec": 2 },

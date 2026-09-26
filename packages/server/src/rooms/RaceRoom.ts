@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
 import { Room, type Client } from 'colyseus';
 import {
-  Action, addPlayer, createWorld, InputQueue, loadLevel, removePlayer, setInput, step, TICK_RATE, validateLevel,
-  type InputMsg, type Level, type SimEvent, type World,
+  Action, addPlayer, createWorld, InputQueue, loadLevel, mulberry32, pickCandidates, removePlayer, setInput, step, tallyVotes,
+  TICK_RATE, validateLevel, validVote, voteCounts, type InputMsg, type Level, type SimEvent, type World,
 } from '@kula/shared';
 import { config } from '../config.ts';
 import { GameState, PlayerS, syncSchema } from '../schema/State.ts';
@@ -37,16 +37,27 @@ class StalemateMeter {
   }
 }
 
+const LEVELS_DIR = new URL('../../../../levels/', import.meta.url);
+
 /** Loads and validates levels/<id>.json. Throws on invalid levels, so a room never starts with one. */
 export function loadLevelFile(id: string): Level {
-  const level = loadLevel(JSON.parse(readFileSync(new URL(`../../../../levels/${id}.json`, import.meta.url), 'utf8')));
+  const level = loadLevel(JSON.parse(readFileSync(new URL(`${id}.json`, LEVELS_DIR), 'utf8')));
   const errors = validateLevel(level);
   if (errors.length) throw new Error(`level "${id}" is invalid:\n  ${errors.join('\n  ')}`);
   return level;
 }
 
-/** LEVEL may be a comma list (e.g. "race-01,test-cube"); rooms rotate through it each round. */
+/** LEVEL may be a comma list (e.g. "race-01,test-cube"): a testing override of the pool. */
 export const levelIds = (): string[] => config.level.split(',').map((s) => s.trim()).filter(Boolean);
+
+/** The lobby vote's level pool (phase 14): the LEVEL override if set, else every level file with "pool": true. */
+export function levelPool(): Level[] {
+  const ids = levelIds();
+  const pool = ids.length ? ids.map(loadLevelFile)
+    : readdirSync(LEVELS_DIR).filter((f) => f.endsWith('.json')).map((f) => loadLevelFile(f.slice(0, -5))).filter((l) => l.pool);
+  if (!pool.length) throw new Error('empty level pool: no LEVEL and no level with "pool": true');
+  return pool;
+}
 
 /** Validates an `input` message at the trust boundary. `tick` (when to apply it, §17) is optional: bots omit it. */
 export function parseInput(m: unknown): InputMsg | null {
@@ -63,9 +74,12 @@ export function parseInput(m: unknown): InputMsg | null {
 export class RaceRoom extends Room<{ state: GameState }> {
   maxClients = 8;
   state = new GameState();
-  /** Levels from LEVEL (comma list), rotated each round. */
-  private levels: Level[] = [];
+  /** The vote's level pool, and the last level played (never a candidate next time). */
+  private pool: Level[] = [];
   private level!: Level;
+  private lastLevelId: string | null = null;
+  /** Lobby vote RNG (candidates, tie-breaks, Random): seeded per room, outside the sim. */
+  private rng = mulberry32(Date.now() >>> 0);
   private world: World | null = null;
   private stalemate = new StalemateMeter();
   private round = 0;
@@ -76,11 +90,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private warned = new Set<string>();
 
   onCreate() {
-    this.levels = levelIds().map(loadLevelFile);
-    this.level = this.levels[0];
-    this.state.levelId = this.level.id;
+    this.pool = levelPool();
+    console.log(`level pool: ${this.pool.map((l) => l.id).join(', ')}`);
     this.onMessage('input', (client, msg) => this.onInput(client, msg));
     this.onMessage('ready', (client) => this.onReady(client));
+    this.onMessage('vote', (client, option) => this.onVote(client, option));
     this.setFixedTimestep(() => this.update(), TICK_RATE);
     this.setPhase('lobby');
   }
@@ -100,6 +114,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
     this.state.players.delete(id);
     this.inputCounts.delete(id);
     this.queues.delete(id);
+    this.syncVotes();
     if (this.world) {
       removePlayer(this.world, id);
       if (this.world.players.length === 0) this.setPhase('lobby');
@@ -112,6 +127,21 @@ export class RaceRoom extends Room<{ state: GameState }> {
     if (!p || this.state.phase !== 'lobby') return;
     p.ready = !p.ready;
     this.maybeStart();
+  }
+
+  /** Lobby only: a candidate index or RANDOM_VOTE. Voting again changes the vote. */
+  private onVote(client: Client, option: unknown) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p || this.state.phase !== 'lobby' || !validVote([...this.state.candidates], option)) return;
+    p.vote = option;
+    this.syncVotes();
+  }
+
+  private syncVotes() {
+    const votes = [...this.state.players.values()].map((p) => p.vote);
+    voteCounts([...this.state.candidates], votes).forEach((n, i) => {
+      if (this.state.voteCounts[i] !== n) this.state.voteCounts[i] = n;
+    });
   }
 
   private onInput(client: Client, msg: unknown) {
@@ -179,13 +209,21 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.world = null;
         s.tick = s.phaseEndTick = 0;
         s.winnerId = '';
-        for (const p of s.players.values()) { p.ready = false; p.spectating = false; }
-        console.log(`phase lobby (min players ${config.minPlayers})`);
+        for (const p of s.players.values()) { p.ready = false; p.spectating = false; p.vote = -1; }
+        s.candidates.clear();
+        s.candidates.push(...pickCandidates(this.pool, this.lastLevelId, this.rng));
+        if (!s.voteCounts.length) s.voteCounts.push(0, 0, 0, 0);
+        this.syncVotes();
+        if (!s.levelId) s.levelId = s.candidates[0]; // the lobby backdrop until a round has been played
+        console.log(`phase lobby (min players ${config.minPlayers}), vote: ${s.candidates.join(', ')}, random`);
         break;
       case 'countdown': {
         // Fresh world with everyone at their spawns; not stepped until playing, so the timer starts with the round.
-        this.level = this.levels[this.round % this.levels.length];
-        s.levelId = this.level.id;
+        const votes = [...s.players.values()].map((p) => p.vote);
+        const id = tallyVotes([...s.candidates], votes, this.pool, this.lastLevelId, this.rng);
+        console.log(`vote: ${voteCounts([...s.candidates], votes).join('/')} (${s.candidates.join(', ')}, random) → ${id}`);
+        this.level = this.pool.find((l) => l.id === id)!;
+        this.lastLevelId = s.levelId = id;
         const level = config.antiStalemate ? this.level : { ...this.level, heat: null, crumble: this.level.mode === 'race' ? null : this.level.crumble };
         const world = createWorld(level, ++this.round, { push: config.push, chain: config.antiStalemate });
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);

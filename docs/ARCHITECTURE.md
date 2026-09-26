@@ -149,6 +149,7 @@ Each tick, `step(world, inputs)` in shared runs:
 - Timeout: most keys wins. A tie is a draw.
 - Room phases: `lobby → countdown (3 s) → playing → results (5 s) → lobby`.
   - Lobby: players toggle ready (R). Start when everyone is ready and players ≥ `MIN_PLAYERS` (env, default 1 in dev, 2 in prod).
+  - **Level vote** (phase 14): the lobby offers up to 3 candidates from the level pool (random, never the level just played, at least one race and one knockout when the pool allows) plus Random. Players vote with 1–4 or a click and can change their vote. At countdown the most votes wins, a tie is broken by the room's seeded RNG, and no votes (or Random winning) picks a random pool level other than the last. Votes are cleared on every new lobby; a leaving player's vote goes with them. Pure logic in `shared/src/vote.ts`.
   - Each round reloads the level (keys reset, players at spawns).
 
 ## 9. Level format (`levels/*.json`)
@@ -169,6 +170,7 @@ Each tick, `step(world, inputs)` in shared runs:
 ```
 
 - Optional `"sky": ["#top", "#bottom"]`: the client's gradient sky colours (render-only, phase 07b).
+- Optional `"pool": true` (phase 14): the level is in the lobby vote's pool. Default false (test levels, arena-cube, traps-lab).
 - `blocks` and `boxes` are merged. The loader expands boxes into a `Set<cellKey>`.
 - `validateLevel()` returns a list of errors. It checks that:
   - spawn, key and exit cells are empty and `solid(cell − up)`
@@ -188,10 +190,11 @@ Required test levels:
 - Schema `GameState`:
   - `phase`, `tick`, `phaseEndTick`, `levelId`, `winnerId`
   - `players: MapSchema<PlayerS>`, `items: MapSchema<ItemS>`
+  - `candidates` (level ids) and `voteCounts` (3 candidate slots, then Random), and `PlayerS.vote` (-1 = none) (phase 14)
 - `PlayerS`: `id`, `name`, `color`, `action`, `from*` / `to*` (cell xyz as int16, up, fwd), `startTick`, `endTick`, `keys`, `ready`.
 - The server owns a plain sim `World` and copies it into the schema after each step. Don't make the schema the sim state.
-- Messages: client → server `input` and `ready`. Server → client `event` (`{type:'key'|'win'|'death', ...}`) for sounds/FX later.
-- Env (read from `.env`): `PORT` (2567), `MIN_PLAYERS`, `LEVEL` (default `test-cube`), `LATENCY_MS` (use Colyseus `simulateLatency` if available, otherwise log in DECISIONS.md what you used).
+- Messages: client → server `input`, `ready` and `vote` (a candidate index 0–2, or 3 = Random; lobby only). Server → client `event` (`{type:'key'|'win'|'death', ...}`) for sounds/FX later.
+- Env (read from `.env`): `PORT` (2567), `MIN_PLAYERS`, `LEVEL` (optional testing override of the pool: one id or a comma list, voted on like the pool; unset = every `"pool": true` level), `LATENCY_MS` (use Colyseus `simulateLatency` if available, otherwise log in DECISIONS.md what you used).
 
 **Client time and rendering**: the client doesn't simulate. It keeps `estServerTick` (a float), updated from each patch's `tick` plus the local elapsed time, and smoothed so it never jumps backwards. It renders at `renderTick = estServerTick − INTERP_TICKS` (2). For each player, `pose.ts` computes the position/orientation from `(action, from, to, progress)`:
 - Roll: lerp the position and rotate the ball around the axis `cross(U, F)`.
@@ -345,7 +348,11 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 **Arenas**
 - `arena-01`: a 9×9×1 plate with 4 single-cell holes and 8 spawns around the edge. Flat brawling.
 - `arena-02` "Sky Cross" (phase 07b): a 5×5 plate with four different arms (beam to a pad, a beam with a 1-cell jump gap to a pad, a ladder of two rails, and a beam that wraps down a hanging column to a lower pad). 8 spawns, 4 on top and 4 underneath. Pads crumble first, the plate core last.
-- `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the default rotation.
+- `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the pool.
+
+**Level pool** (phase 14, `"pool": true`; `npm run level:stats` lists their traps):
+- Race (7 keys, 3 required, heat 3/5, sudden death over the last 30 s): race-01 Four Islands (+ a crumble bridge and a boost shortcut), race-02 Ice Garden, race-03 Pillar Garden, race-04 Sky Ladder, race-05 Underside, race-06 Boost Relay.
+- Knockout (3 lives, crumble 45/10/2): arena-01, arena-02 Sky Cross (+ spikes round the pad, ice rails), arena-03 Ice Rink, arena-04 Crumble Tower, arena-05 Fire Ring, arena-06 Pillar Field.
 
 **Level lint** (phase 12): `npm run level:check` lists 1-wide straight runs (≥ 4 tiles on one face) with the length of the way round them. It warns when there's no way round (`lintCorridors` in `shared/src/level/lint.ts`).
 
@@ -474,4 +481,3 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
 - Death causes are added to the `death` event (`fall`, `spikes`, `fire`, `laser`, `burn`) for HUD and toasts.
 - BFS (`findPath`/`resultPose`) must follow forced moves (ice slides, boosts, teleports) and treat lethal outcomes as invalid, like fatal falls. Retracting spikes count as lethal at planning time (bots don't time them in v1).
 - The predictor runs the same rules. The trap state (crumbled blocks, laser groups) comes from server state each patch, like `removed`.
-

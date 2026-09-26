@@ -8,7 +8,8 @@ const prod = env.NODE_ENV === 'production';
 export const config = {
   port: Number(env.PORT ?? 2567),
   minPlayers: Number(env.MIN_PLAYERS ?? (prod ? 2 : 1)),
-  level: env.LEVEL ?? 'test-cube',
+  /** Optional level override (one id or a comma list) for testing; empty = the pool (levels with "pool": true). */
+  level: env.LEVEL ?? '',
   /** Round-trip ms passed to Colyseus simulateLatency; 0 = off. Ignored in production. */
   /** PvP push rules (ARCHITECTURE §14): PUSH=on|off, default on. */
   push: env.PUSH !== 'off',

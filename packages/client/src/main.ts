@@ -9,6 +9,7 @@ import { PlayersView } from './render/players.ts';
 import { TrapsView } from './render/traps.ts';
 import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
+import { levelPreview } from './render/preview.ts';
 import { createDebug } from './ui/debug.ts';
 import { createHud } from './ui/hud.ts';
 import { createTuningPanel } from './ui/tuning.ts';
@@ -26,7 +27,8 @@ const ACTIVE = new Set(['countdown', 'playing', 'results']);
 const BUMP_AFTER_MS = 150;
 const BUMP_EVERY_MS = 300;
 
-const hud = createHud();
+let net: Net;
+const hud = createHud({ onVote: (i) => net?.sendVote(i), preview: levelPreview, findLevel });
 await loadArt();
 const view = createScene();
 view.setSky();
@@ -61,7 +63,6 @@ players.onFeel = (e) => {
   }
 };
 
-let net: Net;
 try {
   net = await connect();
 } catch (e) {

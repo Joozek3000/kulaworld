@@ -35,6 +35,17 @@
     #hud-center .big { font-size: clamp(90px, 18vh, 220px); font-weight: 800; text-shadow: 0 4px 24px #000a; }
     #hud-center .big.move { font-size: clamp(48px, 9vh, 110px); color: #ff6a1e; animation: pulse 0.35s ease-in-out infinite alternate; }
     @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+    .cards { display: flex; gap: 0.6em; justify-content: center; flex-wrap: wrap; margin: 0.4em 0 0.8em; }
+    .card { pointer-events: auto; cursor: pointer; position: relative; width: 11em; padding: 0.4em; background: #ffffff12; border: 2px solid #ffffff30; border-radius: 10px; color: inherit; font: inherit; }
+    .card:hover { border-color: #fffa; }
+    .card.mine { border-color: var(--ok); background: #3ddc6f22; }
+    .card img, .card .random { display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 6px; }
+    .card .random { display: grid; place-items: center; font-size: 3em; font-weight: 800; background: #ffffff10; }
+    .card kbd { position: absolute; top: 0.6em; left: 0.6em; background: #000a; }
+    .card .cname { font-weight: 700; margin-top: 0.3em; }
+    .card .cmode { font-size: 0.85em; color: #c8cce0; }
+    .card .trap { margin-left: 0.25em; }
+    .card .votes { margin-top: 0.2em; color: #ffd166; font-size: 0.9em; }
     .list { list-style: none; margin: 0; padding: 0; text-align: left; }
     .list li { display: flex; align-items: center; gap: 0.2em; padding: 0.15em 0; }
     .list li.me .name { font-weight: 700; }

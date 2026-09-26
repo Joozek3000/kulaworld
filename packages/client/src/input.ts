@@ -46,6 +46,9 @@ export function setupInput(net: Net, hooks: InputHooks): { readonly fwdHeld: boo
       case 'KeyD': case 'ArrowRight': if (!e.repeat) turn(1); break;
       case 'Space': setJump(true); break;
       case 'KeyR': if (!e.repeat) net.sendReady(); break;
+      case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': // lobby level vote (phase 14): 4 = Random
+        if (!e.repeat) net.sendVote(Number(e.code.slice(5)) - 1);
+        break;
       case 'KeyM': if (!e.repeat) hooks.onMute(); break;
       case 'BracketLeft': hooks.onVolume(-0.1); break;
       case 'BracketRight': hooks.onVolume(0.1); break;

@@ -15,6 +15,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "bots": "tsx tools/bots/src/index.ts",
     "level:check": "tsx packages/shared/scripts/level-check.ts",
+    "level:stats": "tsx packages/shared/scripts/level-stats.ts",
     "coverage": "vitest run --coverage --coverage.include=packages/shared/src/sim/**"
   },
   "devDependencies": {

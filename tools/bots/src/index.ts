@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
-  blockTileAt, lethalForPlanning, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
+  blockTileAt, lethalForPlanning, RANDOM_VOTE, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
 
@@ -609,11 +609,19 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
 
   let dodging = false;
   let cooling = false;
+  let voted = false;
   /** The incoming jump being reacted to: when the hop goes in, or null if this bot misses it. */
   let threat: { key: string; at: number | null } | null = null;
   const timer = setInterval(() => {
     const p = room.state.players?.get(room.sessionId);
     if (!p) return;
+    if (room.state.phase !== 'lobby') voted = false;
+    else if (!voted && room.state.candidates?.length) {
+      // Lobby vote (phase 14): a random option, a candidate or Random.
+      const options = [...Array(room.state.candidates.length).keys(), RANDOM_VOTE];
+      room.send('vote', options[Math.floor(Math.random() * options.length)]);
+      voted = true;
+    }
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
     const playing = room.state.phase === 'playing' && !p.spectating;
     // Hot tile (phase 12): past the warn threshold, step off (any legal move: W rolls, flips or climbs).
