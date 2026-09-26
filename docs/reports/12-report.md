@@ -44,7 +44,7 @@ The soaks used `race-01,arena-01,arena-02` and `seek,bully,bully,wander` at skil
 | 14 | arena-01 | 0.0 | 0.8 | 0.0 |
 | **total** | | **5.0 s** | **9.7 s** | **6.6 s** |
 
-**Honest reading: the bots don't reproduce Jakub's stalemate.** With all four soaks near zero, the differences are noise. Our bots keep moving:
+**Honest reading: the bots don't reproduce Jakub's stalemate.** With all three soaks near zero, the differences are noise. Our bots keep moving:
 - they hunt;
 - wander never stops;
 - at skill 0.5 they react with delays, so they don't lock up in place.
