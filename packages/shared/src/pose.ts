@@ -23,6 +23,8 @@ export const BALL_RADIUS = 0.4;
 export const SPIN_PER_CELL = 1 / BALL_RADIUS;
 export const JUMP_HEIGHT = 1.2;
 export const HOP_HEIGHT = 1.0;
+/** Rolling spin (rad) during a climb: a little forward roll on top of the frame's 90° pitch-up (§5). */
+export const CLIMB_SPIN = Math.PI / 2 + 0.5;
 /** Clash rebound (§16): a lower arc back to the takeoff cell. */
 export const REBOUND_HEIGHT = 0.8;
 /** A knock waits this fraction of KNOCK_TICKS (1 tick: the pusher closing the 0.2-cell gap), then slides fast. */
@@ -133,6 +135,14 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
       pos[2] = C.z - 0.5 * U.z + 0.5 * F.z + off[2];
       quatMul(axisAngle(X, (Math.PI / 2) * p, qa), out.quat, out.quat); // up turns 90° from U to F
       out.spin = p * SPIN_PER_CELL;
+      break;
+    }
+    case Action.Climb: {
+      // Up turns 90° from U to −F about cross(U, F) (the opposite of a flip) while the ball stays in C. The
+      // renderer's contact offset follows `up`, so the ball rolls from the floor into the corner onto the wall.
+      const X = dirVec(cross(from.up, from.fwd));
+      quatMul(axisAngle(X, -(Math.PI / 2) * p, qa), out.quat, out.quat);
+      out.spin = p * CLIMB_SPIN;
       break;
     }
     case Action.Jump:

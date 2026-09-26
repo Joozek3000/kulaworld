@@ -23,14 +23,13 @@ describe('roll', () => {
     expect(p.pose).toEqual({ cell: vec(1, 1, 0), up: Dir.PY, fwd: Dir.PX });
   });
 
-  test('a wall blocks: state unchanged, no action', () => {
+  test('a wall is climbed (phase 11, §5): same cell, the wall becomes the floor', () => {
     const w = makeWorld([...row(0, 4), [1, 1, 0]], [onRow()]);
     const p = player(w);
-    const before = structuredClone(p.pose);
     setInput(w, 'p0', input({ fwdHeld: true }));
-    run(w, 3);
-    expect(p.action).toBe(Action.Idle);
-    expect(p.pose).toEqual(before);
+    step(w);
+    expect(p.action).toBe(Action.Climb);
+    expect(p.to).toEqual({ cell: vec(0, 1, 0), up: Dir.NX, fwd: Dir.PY });
   });
 });
 

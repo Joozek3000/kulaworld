@@ -65,7 +65,7 @@ When an action starts, `from` is the current state and `to` is the result. When 
 Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is at v, `free(v)` = not solid and not reserved by another player (§7).
 
 **Forward (Roll / Flip)**, from Idle:
-1. `A = C + F`. If `solid(A)`, the move is **blocked** (wall) and nothing happens.
+1. `A = C + F`. If `solid(A)`, it's a **Climb** (changed in phase 11, per Jakub: like Kula World, a vertical wall becomes the floor). The ball stays in cell C and rotates onto the wall: `to.cell = C`, `to.up = −F`, `to.fwd = U`, duration `CLIMB_TICKS`. Holding W then rolls up the wall; at its top edge a normal Flip takes the ball onto the wall's top. There's no "blocked by wall" for rolling any more. Walls block only jumps (A1 solid → hop) and pushes/knocks (bump cell solid → bounce).
 2. If `solid(A − U)`, **Roll**: `to.cell = A`, same up/fwd. Requires `free(A)`.
 3. Otherwise, **Flip** over the edge of the block the ball stands on: `to.cell = C − U + F`, `to.up = F`, `to.fwd = −U`. Requires `free(A)` and `free(C − U + F)`.
 
@@ -201,6 +201,7 @@ Required test levels:
 - Hop: the same parabola along U with no lateral movement (peak 1.0 cell).
 - Ball contact: the ball's radius is 0.4 and the cell centre is 0.5 above the face, so render the ball offset by `−U·0.1` so it touches the surface.
 - Fall: linear along −U.
+- Climb (phase 11): the ball stays in C. The frame rotates −90° about `cross(U, F)` (up U → −F, fwd F → U), with a little forward spin. The contact offset follows up, so the ball rolls from the floor into the corner onto the wall.
 - Dead: hidden.
 
 `pose.ts` is float math used only for display. It never feeds back into the sim.
@@ -220,6 +221,7 @@ Required test levels:
 - Other players get CSS2D name labels.
 - Feel (phase 08): balls squash and stretch on a per-ball spring (render only). Sounds are procedural WebAudio synths, overridable by dropping `public/sfx/<name>.ogg|wav`. Ball sounds are triggered by rendered segment transitions (render time), and other players' sounds are positional.
 - Camera: follow cam at `ball − F·4 + U·2.5` looking at `ball + F·1.5`, with `camera.up = U`. The position and quaternion are damped (not snapped) so flips and turns rotate smoothly.
+  - **Occlusion (phase 11):** on a climbed wall the usual spot is inside the old floor. The rig tries progressively higher, closer offsets (each looking at `ball + F·1.5`) and takes the first with a clear line to the ball. As a last resort it pulls the camera toward the ball until the line is clear.
 - HUD (HTML overlay): phase/countdown, timer, keys x/required, player list with ready state and keys, and a results banner.
 - Debug overlay: estServerTick, ping, local player action/cell/up/fwd, patch rate.
 - URL params: `?name=Bob` and `?server=ws://host:2567`. Vite runs with `--host` for LAN tests.
@@ -391,6 +393,9 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
   - a held-back move was just resolved by the server (a push, a bounce, or a roll once the way cleared), until the server has it Idle again with nothing held back. The server's action starts from the cell the predicted ball was holding in, so the switch is seamless and pushes render exactly as without prediction.
 - A correction, or a switch between the timelines, blends the drawn pose into the new one over 100 ms (a decaying position offset and orientation slerp) instead of teleporting.
 - Sounds and squash come from the rendered segments, so for the local ball they happen at press time.
+- **Sub-tick start (phase 11):** a press while the predicted local player is at rest runs the stamped tick at once. The local ball is drawn from that tick immediately; the ≤ 1-tick render offset eases back to `predTick` over 150 ms. So motion starts on the next frame instead of the next tick boundary (up to 50 ms). The sim and the stamps are unchanged.
+- **Precise deferral (phase 11):** a move is held back only when another player changes its outcome. The first viable command is planned with and without the other players, and any difference (push, block, jump over or onto, a shortened jump, a flip onto a taken cell) defers. A player merely nearby doesn't.
+- The local ball has no takeoff anticipation squash (a wind-up reads as input lag); remote balls keep it.
 - `?predict=0` turns prediction off: unstamped inputs, server timeline only (phase 08 behaviour).
 - F3 shows `predTick`, the lead, mispredictions per minute, deferrals and the last correction's size.
 

@@ -169,4 +169,19 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - While a bot hasn't reacted yet (or has missed), it carries on with its normal brain. It doesn't freeze.
 - 2026-09-26, phase 10b: Landing marker visibility is the client tuning value `markerLeadTicks` (F4). 0 = the whole jump (the default).
 - 2026-09-26, phase 10b: `.env.example` is back to the template values. The values Jakub had put in it (`MIN_PLAYERS=4`, `LEVEL=race-01,arena-01,arena-02`) and `LEVEL=test-stomp` are now comments, as examples. `.env` stays git-ignored.
+- 2026-09-26, phase 11: Climb.
+  - `Action.Climb` (11) and `CLIMB_TICKS` 5. `previewAction('fwd')` climbs when A is solid, before the player check (a wall always wins).
+  - A climb reserves only its own cell (`occupiedCells` default: C and `to` = C). It isn't pushable, and a stomp landing on a climbing ball clashes.
+  - Bots count a Climb as a valid result of `fwd`.
+  - The old wall `bump` sound code stays, but now only fires when W is held against an unpushable player.
+- 2026-09-26, phase 11: Camera occlusion is part of the rig (`clampToOpen` plus fallback offsets), using the same solid test as shadows.
+  - Without it, a climbed wall put the follow camera inside the old floor (a screen of solid block).
+  - With the fallbacks, on a wall the camera looks down onto the wall face (the new floor), like Kula.
+- 2026-09-26, phase 11: Latency audit.
+  - The audit measured in a headed Chrome at 165 fps: a separate window with a throwaway profile, because the extension's tab was a background tab and didn't render.
+  - Only one suspect was real: tick quantisation, 0-50 ms from keydown to the stamped tick, which is when the predicted action started. Sending took < 0.5 ms, and the ball visibly moved on the first frame after the action started. Easing (linear), the anticipation squash (a scale change only), keyboard handling (window listeners, repeats ignored) and prediction coverage (active throughout, 0-2 deferrals) didn't add delay.
+  - **Fix: sub-tick start.** It's client-only: the predictor runs the stamped tick at the press, and the local render tick eases back from that tick to `predTick` over 150 ms. Median keydown → visible change dropped from 30-49 ms to 3-5 ms; the max is one frame (6.8 ms).
+  - Also applied: no anticipation squash on the local ball's takeoff, and precise deferral (outcome with vs without the other players, instead of "a player on A, A+F or the flip cell").
+  - Not applied, as the measurements didn't justify them: front-loaded easing (the motion was already visible on the first frame) and faster action ticks (proposed in the report).
+- 2026-09-26, phase 11: F3 shows the last 4 measured presses (sent / stamp ahead / predicted start / visible, in ms after keydown), and `kula.latency.table()` returns them all as a markdown table (dev console).
 

@@ -6,6 +6,13 @@ const OFFSET = new THREE.Vector3(0, 2.5, -4);
 const LOOK = new THREE.Vector3(0, 0, 1.5);
 /** Camera orientation relative to the ball frame, computed once. No world-space lookAt, so no gimbal flip. */
 const Q0 = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(OFFSET, LOOK, new THREE.Vector3(0, 1, 0)));
+/**
+ * Fallback follow offsets when the normal spot is inside a block (phase 11: on a climbed wall "behind" is the old
+ * floor): progressively higher and closer, each still looking at LOOK. The first with a clear line to the ball wins.
+ */
+const OFFSETS = [OFFSET, new THREE.Vector3(0, 3.2, -2.4), new THREE.Vector3(0, 3.8, -1.1), new THREE.Vector3(0, 4.2, 0.3)]
+  .map((o) => ({ o, q: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(o, LOOK, new THREE.Vector3(0, 1, 0))) }));
+const probePos = new THREE.Vector3(), probeOut = new THREE.Vector3();
 const DAMP_PER_SEC = 10;
 const ORBIT_SPEED = 0.15; // rad/s
 
@@ -20,6 +27,25 @@ export function followTarget(pose: RenderPose, outPos: THREE.Vector3, outQuat: T
   outQuat.copy(frame).multiply(Q0);
 }
 
+type SolidFn = (x: number, y: number, z: number) => boolean;
+const STEP = 0.1; // cells
+const MARGIN = 0.2; // cells kept clear of the block face
+
+/**
+ * Occlusion (phase 11): the point on the segment `from` → `to` just before it first enters a solid cell, or `to`
+ * if the way is clear. Climbing a wall puts the follow camera's spot behind the ball inside the old floor.
+ */
+export function clampToOpen(from: THREE.Vector3, to: THREE.Vector3, solid: SolidFn, out: THREE.Vector3): THREE.Vector3 {
+  const len = from.distanceTo(to);
+  for (let d = STEP; d < len; d += STEP) {
+    out.lerpVectors(from, to, d / len);
+    if (solid(Math.round(out.x), Math.round(out.y), Math.round(out.z))) {
+      return out.lerpVectors(from, to, Math.max(0, d - MARGIN) / len);
+    }
+  }
+  return out.copy(to);
+}
+
 /** Frame-rate independent exponential damping factor. */
 export const dampAlpha = (k: number, dt: number) => 1 - Math.exp(-k * dt);
 
@@ -28,14 +54,30 @@ export type CameraMode = 'follow' | 'hold' | 'orbit';
 export class CameraRig {
   private orbitAngle = 0;
   private snap = true;
+  /** The damped camera position before occlusion (damping continues from here, not from the clamped spot). */
+  private readonly pos = new THREE.Vector3();
+  private solid: SolidFn | null = null;
 
   constructor(private camera: THREE.Camera) {}
+
+  /** Solid test for camera occlusion (the level minus crumbled blocks). */
+  setSolid(solid: SolidFn | null): void { this.solid = solid; }
 
   /** follow: chase `pose`; hold: stay put (local ball dead); orbit: circle the level. */
   update(dt: number, mode: CameraMode, pose: RenderPose | null, center: THREE.Vector3, radius: number): void {
     if (mode === 'hold') return;
     if (mode === 'follow' && pose) {
       followTarget(pose, goalPos, goalQuat);
+      if (this.solid) {
+        for (const { o, q } of OFFSETS) {
+          probePos.copy(o).applyQuaternion(frame).add(ball);
+          if (clampToOpen(ball, probePos, this.solid, probeOut).equals(probePos)) {
+            goalPos.copy(probePos);
+            goalQuat.copy(frame).multiply(q);
+            break;
+          }
+        }
+      }
     } else {
       this.orbitAngle += dt * ORBIT_SPEED;
       const r = radius * 2.2;
@@ -44,7 +86,9 @@ export class CameraRig {
     }
     const a = this.snap ? 1 : dampAlpha(DAMP_PER_SEC, dt);
     this.snap = false;
-    this.camera.position.lerp(goalPos, a);
+    this.pos.lerp(goalPos, a);
     this.camera.quaternion.slerp(goalQuat, a);
+    if (mode === 'follow' && pose && this.solid) clampToOpen(ball, this.pos, this.solid, this.camera.position);
+    else this.camera.position.copy(this.pos);
   }
 }

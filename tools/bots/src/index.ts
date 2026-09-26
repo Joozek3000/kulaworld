@@ -136,13 +136,13 @@ function wanderBrain(ctx: Ctx) {
 
 /** Actions a path step may start as. */
 const EXPECTED: Record<string, readonly number[]> = {
-  fwd: [Action.Roll, Action.Flip],
+  fwd: [Action.Roll, Action.Flip, Action.Climb],
   jump: [Action.Jump],
   left: [Action.Turn],
   right: [Action.Turn],
 };
 /** Actions whose `to` is where the player ends up, so the next step may be pressed in their last tick. */
-const EARLY_OK = new Set<number>([Action.Roll, Action.Turn, Action.Flip]);
+const EARLY_OK = new Set<number>([Action.Roll, Action.Turn, Action.Flip, Action.Climb]);
 const STUCK_MS = 10_000;
 const BULLY_PATIENCE_MS = 1_000;
 const BULLY_IGNORE_MS = 3_000;

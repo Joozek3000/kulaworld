@@ -16,6 +16,8 @@ const LEAD_GROW_PER_SEC = 2, LEAD_DECAY_PER_SEC = 0.5;
  * after a quiet spell.
  */
 const MARGIN_MIN = 2, MARGIN_MAX = 5, MARGIN_EASE_MS = 15_000;
+/** Sub-tick start: how long the local render offset takes to ease back to the predicted clock. */
+const BOOST_MS = 150;
 
 const pose = (x: number, y: number, z: number, up: number, fwd: number): Pose => ({ cell: { x, y, z }, up: up as Dir, fwd: fwd as Dir });
 
@@ -42,6 +44,17 @@ export class LocalPrediction {
   predTick = 0;
   /** When predTick was last advanced (a key press between frames extrapolates from here). */
   private predAt = 0;
+  /** Latency audit: how far ahead (ms on the predicted clock) the last input was stamped, and a hook for when the
+   * predicted local action starts. */
+  lastStampAheadMs = 0;
+  /**
+   * Sub-tick start (phase 11): a press from rest steps the prediction to its stamped tick at once and renders the
+   * local ball from that tick right away; the offset (≤ 1 tick) eases back to predTick over BOOST_MS.
+   */
+  private boost = 0;
+  private boostAt = 0;
+  onLocalStart: ((at: number) => void) | null = null;
+  private lastStartSig = '';
   private margin = MARGIN_MIN;
   private lateSeen = 0;
   private lateAt = 0;
@@ -142,6 +155,21 @@ export class LocalPrediction {
     this.predTick = Math.max(this.predTick, this.net.estServerTick + this.lead); // never runs backwards
     this.predAt = performance.now();
     this.pred.advanceTo(Math.floor(this.predTick));
+    this.checkStart();
+  }
+
+  /** Latency audit: report when the predicted local action changes to a new moving one. */
+  private checkStart(): void {
+    const l = this.pred!.local, sig = `${l.action}:${l.startTick}`;
+    if (sig === this.lastStartSig) return;
+    this.lastStartSig = sig;
+    if (l.action !== Action.Idle) this.onLocalStart?.(performance.now());
+  }
+
+  /** The tick the local ball renders at: predTick plus the easing sub-tick-start offset. */
+  get renderTick(): number {
+    const k = Math.max(0, 1 - (performance.now() - this.boostAt) / BOOST_MS);
+    return this.predTick + this.boost * k;
   }
 
   /** The local ball is drawn from the prediction (else from the server, as with ?predict=0). */
@@ -157,7 +185,17 @@ export class LocalPrediction {
     // Extrapolated to the moment of the key press: at low frame rates two presses in one frame gap would otherwise
     // get the same (stale) tick, and presses 60-90 ms apart could land 3 ticks apart.
     const now = this.predTick + Math.max(0, performance.now() - this.predAt) / TICK_MS;
-    return { ...input, tick: this.pred.input(input, Math.floor(now) + 1) };
+    const atRest = this.pred.local.action === Action.Idle && this.pred.tick <= Math.floor(now);
+    const tick = this.pred.input(input, Math.floor(now) + 1);
+    this.lastStampAheadMs = (tick - now) * TICK_MS;
+    if (atRest && tick === Math.floor(now) + 1) {
+      // Don't wait up to a tick for the boundary: run the stamped tick now and draw the local ball from it.
+      this.pred.advanceTo(tick);
+      this.checkStart();
+      this.boost = tick - now;
+      this.boostAt = performance.now();
+    }
+    return { ...input, tick };
   }
 
   /** The predicted local player in schema shape, for the renderer. */

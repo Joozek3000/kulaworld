@@ -8,6 +8,8 @@ export interface InputHooks {
   onMute(): void; // M
   onVolume(delta: number): void; // [ and ]
   onTuning(): void; // F4 (dev)
+  /** A gameplay key went down (not a repeat): its label and the event's timeStamp (latency audit). */
+  onKey?(key: string, at: number): void;
 }
 
 /**
@@ -34,8 +36,10 @@ export function setupInput(net: Net, hooks: InputHooks): { readonly fwdHeld: boo
   const turn = (t: -1 | 1) => { send(t, false); hooks.onPress(); };
   const releaseAll = () => { setFwd(false); setJump(false); };
 
+  const LABELS: Record<string, string> = { KeyW: 'W', ArrowUp: 'W', KeyA: 'A', ArrowLeft: 'A', KeyD: 'D', ArrowRight: 'D', Space: 'Space' };
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return; // a focused tuning slider owns the arrow keys
+    if (!e.repeat && LABELS[e.code]) hooks.onKey?.(LABELS[e.code], e.timeStamp);
     switch (e.code) {
       case 'KeyW': case 'ArrowUp': setFwd(true); break;
       case 'KeyA': case 'ArrowLeft': if (!e.repeat) turn(-1); break;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Action, type Level } from '@kula/shared';
+import { Action, type InputMsg, type Level } from '@kula/shared';
 import { setupInput } from './input.ts';
 import { connect, serverUrl, type Net } from './net.ts';
 import { CameraRig, type CameraMode } from './render/camera.ts';
@@ -12,6 +12,7 @@ import { createDebug } from './ui/debug.ts';
 import { createHud } from './ui/hud.ts';
 import { createTuningPanel } from './ui/tuning.ts';
 import { AudioEngine } from './audio/engine.ts';
+import { latency } from './ui/latency.ts';
 import { LocalPrediction } from './predict/local.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
@@ -43,6 +44,7 @@ players.onFeel = (e) => {
     case 'land': audio.play('bounce', { at, intensity: e.intensity }); break;
     case 'roll': audio.play('roll', { at }); break;
     case 'flip': audio.play('squeak', { at }); break;
+    case 'climb': audio.play('squeak', { at, gain: 0.8 }); break; // rubber into the corner (phase 11)
     case 'fall': audio.play('fall', { at }); break;
     case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
     case 'boing': audio.play('boing', { at }); break;
@@ -61,7 +63,19 @@ try {
 }
 net.room.onLeave(() => hud.error('disconnected'));
 const predict = new LocalPrediction(net, findLevel);
-if (predict.enabled) net.stamp = (i) => predict.stamp(i);
+net.stamp = (i) => {
+  const msg: InputMsg = predict.enabled ? predict.stamp(i) : i;
+  latency.sent(performance.now(), msg.tick === undefined ? undefined : predict.lastStampAheadMs);
+  return msg;
+};
+predict.onLocalStart = (at) => latency.predStart(at);
+// Without prediction, (c) is when the server's action for the press shows up in a patch.
+let lastServerStart = '';
+net.onPatch(() => {
+  const p = net.state.players.get(net.sessionId);
+  const sig = p ? `${p.action}:${p.startTick}` : '';
+  if (sig !== lastServerStart) { lastServerStart = sig; if (p && p.action !== Action.Idle && !predict.predicting) latency.predStart(performance.now()); }
+});
 
 let screenshot = false;
 let frozen = false;
@@ -73,7 +87,15 @@ const input = setupInput(net, {
   onMute: () => audio.toggleMute(),
   onVolume: (d) => { audio.setVolume(audio.volume + d); hud.toast(`Volume ${Math.round(audio.volume * 100)}%`, '#fff'); },
   onTuning: () => tuningPanel?.toggle(),
+  onKey: (key, at) => {
+    const p = net.state.players.get(net.sessionId);
+    latency.press(key, at, !!p && p.action === Action.Idle && players.localAction(net.sessionId) === Action.Idle, predict.predicting);
+  },
 });
+
+/** F3: the last few measured presses, ms after keydown (sent / stamp ahead / predicted start / visible). */
+const latencyLines = () => ['press→ (ms)   key  mode    sent  stamp  start  visible',
+  ...latency.rows.slice(-4).map((r) => `              ${latency.summary(r).map((c) => c.padStart(5)).join(' ')}`)];
 
 const nameOf = (id: string) => (id === net.sessionId ? 'You' : net.state.players.get(id)?.name ?? '?');
 const colorOf = (id: string) => net.state.players.get(id)?.color ?? '#fff';
@@ -96,7 +118,7 @@ net.onEvent((e) => {
   }
 });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, input, predict, debug } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, input, predict, debug, latency } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
@@ -105,6 +127,7 @@ let last = performance.now();
 let lastPhase = '';
 let lastCount = -1;
 let wasUnlocked = false;
+let lastLocalPose = '';
 let blockedSince = 0, lastBump = 0;
 
 view.renderer.setAnimationLoop((now: number) => {
@@ -120,6 +143,7 @@ view.renderer.setAnimationLoop((now: number) => {
     if (levelView) view.scene.remove(levelView.group);
     levelView = level ? new LevelView(level) : null;
     players.setSolid(levelView?.solid ?? null);
+    rig.setSolid(levelView?.solid ?? null);
     if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
     view.setSky(level?.sky ?? undefined);
   }
@@ -129,8 +153,15 @@ view.renderer.setAnimationLoop((now: number) => {
   // Prediction (§17): the local ball runs on its predicted timeline at predTick; otherwise it trails the server.
   predict.update(dtMs);
   const predicting = predict.predicting && !!s.players.get(me);
-  const localTick = predicting ? predict.predTick : net.estServerTick - LOCAL_INTERP_TICKS;
+  const localTick = predicting ? predict.renderTick : net.estServerTick - LOCAL_INTERP_TICKS;
   players.update(s, renderTick, me, localTick, dtMs / 1000, now, predicting ? predict.localPlayer(s.players.get(me)!) : null, predict.takeCorrection());
+  // Latency audit (d): the first frame whose local ball differs from the last frame's (> 0.01 in position/rotation).
+  const lp = players.poseOf(me);
+  if (lp) {
+    const sig = [...lp.position, ...lp.quat, lp.spin].map((v) => Math.round(v * 100)).join(',');
+    if (lastLocalPose && sig !== lastLocalPose) latency.visible(now);
+    lastLocalPose = sig;
+  } else lastLocalPose = '';
   const mine = s.players.get(me);
   const unlocked = !!level?.exit && !!mine && mine.keys >= level.keysRequired;
   items.update(s, active, unlocked, now / 1000);
@@ -150,7 +181,8 @@ view.renderer.setAnimationLoop((now: number) => {
   for (const r of rolls) audio.roll(r.id, r.speed, r.at, r.local);
   audio.endRolls(new Set(rolls.map((r) => r.id)));
 
-  // Bump: forward held while Idle (server and screen) for a moment means a wall is in the way.
+  // Bump: forward held while Idle (server and screen) for a moment: an unpushable player in the way (walls are
+  // climbed since phase 11, so this no longer fires for them).
   const blocked = s.phase === 'playing' && input.fwdHeld && mine?.action === Action.Idle && players.localAction(me) === Action.Idle;
   if (!blocked) blockedSince = 0;
   else if (!blockedSince) blockedSince = now;
@@ -171,7 +203,8 @@ view.renderer.setAnimationLoop((now: number) => {
     predict.enabled ? [
       `predict       ${predicting ? 'on' : 'paused'}   predTick ${predict.predTick.toFixed(2)}   lead ${predict.lead.toFixed(2)}`,
       `mispredict    ${predict.mispredictionsPerMin}/min (${predict.mispredictions} total)   deferred ${predict.deferred}   last fix ${players.localCorrection(me).toFixed(2)} cells`,
-    ] : ['predict       off (?predict=0)']);
+      ...latencyLines(),
+    ] : ['predict       off (?predict=0)', ...latencyLines()]);
 
   if (screenshot) {
     screenshot = false;

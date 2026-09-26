@@ -1,13 +1,13 @@
 // Client-side prediction for the local player (ARCHITECTURE §17). Pure and deterministic, so it's unit-testable; the
 // client wraps it (client/src/predict/) and the server shares the input scheduling rule.
 import { INPUT_BUFFER_TICKS } from './constants.ts';
-import { dirVec } from './dir.ts';
 import type { Level, Pose } from './level/types.ts';
-import { add, cellKey, sub } from './vec.ts';
+import { cellKey } from './vec.ts';
+import { previewAction, type Plan } from './sim/actions.ts';
 import { step } from './sim/tick.ts';
 import {
   Action, addPlayer, createWorld, reserve, setInput,
-  type Input, type PlayerState, type Reservations, type World,
+  type Cmd, type Input, type PlayerState, type Reservations, type World,
 } from './sim/world.ts';
 
 /** Inputs stamped further ahead than this are applied this many ticks ahead instead (a jump is never dropped). */
@@ -221,22 +221,33 @@ export class Predictor {
   }
 
   /**
-   * Would the command the sim is about to pick move toward another player? Mirrors the priority in tick.ts
-   * (jump pulse/latch, turn pulse, jumpHeld, fwdHeld): true when it's a roll/flip/forward jump and the cell ahead,
-   * the one beyond it, or the flip's landing cell is held by another player.
+   * Does another player change what the sim is about to do? The command list mirrors the priority in tick.ts (jump
+   * pulse/latch, turn pulse, jumpHeld, fwdHeld); the first viable command is planned with the other players present
+   * and without them. Any difference (a push or a block, a jump over or onto someone, a shortened jump, a flip onto a
+   * taken cell) means the move involves a player: the server decides it. Anything else is predicted, however close
+   * the others are.
    */
   private towardOthers(p: PlayerState, pose: Pose): boolean {
     const pulse = p.pulse && p.pulseAge <= INPUT_BUFFER_TICKS ? p.pulse : null;
-    let forward: boolean;
-    if (pulse === 'jump' || p.fwdLatch) forward = p.fwdHeld || p.fwdLatch;
-    else if (pulse) forward = false; // a turn
-    else forward = p.fwdHeld;
-    if (!forward) return false;
-    const res: Reservations = new Map();
-    for (const o of this.world.players) if (o !== p) reserve(res, o);
-    const F = dirVec(pose.fwd), A = add(pose.cell, F);
-    return [A, add(A, F), sub(A, dirVec(pose.up))].some((c) => res.has(cellKey(c)));
+    const jumps = (fwd: boolean): Cmd[] => (fwd ? ['jump', 'hop'] : ['hop']);
+    const cmds: Cmd[] = [];
+    if (pulse === 'jump' || p.fwdLatch) cmds.push(...jumps(p.fwdHeld || p.fwdLatch));
+    if (pulse === 'left' || pulse === 'right') cmds.push(pulse);
+    if (p.jumpHeld) cmds.push(...jumps(p.fwdHeld));
+    if (p.fwdHeld) cmds.push('fwd');
+    if (!cmds.length) return false;
+    const others: Reservations = new Map();
+    for (const o of this.world.players) if (o !== p) reserve(others, o);
+    const self = { id: p.id, pose };
+    const pick = (res: Reservations): Plan | null => {
+      for (const c of cmds) { const plan = previewAction(this.world, self, c, res); if (plan) return plan; }
+      return null;
+    };
+    const a = pick(others), b = pick(new Map());
+    if (!a || !b) return a !== b;
+    return a.action !== b.action || !samePose(a.to, b.to) || !!a.over !== !!b.over || !!a.bump !== !!b.bump;
   }
+
 
   /**
    * The server's state of the local player at tick `ts` (with the last input it applied, if known). A match drops

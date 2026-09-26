@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import { Action, ALL_DIRS, dirVec, perpendicular, poseAt, turnFwd, vec, type Pose } from '@kula/shared';
-import { dampAlpha, followTarget } from './camera.ts';
+import { clampToOpen, dampAlpha, followTarget } from './camera.ts';
 
 const pairs = ALL_DIRS.flatMap((u) => ALL_DIRS.filter((f) => perpendicular(u, f)).map((f) => [u, f] as const));
 const v3 = (d: { x: number; y: number; z: number }) => new THREE.Vector3(d.x, d.y, d.z);
@@ -50,3 +50,14 @@ test('camera ignores hop/jump height', () => {
   followTarget(poseAt(Action.Hop, p, p, 0.5), b, q);
   expect(a.distanceTo(b)).toBeLessThan(1e-9);
 });
+
+test('clampToOpen: stops just before the first solid cell on the way to the camera, else keeps the camera', () => {
+  const floor = (_x: number, y: number) => y <= 0; // everything at y <= 0 is solid
+  const out = new THREE.Vector3();
+  clampToOpen(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -3, 0), floor, out);
+  expect(out.y).toBeGreaterThan(0.5); // above the floor's top face (y = 0.5)
+  expect(out.y).toBeLessThan(1);
+  clampToOpen(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 3, -4), floor, out);
+  expect(out.toArray()).toEqual([0, 3, -4]);
+});
+

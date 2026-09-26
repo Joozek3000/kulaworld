@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
+  Action, BALL_RADIUS, CLIMB_SPIN, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
   SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
@@ -13,7 +13,7 @@ import { applySquash, Spring } from './squash.ts';
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
  * `hit` is push contact (at the victim), `pop` a death.
  */
-export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash';
+export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -70,6 +70,7 @@ const SQUASH = {
   bounce: -0.3, // the pusher against the victim on a failed push
   wobble: 0.12, // stunned
   roll: -0.03, // pulse at each tile start
+  climb: -0.12, // rolling into a wall's corner
   stomp: -0.5, // a stomped victim, flattened under the attacker before it shoots out (§16)
 };
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
@@ -246,6 +247,8 @@ class PlayerView {
         this.spinBase = (this.spinBase + SPIN_PER_CELL) % (Math.PI * 2);
       } else if (this.renderedAction === Action.Knocked) {
         this.spinBase = (this.spinBase + KNOCK_SPIN) % (Math.PI * 2);
+      } else if (this.renderedAction === Action.Climb) {
+        this.spinBase = (this.spinBase + CLIMB_SPIN) % (Math.PI * 2);
       }
       this.renderedSerial = s.serial;
       this.renderedAction = s.action;
@@ -347,9 +350,18 @@ class PlayerView {
     if (prev === Action.Knocked && s.action !== Action.Knocked) this.kick(this.knockAxis, SQUASH.stop * sq);
     switch (s.action) {
       case Action.Hop:
-      case Action.Jump: this.kick(tmpUp, Math.min(this.spring.x, SQUASH.anticipation * sq)); feel('takeoff'); break;
+      case Action.Jump: // your own ball leaves at once (phase 11: a wind-up reads as input lag); others wind up
+        if (!this.local) this.kick(tmpUp, Math.min(this.spring.x, SQUASH.anticipation * sq));
+        feel('takeoff');
+        break;
       case Action.Roll: if (this.spring.x > SQUASH.roll * sq) this.kick(tmpUp, SQUASH.roll * sq); feel('roll'); break; // don't cut a jiggle short
       case Action.Flip: feel('flip'); break;
+      case Action.Climb: { // squash into the corner, toward the wall that becomes the floor
+        const f = dirVec(s.from.fwd);
+        this.kick(probe.set(f.x, f.y, f.z), SQUASH.climb * sq);
+        feel('climb');
+        break;
+      }
       case Action.Rebound: this.kick(tmpUp, SQUASH.contact * sq); feel('clash'); break; // bounced off a high hop
       case Action.Knocked: this.contactPending = true; break;
       case Action.Stunned: this.boingPending = s.bounce; break;
@@ -394,7 +406,7 @@ class PlayerView {
     switch (s.action) {
       case Action.Hop:
       case Action.Jump: {
-        if (t < ANTICIPATION_TICKS) { target = SQUASH.anticipation; this.squashAxis.copy(tmpUp); break; }
+        if (t < ANTICIPATION_TICKS && !this.local) { target = SQUASH.anticipation; this.squashAxis.copy(tmpUp); break; }
         // Velocity along the arc (cells/tick): the forward glide plus the parabola's rate along up.
         const h = (4 * (s.action === Action.Hop ? HOP_HEIGHT : JUMP_HEIGHT)) / len;
         const vu = h * (1 - 2 * p);
@@ -648,7 +660,7 @@ export class PlayersView {
   /** Every ball's roll state for the rumble loops: speed 1 while rolling or flipping on screen. */
   rolling(): { id: string; speed: number; at: THREE.Vector3; local: boolean }[] {
     return [...this.views].map(([id, v]) => ({
-      id, at: v.ball.position, local: v.local, speed: v.shown && (v.action === Action.Roll || v.action === Action.Flip) ? 1 : 0,
+      id, at: v.ball.position, local: v.local, speed: v.shown && (v.action === Action.Roll || v.action === Action.Flip || v.action === Action.Climb) ? 1 : 0,
     }));
   }
 

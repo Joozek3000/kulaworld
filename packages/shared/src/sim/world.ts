@@ -6,7 +6,7 @@ import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */

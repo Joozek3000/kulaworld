@@ -1,4 +1,4 @@
-import { FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
+import { CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, sub, type Vec3 } from '../vec.ts';
@@ -35,7 +35,9 @@ export function previewAction(
       return { action: Action.Turn, to: { cell: C, up, fwd: turnFwd(up, fwd, cmd === 'left' ? -1 : 1) }, ticks: TURN_TICKS };
     case 'fwd': {
       const A = add(C, F);
-      if (!free(A)) return null; // wall or player
+      // A wall ahead becomes the floor (§5, phase 11): the ball stays in C and turns up onto it.
+      if (isSolid(world, A)) return { action: Action.Climb, to: { cell: C, up: opposite(fwd), fwd: up }, ticks: CLIMB_TICKS };
+      if (!free(A)) return null; // a player
       const below = sub(A, U);
       if (isSolid(world, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: ROLL_TICKS };
       if (!free(below)) return null;

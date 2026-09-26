@@ -209,5 +209,36 @@ describe('predictor', () => {
     expect(h.pred.mispredictions).toBe(0);
     expect(h.results.filter((r) => r !== 'match' && r !== 'paused')).toEqual([]);
   });
+
+  test('a climb (rolling into a wall, then up and over it) is predicted exactly', () => {
+    const w = createWorld(loadLevel(levelJson([...row(0, 8), [4, 1, 0], [4, 2, 0]], [[[1, 1, 0], '+Y', '+X'], [[7, 1, 0], '+Y', '-X'], [[0, 1, 0], '+Y', '+X'], [[8, 1, 0], '+Y', '-X']])), 1);
+    w.spawnOrder = [0, 1, 2, 3];
+    addPlayer(w, 'me', 'me');
+    const h = new Harness(w);
+    h.run(2);
+    h.send({ fwdHeld: true });
+    h.run(40);
+    h.send({});
+    h.run(20);
+    expect(h.local.pose.cell.x).toBeGreaterThan(4); // went over the wall
+    expect(h.pred.mispredictions).toBe(0);
+    expect(h.results.filter((r) => r !== 'match' && r !== 'paused')).toEqual([]);
+  });
+
+  test('a move near another player that does not involve it is predicted, not deferred (phase 11)', () => {
+    const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[2, 1, 0], '+Y', '-X']]), 1);
+    w.spawnOrder = [0, 1];
+    addPlayer(w, 'me', 'me');
+    const other = addPlayer(w, 'other', 'other');
+    const h = new Harness(w);
+    h.pred.setOthers([{ id: 'other', ...toServer(other) }]);
+    h.send({ fwdHeld: true }); // one roll to x=1: the ball on x=2 is 1 cell past the target, not in the way
+    h.run(2);
+    h.send({});
+    h.run(10);
+    expect(h.local.pose.cell.x).toBe(1);
+    expect(h.pred.deferrals).toBe(0);
+    expect(h.pred.mispredictions).toBe(0);
+  });
 });
 

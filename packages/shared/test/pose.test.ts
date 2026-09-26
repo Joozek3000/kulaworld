@@ -53,6 +53,19 @@ describe('poseAt', () => {
     close(poseAt(Action.Jump, C, to, 1).position, [0, 1, 2]);
   });
 
+  test('climb: stays in the cell, up turns from U to −F and fwd from F to U, for all 24 frames', () => {
+    for (const [u, f] of pairs) {
+      const C = pose(3, 4, 5, u, f), to = pose(3, 4, 5, opposite(f), u);
+      const U = arr(dirVec(u)), F = arr(dirVec(f));
+      for (const p of [0, 0.5, 1]) close(poseAt(Action.Climb, C, to, p).position, [3, 4, 5]);
+      sameRot(poseAt(Action.Climb, C, to, 0).quat, frameQuat(u, f, [0, 0, 0, 1]));
+      sameRot(poseAt(Action.Climb, C, to, 1).quat, frameQuat(opposite(f), u, [0, 0, 0, 1]));
+      const s = Math.SQRT1_2; // halfway, up points diagonally out of the corner
+      close(poseAt(Action.Climb, C, to, 0.5).up, [s * (U[0] - F[0]), s * (U[1] - F[1]), s * (U[2] - F[2])]);
+      close(poseAt(Action.Climb, C, to, 1).up, [-F[0], -F[1], -F[2]]);
+    }
+  });
+
   test('rebound: a reverse arc from the landing cell back to the takeoff cell, facing kept', () => {
     const L = pose(0, 1, 2, Dir.PY, Dir.PZ), back = pose(0, 1, 0, Dir.PY, Dir.PZ);
     close(poseAt(Action.Rebound, L, back, 0).position, [0, 1, 2]);

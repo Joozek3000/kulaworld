@@ -24,3 +24,4 @@ Workflow:
 | 09 | Prediction | Own ball reacts instantly; server-authoritative reconciliation; no push prediction |
 | 10 | Stomp | Jump over players; landing on a player bumps them 1 tile in your jump direction; hop = clash defence |
 | 10b | Stomp polish | Human-like bot reactions, W+Space jump grace, marker tuning |
+| 11 | Climb + latency | Rolling into a wall makes it the floor (Kula gravity); measure and remove input lag |
