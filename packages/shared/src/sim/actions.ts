@@ -89,6 +89,7 @@ export function startAction(p: PlayerState, plan: Plan, tick: number): void {
   p.to = plan.to;
   p.jumpOver = plan.over ?? false;
   p.stompBump = plan.bump ?? null;
+  p.graceUntil = -1; // tryCmds re-arms it for a roll started from rest
   p.startTick = tick;
   p.endTick = tick + plan.ticks;
   // Reset a stale mid-air turn record, but keep one that is still spinning (e.g. a turn on the landing tick of a

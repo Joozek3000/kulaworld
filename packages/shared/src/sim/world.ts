@@ -57,6 +57,8 @@ export interface PlayerState {
   jumpOver: boolean;
   /** Stomp jump: the bump cell B = L + F, reserved for the whole jump; null otherwise (§16). */
   stompBump: Vec3 | null;
+  /** Jump grace (§6): a Roll started from rest can still turn into a standing jump until this tick; -1 otherwise. */
+  graceUntil: number;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -194,7 +196,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
-    jumpOver: false, stompBump: null,
+    jumpOver: false, stompBump: null, graceUntil: -1,
   };
   world.players.push(p);
   trySpawn(world, p);

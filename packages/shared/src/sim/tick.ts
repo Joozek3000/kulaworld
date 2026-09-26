@@ -1,4 +1,4 @@
-import { INPUT_BUFFER_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
+import { INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STUN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import { add, eq, type Vec3 } from '../vec.ts';
 import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
@@ -24,6 +24,17 @@ export function step(world: World): SimEvent[] {
       p.turnStartTick = tick;
       p.to = { ...p.to, fwd: turnFwd(p.to.up, p.to.fwd, p.pulse === 'left' ? -1 : 1) };
       p.pulse = null;
+    }
+  }
+
+  // Jump grace (§6): W and Space pressed "together" from rest but a tick or two apart. The roll is cancelled (its
+  // target cell released) and the player decides again this tick, from its origin cell: a standing forward jump.
+  for (const p of order) {
+    if (p.action === Action.Roll && tick <= p.graceUntil && p.pulse === 'jump' && p.fwdHeld) {
+      p.action = Action.Idle;
+      p.to = p.pose;
+      p.startTick = p.endTick = tick;
+      p.graceUntil = -1;
     }
   }
 
@@ -127,7 +138,9 @@ function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): 
     if (cmd !== 'fwd') p.pulse = null;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
+    const resting = p.endTick < world.tick; // Idle for at least a tick, not chaining from a finished action
     startAction(p, plan, world.tick);
+    p.graceUntil = plan.action === Action.Roll && resting ? world.tick + JUMP_GRACE_TICKS : -1;
     reserve(res, p);
     return;
   }

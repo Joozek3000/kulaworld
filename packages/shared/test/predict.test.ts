@@ -192,4 +192,22 @@ describe('predictor', () => {
       expect(h.results).toContain('deferred'); // the server jumped; the client waited for it
     }
   });
+
+  test('jump grace (W, then Space a tick later) is predicted exactly: no misprediction', () => {
+    const h = new Harness(soloWorld('test-flat.json'));
+    h.run(2);
+    for (let i = 0; i < 6; i++) {
+      h.send({ fwdHeld: true });
+      h.run(1);
+      h.send({ fwdHeld: true, jump: true });
+      h.run(1);
+      h.send({});
+      h.run(14);
+      h.send({ turn: 1 });
+      h.run(4);
+    }
+    expect(h.pred.mispredictions).toBe(0);
+    expect(h.results.filter((r) => r !== 'match' && r !== 'paused')).toEqual([]);
+  });
 });
+

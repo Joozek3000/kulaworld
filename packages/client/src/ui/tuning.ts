@@ -37,6 +37,7 @@ export function createTuningPanel(audio: AudioEngine) {
     row('stiffness', 50, 800, 10, () => tuning.stiffness, (v) => { tuning.stiffness = v; }),
     row('damping', 2, 40, 0.5, () => tuning.damping, (v) => { tuning.damping = v; }),
     row('hit-stop ms', 0, 120, 5, () => tuning.hitStopMs, (v) => { tuning.hitStopMs = v; }),
+    row('marker ticks', 0, 10, 1, () => tuning.markerLeadTicks, (v) => { tuning.markerLeadTicks = v; }), // 0 = whole jump
     heading('Sound gains'),
     ...SOUND_NAMES.map((n) => row(n, 0, 2, 0.05, () => tuning.gains[n], (v) => { tuning.gains[n] = v; },
       () => audio.play(n, { intensity: 0.6, mine: true }, 'ui'))),

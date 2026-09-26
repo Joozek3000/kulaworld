@@ -199,8 +199,10 @@ export class Predictor {
     const t = this.world.tick + 1, p = this.local;
     if (p.action === Action.Dead) p.endTick = Infinity; // respawns (and lives) are the server's call
     for (const e of this.log) if (e.tick === t) setInput(this.world, this.localId, e.input);
-    const deciding = p.action === Action.Idle || (p.action !== Action.Dead && p.endTick === t);
-    if (deciding && this.world.players.length > 1 && this.towardOthers(p, p.action === Action.Idle ? p.pose : p.to)) {
+    // Deciding this tick: Idle, finishing an action, or a roll about to be turned into a jump by the grace rule.
+    const grace = p.action === Action.Roll && t <= p.graceUntil && p.pulse === 'jump' && p.fwdHeld;
+    const deciding = p.action === Action.Idle || grace || (p.action !== Action.Dead && p.endTick === t);
+    if (deciding && this.world.players.length > 1 && this.towardOthers(p, p.action === Action.Idle || grace ? p.pose : p.to)) {
       // Don't predict a push or a move into another player: hold still and let the server decide.
       const keep = { fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge };
       p.fwdHeld = p.jumpHeld = p.fwdLatch = false;

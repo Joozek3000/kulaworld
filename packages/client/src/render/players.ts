@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
-  Action, BALL_RADIUS, dirVec, HOP_HEIGHT, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
+  Action, BALL_RADIUS, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
   SPIN_PER_CELL, STUN_TICKS, TURN_TICKS,
   type AirTurn, type Dir, type Pose, type RenderPose,
 } from '@kula/shared';
@@ -187,6 +187,9 @@ class PlayerView {
       s.turnStartTick = p.turnStartTick;
       return;
     }
+    // Jump grace (§6): a just-started roll turned into a standing jump from its origin. Blend, don't snap back.
+    if (p.action === Action.Jump && s.action === Action.Roll && p.startTick - s.startTick <= JUMP_GRACE_TICKS
+      && p.fromX === s.from.cell.x && p.fromY === s.from.cell.y && p.fromZ === s.from.cell.z) this.requestBlend();
     this.head = (this.head + 1) % HISTORY;
     const n = this.segs[this.head];
     n.serial = ++this.serial;
@@ -310,7 +313,8 @@ class PlayerView {
   /** The landing marker of a forward jump: flat on L's face, shrinking toward the landing. */
   private placeMarker(s: Seg, renderTick: number): void {
     const { from, to } = s;
-    const forward = this.shown && s.action === Action.Jump
+    const lead = tuning.markerLeadTicks; // 0 = the whole jump, else only its last `lead` ticks
+    const forward = this.shown && s.action === Action.Jump && (lead <= 0 || s.endTick - renderTick <= lead)
       && (from.cell.x !== to.cell.x || from.cell.y !== to.cell.y || from.cell.z !== to.cell.z);
     this.marker.visible = forward;
     this.markerCell = forward ? `${to.cell.x},${to.cell.y},${to.cell.z}|${to.up}` : '';

@@ -13,6 +13,7 @@ const { values } = parseArgs({
     behaviour: { type: 'string', default: 'wander' }, // comma list, assigned round-robin: seek,wander,bully
     duration: { type: 'string' }, // seconds; default: run until Ctrl+C
     server: { type: 'string', default: 'ws://localhost:2567' },
+    skill: { type: 'string', default: '0.5' }, // 0..1: reaction speed and reliability; 1 = instant, never misses
   },
 });
 const BEHAVIOURS = ['wander', 'seek', 'bully'] as const;
@@ -23,6 +24,16 @@ const behaviours = values.behaviour.split(',').map((b) => b.trim());
 if (!Number.isInteger(count) || count < 1) throw new Error(`--count must be a positive integer, got ${values.count}`);
 if (!(duration > 0)) throw new Error(`--duration must be a positive number of seconds, got ${values.duration}`);
 for (const b of behaviours) if (!BEHAVIOURS.includes(b as Behaviour)) throw new Error(`unknown --behaviour ${b} (available: ${BEHAVIOURS.join(', ')})`);
+const skill = Number(values.skill);
+if (!(skill >= 0 && skill <= 1)) throw new Error(`--skill must be 0..1, got ${values.skill}`);
+/**
+ * Human-like reactions (phase 10b) for *reactive* inputs (the defensive hop, jumping over a blocker). At the default
+ * skill 0.5: 150-300 ms before reacting and a 25 % chance of missing a hop. Skill 1 is instant and never misses (the
+ * phase 10 bots); skill 0 doubles both.
+ */
+const slowness = (1 - skill) / 0.5;
+const reactionMs = () => slowness * (150 + Math.random() * 150);
+const HOP_MISS = Math.min(1, 0.25 * slowness);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const between = (a: number, b: number) => a + Math.random() * (b - a);
@@ -30,7 +41,7 @@ const between = (a: number, b: number) => a + Math.random() * (b - a);
 interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
-  stomps: number; stomped: number; clashes: number; dodges: number;
+  stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -81,11 +92,11 @@ function withPlayers(world: World, state: { players: { forEach(cb: (p: SchemaPla
   return { ...world, players };
 }
 
-/** Someone's forward jump is coming down on my cell (the landing marker is on my tile). */
-function jumpingOnto(state: { players: { forEach(cb: (p: SchemaPlayer, id: string) => void): void } }, me: SchemaPlayer, selfId: string): boolean {
-  let hit = false;
+/** Someone's forward jump is coming down on my cell (the landing marker is on my tile): that jump's key, or ''. */
+function jumpingOnto(state: { players: { forEach(cb: (p: SchemaPlayer, id: string) => void): void } }, me: SchemaPlayer, selfId: string): string {
+  let hit = '';
   state.players.forEach((o, id) => {
-    if (id !== selfId && o.action === Action.Jump && o.toUp === me.fromUp && o.toX === me.fromX && o.toY === me.fromY && o.toZ === me.fromZ) hit = true;
+    if (id !== selfId && o.action === Action.Jump && o.toUp === me.fromUp && o.toX === me.fromX && o.toY === me.fromY && o.toZ === me.fromZ) hit = `${id}:${o.startTick}`;
   });
   return hit;
 }
@@ -220,6 +231,8 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   // After a bounce, wait a random moment: two bots that bounced off each other recover on the same tick and would
   // otherwise push each other again in lockstep forever.
   let holdUntil = 0;
+  /** seek: the blocker currently in the way and when this bot reacts to it (ms). */
+  let blocker: { key: string; at: number } | null = null;
 
   const replan = () => { path = []; target = ''; expected = null; };
   const randomTurn = () => ctx.send({ turn: Math.random() < 0.5 ? -1 : 1 });
@@ -345,14 +358,18 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     }
     const cmd = path[0].cmd;
     const F = dirVec(pose.fwd), a1 = add(pose.cell, F), a2 = add(a1, F);
-    // seek: a player blocking the way (say on a 1-wide beam) is jumped over, if the landing is safe ground (§16).
+    // seek: a player blocking the way (say on a 1-wide beam) is jumped over, if the landing is safe ground (§16),
+    // after a human-like reaction delay from first seeing the blocker there.
     if (cmd === 'fwd' && !bully && occupiedByOther(s, me, cellKey(a1))) {
+      const key = cellKey(a1);
+      if (blocker?.key !== key) blocker = { key, at: Date.now() + reactionMs() };
       const plan = previewAction(withPlayers(world, s, me), { id: me, pose }, 'jump');
       if (plan?.action === Action.Jump && !plan.bump && isSolid(world, sub(plan.to.cell, dirVec(pose.up)))) {
+        if (Date.now() < blocker.at) return; // still "noticing"
         replan();
         return press('jump', p.startTick, p.action, s.tick, true);
       }
-    }
+    } else blocker = null;
     if (cmd === 'jump') {
       // Someone standing right in front can be shoved out of the way instead.
       if (pushable(s, me, pose, world, false)) { replan(); return press('fwd', p.startTick, p.action, s.tick, true); }
@@ -367,7 +384,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const room = await connect(client, name);
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
-    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0,
+    eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
@@ -398,16 +415,30 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   });
 
   let dodging = false;
+  /** The incoming jump being reacted to: when the hop goes in, or null if this bot misses it. */
+  let threat: { key: string; at: number | null } | null = null;
   const timer = setInterval(() => {
     const p = room.state.players?.get(room.sessionId);
     if (!p) return;
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
     const playing = room.state.phase === 'playing' && !p.spectating;
-    // Every bot: an enemy's landing marker on my tile → hold jump (a hop high at their landing clashes, §16).
-    if (playing && jumpingOnto(room.state, p, room.sessionId)) {
-      if (!dodging) { ctx.send({ jump: true, jumpHeld: true }); stats.dodges++; dodging = true; }
+    // Every bot: an enemy's landing marker on my tile → hold jump (a hop high at their landing clashes, §16),
+    // after a reaction delay, and sometimes not at all.
+    const key = playing ? jumpingOnto(room.state, p, room.sessionId) : '';
+    if (key) {
+      if (threat?.key !== key) {
+        const miss = Math.random() < HOP_MISS;
+        threat = { key, at: miss ? null : Date.now() + reactionMs() };
+        if (miss) stats.missedDodges++;
+      }
+      if (threat.at !== null && Date.now() >= threat.at) {
+        if (!dodging) { ctx.send({ jump: true, jumpHeld: true }); stats.dodges++; dodging = true; }
+        return;
+      }
+      if (!dodging) { brain(playing); return; } // not reacting (yet): carry on as if nothing's coming
       return;
     }
+    threat = null;
     if (dodging) { ctx.send({}); dodging = false; }
     brain(playing);
   }, 20);
@@ -422,7 +453,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
 }
 
 const assigned = Array.from({ length: count }, (_, i) => behaviours[i % behaviours.length] as Behaviour);
-console.log(`spawning ${count} bot(s) [${assigned.join(', ')}] → ${values.server}${duration !== Infinity ? ` for ${duration}s` : ''}`);
+console.log(`spawning ${count} bot(s) [${assigned.join(', ')}] → ${values.server}${duration !== Infinity ? ` for ${duration}s` : ''}, skill ${skill}`);
 const client = new Client(values.server);
 const names = assigned.map((b, i) => `${b}-${i + 1}`);
 const results = await Promise.allSettled(names.map((n, i) => runBot(client, n, assigned[i])));
@@ -432,7 +463,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

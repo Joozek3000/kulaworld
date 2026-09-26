@@ -23,3 +23,4 @@ Workflow:
 | 08 | Rubber feel | Dodgeball rubber sounds (procedural + sample override), squash & stretch, hit-stop, F4 tuning panel |
 | 09 | Prediction | Own ball reacts instantly; server-authoritative reconciliation; no push prediction |
 | 10 | Stomp | Jump over players; landing on a player bumps them 1 tile in your jump direction; hop = clash defence |
+| 10b | Stomp polish | Human-like bot reactions, W+Space jump grace, marker tuning |

@@ -14,5 +14,7 @@ export const HOP_PUSH_WINDOW = 2; // a hop is pushable this many ticks after its
 export const KNOCKOUT_CREDIT_TICKS = 60;
 // Stomp (ARCHITECTURE §16)
 export const REBOUND_TICKS = 6; // clash: the attacker arcs back to its takeoff cell
+/** A jump pulse this soon after a roll started from rest turns it into a standing forward jump (§6). */
+export const JUMP_GRACE_TICKS = 2;
 // Knockout (ARCHITECTURE §15)
 export const SPAWN_PROTECT_TICKS = 40;

@@ -81,6 +81,11 @@ Notation: `C` = cell, `U` = up vector, `F` = fwd vector, `solid(v)` = a block is
 - A tap shorter than one tick still gives one bounce, via the jump pulse.
 - **Mid-air turning** (per Jakub, from the original): a left/right press while **airborne** (Hop, Jump, Fall) turns the ball **immediately**. It changes `to.fwd` on the tick the input is applied, with no Turn action and no delay, and the ball spins in the air. The jump's trajectory (`to.cell`) doesn't change. Only the facing does, so the next forward jump or roll goes the new way. Several presses in one airborne action stack. Turns on the ground stay a 3-tick Turn action.
 - If a forward jump is blocked (A1 solid or taken), it falls back to a hop.
+- **Jump grace** (phase 10b): W and Space pressed "together" from a standstill often reach the server a tick or two apart, which would roll a tile first.
+  - A jump pulse arriving within `JUMP_GRACE_TICKS` (2) ticks after a Roll that started **from rest**, with fwd still held, cancels that roll. "From rest" means the player was Idle for at least a tick; not a roll chained on the tick a previous action ended.
+  - The cancelled roll's target cell is released (reservations are rebuilt every tick), and the player decides again the same tick, from the roll's origin cell. With the pulse and fwd held, that's a standing forward jump under the normal jump/stomp rules, starting on the current tick.
+  - Chained rolls never cancel, so W held plus a Space tap mid-run still jumps at the end of the tile.
+  - It's shared sim code, so the predictor applies it too. The client blends the few rendered roll frames back into the jump.
 
 **Hop**: the ball bounces up along U and lands on the same cell. `to` = the current pose, duration `JUMP_TICKS`. It reserves only its own cell. It's blocked if `solid(C + U)` (a low ceiling). With push on, a hopping player can only be pushed in the low part of the hop (§14 pushable states). This is the counterplay to a push.
 
@@ -345,7 +350,7 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
   - **Fall stomp direction:** the bump cell must be free (not solid, not reserved), but it needs no ground; the victim then falls.
   - **Rebound:** from L back to C, facing kept, `REBOUND_TICKS` = 6. Pose: the jump parabola in reverse at `REBOUND_HEIGHT` 0.8. It's airborne, so mid-air turns apply.
   - **Push rules off:** jump-over stays; stomps and fall stomps are off. A player in L makes L not free (the old short-jump/hop fallback), and a fall onto a player overlaps as in the MVP.
-- **Readability:** during a forward jump, a landing marker (ring in the attacker's colour) is drawn on L, visible to everyone. It turns red when L holds a player (a stomp is incoming).
+- **Readability:** during a forward jump, a landing marker (ring in the attacker's colour) is drawn on L, visible to everyone. It turns red when L holds a player (a stomp is incoming). How long it shows is a client tuning value (`markerLeadTicks` in the F4 panel: 0 = the whole jump, the default; N = only the last N ticks).
 
 ## 17. Client prediction (phase 09)
 

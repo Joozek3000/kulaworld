@@ -40,6 +40,8 @@ export class LocalPrediction {
   /** Ticks ahead of estServerTick: covers the whole round trip (estServerTick itself lags the server by RTT/2). */
   lead = 3;
   predTick = 0;
+  /** When predTick was last advanced (a key press between frames extrapolates from here). */
+  private predAt = 0;
   private margin = MARGIN_MIN;
   private lateSeen = 0;
   private lateAt = 0;
@@ -138,6 +140,7 @@ export class LocalPrediction {
       : Math.max(target, this.lead - (LEAD_DECAY_PER_SEC * dtMs) / 1000);
     if (!this.pred) return;
     this.predTick = Math.max(this.predTick, this.net.estServerTick + this.lead); // never runs backwards
+    this.predAt = performance.now();
     this.pred.advanceTo(Math.floor(this.predTick));
   }
 
@@ -151,7 +154,10 @@ export class LocalPrediction {
   /** Stamps an outgoing input with the tick it should apply at, and records it for re-simulation. */
   stamp(input: Input): InputMsg {
     if (!this.pred) { this.unstamped = [...this.unstamped.slice(-7), { input, at: performance.now() }]; return input; }
-    return { ...input, tick: this.pred.input(input, Math.floor(this.predTick) + 1) };
+    // Extrapolated to the moment of the key press: at low frame rates two presses in one frame gap would otherwise
+    // get the same (stale) tick, and presses 60-90 ms apart could land 3 ticks apart.
+    const now = this.predTick + Math.max(0, performance.now() - this.predAt) / TICK_MS;
+    return { ...input, tick: this.pred.input(input, Math.floor(now) + 1) };
   }
 
   /** The predicted local player in schema shape, for the renderer. */

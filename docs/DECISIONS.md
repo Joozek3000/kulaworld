@@ -160,4 +160,13 @@ Format: `YYYY-MM-DD, phase NN: decision, reason`
   - **bully** takes a stomp when `stompPreview` says it's lethal, or when the bump leaves the victim one push from a ledge (no ground beyond B). It checks its current facing and both turns.
   - **seek** jumps over a player blocking its next roll when the landing is safe ground. A path jump only waits for its landing cell, not for A1 any more.
 - 2026-09-26, phase 10: `levels/test-stomp.json` is a straight 10-block beam with 4 spawns (knockout, 9 lives, crumble at 590 s) for manual and scripted stomp tests. It isn't in any rotation. Vite's eager glob of `levels/*.json` doesn't pick up a level added while the dev server runs, so restart Vite after adding one.
+- 2026-09-26, phase 10b: Jump grace (§6). A player carries `graceUntil`.
+  - `tryCmds` sets it to `tick + JUMP_GRACE_TICKS` when it starts a Roll and the player had been Idle for at least a tick (`endTick < tick`). Any other action start clears it.
+  - At the top of `step`, after inputs, a Roll with `tick <= graceUntil`, a buffered jump pulse and fwd held is set back to Idle at its origin. It then goes through the normal intent resolution this tick.
+  - The predictor's "deciding this tick" check includes the grace case, so a grace jump toward a player is deferred like any other.
+  - The release of the roll's target cell has no separate step: reservations are derived from the players each tick.
+- 2026-09-26, phase 10b: Bot reactions. A `--skill 0..1` flag (default 0.5) scales a reaction delay (150-300 ms at 0.5) and a miss chance (25 % at 0.5) on the defensive hop. The delay also applies before seek jumps over a blocker. Skill 1 is the phase 10 bots (instant, never miss); skill 0 doubles both.
+  - While a bot hasn't reacted yet (or has missed), it carries on with its normal brain. It doesn't freeze.
+- 2026-09-26, phase 10b: Landing marker visibility is the client tuning value `markerLeadTicks` (F4). 0 = the whole jump (the default).
+- 2026-09-26, phase 10b: `.env.example` is back to the template values. The values Jakub had put in it (`MIN_PLAYERS=4`, `LEVEL=race-01,arena-01,arena-02`) and `LEVEL=test-stomp` are now comments, as examples. `.env` stays git-ignored.
 

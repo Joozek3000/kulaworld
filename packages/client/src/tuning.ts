@@ -15,6 +15,8 @@ export const DEFAULT_TUNING = {
   damping: 12,
   /** Push-contact hit-stop: the two balls' render time freezes this long. 0 = off. */
   hitStopMs: 35,
+  /** Landing marker (§16): 0 = shown for the whole jump, N = only for its last N ticks. */
+  markerLeadTicks: 0,
   /** Per-sound gain, 0..2. */
   gains: Object.fromEntries(SOUND_NAMES.map((n) => [n, 1])) as Record<SoundName, number>,
 };
@@ -26,7 +28,7 @@ function load(): Tuning {
   const t: Tuning = { ...DEFAULT_TUNING, gains: { ...DEFAULT_TUNING.gains } };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Tuning>;
-    for (const k of ['master', 'squash', 'stiffness', 'damping', 'hitStopMs'] as const) {
+    for (const k of ['master', 'squash', 'stiffness', 'damping', 'hitStopMs', 'markerLeadTicks'] as const) {
       if (typeof saved[k] === 'number') t[k] = saved[k];
     }
     for (const n of SOUND_NAMES) if (typeof saved.gains?.[n] === 'number') t.gains[n] = saved.gains[n];
