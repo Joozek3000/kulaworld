@@ -28,7 +28,8 @@ Workflow:
 | 12 | Anti-stalemate | Bots route around blockers, chain push, hot tiles, race sudden death, level lint |
 | 12b | Cradle push | Only the last ball in a line flies; heat tuning; blocker bot |
 | 12c | Edge push | Push around block edges onto adjacent faces; tile heat; blocker waits |
-| 13 | Tiles & traps (planned) | Spikes, fire, crumbling, ice, arrows, boost pads, teleporters, lasers + switches, invisible blocks |
+| 13a | Traps 1 | Spikes (static/retracting), fire, crumble, ice, arrows, boost pads; race-02 Ice Garden; traps-lab; clearer edge glow |
+| 13b | Traps 2 (planned) | Teleporters, lasers + switches, invisible/vanishing blocks |
 | 14 | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15 | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
 | 16 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |

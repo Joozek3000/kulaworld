@@ -27,3 +27,14 @@ export const CHAIN_MAX = 6;
 export const STRIKE_TICKS = 4;
 // Knockout (ARCHITECTURE §15)
 export const SPAWN_PROTECT_TICKS = 40;
+// Tiles & traps (ARCHITECTURE §18)
+/** A crumble block vanishes this long after a ball leaves it. */
+export const CRUMBLE_DELAY_TICKS = 4;
+/** Default crumble regrow time in multiplayer (§18). */
+export const CRUMBLE_REGROW_SEC = 8;
+/** Landings on fire in a row that pop a ball (Kula rule). */
+export const FIRE_MAX = 3;
+/** A boost launch's flight time (a normal jump is JUMP_TICKS). */
+export const BOOST_TICKS = 12;
+/** BFS gives up following a forced chain (ice slides, boosts) after this many steps: an ice loop. */
+export const FORCED_MAX = 64;

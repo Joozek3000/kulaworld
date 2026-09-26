@@ -6,6 +6,7 @@ import { CameraRig, type CameraMode } from './render/camera.ts';
 import { ItemsView } from './render/items.ts';
 import { findLevel, levelBounds, LevelView } from './render/level.ts';
 import { PlayersView } from './render/players.ts';
+import { TrapsView } from './render/traps.ts';
 import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
 import { createDebug } from './ui/debug.ts';
@@ -54,6 +55,9 @@ players.onFeel = (e) => {
     case 'clash': audio.play('boing', { at, gain: 1.2 }); break;
     case 'pop': audio.play('pop', { at }); break;
     case 'clack': audio.play('clack', { at, intensity: e.intensity }); break;
+    case 'slide': audio.play('slide', { at }); break;
+    case 'launch': audio.play('pwomp', { at }); break;
+    case 'edge': audio.play('edge', { gain: 0.7 }); break; // an enemy just around your edge (phase 13a)
   }
 };
 
@@ -102,7 +106,26 @@ const latencyLines = () => ['press→ (ms)   key  mode    sent  stamp  start  vi
 
 const nameOf = (id: string) => (id === net.sessionId ? 'You' : net.state.players.get(id)?.name ?? '?');
 const colorOf = (id: string) => net.state.players.get(id)?.color ?? '#fff';
+/** Death toasts by cause (§18). Falls from a push already get the knockout toast. */
+const DEATH_TOAST: Partial<Record<string, (who: string) => string>> = {
+  spikes: (who) => `${who} got spiked`,
+  fire: (who) => `${who} popped on fire`,
+  fall: (who) => `${who} fell off`,
+};
+/** Fall toasts wait a moment: a `knockout` event right after the death replaces them with its own toast. */
+const pendingFall = new Map<string, ReturnType<typeof setTimeout>>();
 net.onEvent((e) => {
+  switch (e.type) {
+    case 'knockout': clearTimeout(pendingFall.get(e.victimId)); pendingFall.delete(e.victimId); break;
+    case 'death': {
+      const toast = DEATH_TOAST[e.cause];
+      if (!toast) break;
+      const show = () => { pendingFall.delete(e.playerId); hud.toast(toast(nameOf(e.playerId)), colorOf(e.playerId)); };
+      if (e.cause === 'fall') pendingFall.set(e.playerId, setTimeout(show, 150));
+      else show();
+      break;
+    }
+  }
   switch (e.type) {
     case 'key':
       hud.toast(`${nameOf(e.playerId)} got a key (${e.keys}/${level?.keysRequired ?? '?'})`, colorOf(e.playerId));
@@ -131,6 +154,7 @@ if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, in
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
+let trapsView: TrapsView | null = null;
 let bounds = { center: new THREE.Vector3(), radius: 5 };
 let last = performance.now();
 let lastPhase = '';
@@ -152,7 +176,11 @@ view.renderer.setAnimationLoop((now: number) => {
   if (s.levelId && level?.id !== s.levelId) {
     level = findLevel(s.levelId);
     if (levelView) { view.scene.remove(levelView.group); levelView.dispose(); }
+    if (trapsView) { view.scene.remove(trapsView.group); trapsView.dispose(); }
     levelView = level ? new LevelView(level) : null;
+    trapsView = level ? new TrapsView(level) : null;
+    if (trapsView) view.scene.add(trapsView.group);
+    players.setLevel(level);
     players.setSolid(levelView?.solid ?? null);
     players.heat = level?.heat ?? null;
     rig.setSolid(levelView?.solid ?? null);
@@ -181,6 +209,11 @@ view.renderer.setAnimationLoop((now: number) => {
   wasUnlocked = unlocked;
 
   levelView?.update(active ? s.crumbled : 0, active ? s.warnBand : -1, now / 1000);
+  // Trap tiles (§18): spikes follow the render tick; crumble tiles the server tick (they vanish on its schedule).
+  const noCrumbling = { get: () => undefined };
+  const crumbling = active && s.crumbling ? s.crumbling : noCrumbling;
+  levelView?.updateTraps(crumbling, s.tick, now / 1000);
+  trapsView?.update(renderTick, s.tick, crumbling, players.rollingOnto(), dtMs / 1000, now / 1000);
 
   // Knocked out of a knockout round: follow whoever did it while they're on screen, otherwise orbit.
   const out = !!mine?.eliminated && active;

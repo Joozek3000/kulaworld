@@ -1,7 +1,8 @@
-import { CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
+import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, sub, type Vec3 } from '../vec.ts';
+import { faceTileAt, fwdAllowed } from './tiles.ts';
 import { Action, isFree, isSolid, outOfBounds, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
 
 /** `over`: a forward jump over a player on A1. `bump`: a stomp jump's bump cell B (§16). */
@@ -28,6 +29,7 @@ export function previewAction(
   const { cell: C, up, fwd } = self.pose;
   const U = dirVec(up), F = dirVec(fwd);
   const free = (v: Vec3) => isFree(world, res, self.id, v);
+  if ((cmd === 'fwd' || cmd === 'jump') && !fwdAllowed(world, self.pose)) return null; // an arrow tile (§18)
 
   switch (cmd) {
     case 'left':
@@ -57,6 +59,23 @@ export function previewAction(
         if (world.rules.push && standingAt(world, L, up, self.id) && free(B)) {
           return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
         }
+      }
+      return null;
+    }
+    case 'boost': {
+      // §18: a forced jump off a boost pad. far: 3 cells forward; high: 2 forward and 1 up. The cells flown through
+      // must be open (no fallback to a shorter launch). Landing, stomp and fall rules are the jump's.
+      const t = faceTileAt(world, self.pose);
+      if (t?.type !== 'boost') return null;
+      const high = t.variant === 'high';
+      const L = high ? add(add(C, F), add(F, U)) : add(add(C, F), add(F, F));
+      const through = high ? [add(C, U), add(add(C, F), U)] : [add(C, F), add(add(C, F), F)];
+      if (through.some((c) => isSolid(world, c)) || isSolid(world, L)) return null;
+      const over = !free(add(C, F));
+      if (free(L)) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over };
+      const B = add(L, F);
+      if (world.rules.push && standingAt(world, L, up, self.id) && free(B)) {
+        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over, bump: B };
       }
       return null;
     }
@@ -107,6 +126,7 @@ export function startFall(world: World, p: PlayerState, tick: number): boolean {
   const { cell, up, fwd } = p.pose;
   const below = sub(cell, dirVec(up));
   if (isSolid(world, below)) return false;
+  p.forced = null; // a slide or launch never survives losing the ground
   startAction(p, { action: Action.Fall, to: { cell: below, up, fwd }, ticks: FALL_TICKS_PER_CELL }, tick);
   return true;
 }

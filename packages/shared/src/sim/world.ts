@@ -9,8 +9,11 @@ import { crumbleBands } from './crumble.ts';
 export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
-/** 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts). */
-export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop';
+/**
+ * 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts).
+ * 'boost' is never input: it's the forced launch off a boost pad (§18).
+ */
+export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop' | 'boost';
 export type Pulse = 'left' | 'right' | 'jump';
 
 /** Client → server input message (ARCHITECTURE §6). `turn` and `jump` are pulses; `jumpHeld` keeps bouncing. */
@@ -61,6 +64,10 @@ export interface PlayerState {
   graceUntil: number;
   /** Hot tiles: the heat of the tile under this player (a copy of `world.hot` at its tile, 0 while dead). */
   heat: number;
+  /** Fire landings in a row (§18); 3 pops the ball. */
+  fireCount: number;
+  /** A forced move for this tick's decision (an ice slide or a boost launch, §18), set when an action finishes. */
+  forced: Cmd | null;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -94,6 +101,8 @@ export interface World {
   knockout: KnockoutState | null;
   /** Hot tiles, in ticks (from the level; the predictor turns them off). */
   heat: { warnTicks: number; burnTicks: number } | null;
+  /** Crumble tiles (§18): block cellKey → the tick it is (or was) removed. Deleted when it regrows. */
+  crumbling: Map<string, number>;
   /** Tile heat (phase 12c), by tileKey; only tiles with heat > 0. */
   hot: Map<string, number>;
   tick: number;
@@ -109,7 +118,7 @@ export interface World {
 export type SimEvent =
   | { type: 'key'; playerId: string; keyId: number; keys: number }
   | { type: 'win'; winnerId: string | null; reason: RaceResult['reason'] }
-  | { type: 'death'; playerId: string; cell: Vec3 }
+  | { type: 'death'; playerId: string; cell: Vec3; cause: DeathCause }
   | { type: 'respawn'; playerId: string; cell: Vec3 }
   | { type: 'push'; pusherId: string; victimId: string; edge?: true }
   | { type: 'bounce'; playerId: string }
@@ -124,6 +133,9 @@ export type SimEvent =
   | { type: 'burn'; playerId: string }
   | { type: 'cradle'; pusherId: string; victimId: string; length: number };
 
+/** Why a ball died (§18), for the HUD and toasts. */
+export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn';
+
 /** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
   const knockout = level.mode === 'knockout';
@@ -137,6 +149,7 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     knockout: level.crumble ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
     heat: level.heat,
     hot: new Map(),
+    crumbling: new Map(),
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
     players: [],
@@ -208,7 +221,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
-    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0,
+    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null,
   };
   world.players.push(p);
   trySpawn(world, p);

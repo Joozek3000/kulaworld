@@ -1,12 +1,17 @@
-import { CHAIN_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS, RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS } from '../constants.ts';
+import {
+  CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS,
+  RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS,
+} from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
-import { add, eq, sub, type Vec3 } from '../vec.ts';
+import type { Pose } from '../level/types.ts';
+import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
+import { blockTileAt, forcedAfter, fwdAllowed, onIce, spiked } from './tiles.ts';
 import {
   Action, isFree, isPushable, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
-  type Cmd, type PlayerState, type Reservations, type SimEvent, type World,
+  type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
 /** Advances the world by one tick (ARCHITECTURE §7). Returns the events of this tick. */
@@ -39,10 +44,13 @@ export function step(world: World): SimEvent[] {
   }
 
   for (const p of order) if (p.action !== Action.Idle && p.endTick === tick && !p.eliminated) finishAction(world, p, events);
+  // Spikes rising under a ball standing on them (§18). Finishing onto raised spikes is handled in finishAction.
+  for (const p of order) if (STANDING.has(p.action) && spiked(world, p.pose)) die(world, p, events, 'spikes');
+  stepCrumbleTiles(world);
   // Crumbled ground: an Idle player whose block is gone falls (mid-action players are checked when they finish).
   if (world.removed.size) for (const p of order) if (p.action === Action.Idle) startFall(world, p, tick);
 
-  const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(p) }));
+  const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(world, p) }));
   resolveMoves(world, intents, events);
 
   updateHeat(world, events);
@@ -58,6 +66,10 @@ export function step(world: World): SimEvent[] {
 const AIRBORNE: ReadonlySet<Action> = new Set([Action.Hop, Action.Jump, Action.Fall, Action.Rebound]);
 /** Pushed around: buffered pulses wait (don't age) until the player is back in control. */
 const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned]);
+/** On the ground in place: rising spikes get these (§18). */
+const STANDING: ReadonlySet<Action> = new Set([Action.Idle, Action.Turn, Action.Stunned, Action.Strike]);
+/** Actions that land a ball on a new tile: fire counts these (§18). A hop, turn or stun in place doesn't. */
+const LANDINGS: ReadonlySet<Action> = new Set([Action.Roll, Action.Flip, Action.Climb, Action.Jump, Action.Fall, Action.Knocked, Action.Rebound]);
 
 /** Join order rotated by tick % playerCount so no player always wins contested cells. */
 function fairOrder(players: PlayerState[], tick: number): PlayerState[] {
@@ -71,14 +83,23 @@ const jumpCmds = (forward: boolean): Cmd[] => (forward ? ['jump', 'hop'] : ['hop
 /**
  * Candidate commands in priority order (ARCHITECTURE §6):
  * 1. buffered jump pulse or forward latch, 2. buffered turn, 3. jumpHeld, 4. fwdHeld.
- * The latch is cleared at every decision.
+ * The latch is cleared at every decision. A forced move (ice slide, boost launch, §18) replaces the input: pulses
+ * pressed during it are dropped, held keys carry on. On ice a jump always goes forward (Kula rule).
  */
-function commands(p: PlayerState): Cmd[] {
+function commands(world: World, p: PlayerState): Cmd[] {
+  if (p.forced) {
+    const cmd = p.forced;
+    p.forced = null;
+    p.pulse = null;
+    p.fwdLatch = false;
+    return [cmd];
+  }
   if (p.pulse && p.pulseAge > INPUT_BUFFER_TICKS) p.pulse = null;
   const cmds: Cmd[] = [];
-  if (p.pulse === 'jump' || p.fwdLatch) cmds.push(...jumpCmds(p.fwdHeld || p.fwdLatch));
+  const ice = (p.pulse === 'jump' || p.jumpHeld) && onIce(world, p.pose);
+  if (p.pulse === 'jump' || p.fwdLatch) cmds.push(...jumpCmds(p.fwdHeld || p.fwdLatch || ice));
   if (p.pulse === 'left' || p.pulse === 'right') cmds.push(p.pulse);
-  if (p.jumpHeld) cmds.push(...jumpCmds(p.fwdHeld));
+  if (p.jumpHeld) cmds.push(...jumpCmds(p.fwdHeld || ice));
   if (p.fwdHeld) cmds.push('fwd');
   p.fwdLatch = false;
   return cmds;
@@ -135,7 +156,7 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
  */
 function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): Plan | { victim: PlayerState; edge?: true } | null {
   for (const cmd of cmds) {
-    if (cmd === 'fwd' && world.rules.push) {
+    if (cmd === 'fwd' && world.rules.push && fwdAllowed(world, p.pose)) {
       const A = add(p.pose.cell, dirVec(p.pose.fwd));
       const victim = world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.up && eq(v.pose.cell, A));
       if (victim) return { victim };
@@ -152,7 +173,7 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
 /** Starts the first command that isn't blocked. A pulse is spent when tried, even if blocked. */
 function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): void {
   for (const cmd of cmds) {
-    if (cmd !== 'fwd') p.pulse = null;
+    if (cmd !== 'fwd' && cmd !== 'boost') p.pulse = null;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
     const resting = p.endTick < world.tick; // Idle for at least a tick, not chaining from a finished action
@@ -243,14 +264,16 @@ function edgePush(world: World, p: PlayerState, v: PlayerState, res: Reservation
   return v;
 }
 
-/** A death (off the map, or burnt): Dead for RESPAWN_TICKS, key drop and knockout credit, a life in knockout. */
-function die(world: World, p: PlayerState, events: SimEvent[]): void {
+/** A death (off the map, burnt, a trap): Dead for RESPAWN_TICKS, key drop and knockout credit, a life in knockout. */
+function die(world: World, p: PlayerState, events: SimEvent[], cause: DeathCause): void {
   p.action = Action.Dead;
   p.to = p.pose;
   p.startTick = world.tick;
   p.endTick = world.tick + RESPAWN_TICKS;
   p.heat = 0;
-  events.push({ type: 'death', playerId: p.id, cell: p.pose.cell });
+  p.fireCount = 0;
+  p.forced = null;
+  events.push({ type: 'death', playerId: p.id, cell: p.pose.cell, cause });
   const creditId = onDeath(world, p, events);
   if (world.mode === 'knockout') loseLife(world, p, creditId, events);
 }
@@ -275,12 +298,43 @@ function updateHeat(world: World, events: SimEvent[]): void {
     if (++p.heat < h.burnTicks) { hot.set(key, p.heat); continue; }
     hot.delete(key);
     events.push({ type: 'burn', playerId: p.id });
-    die(world, p, events);
+    die(world, p, events, 'burn');
   }
   if (world.tick % 2 === 0) {
     for (const [key, heat] of hot) if (!occupied.has(key)) { if (heat > 1) hot.set(key, heat - 1); else hot.delete(key); }
   }
 }
+
+/**
+ * Crumble tiles (§18): a ball whose action takes it off a crumble block (to another block, or into the air) starts
+ * its CRUMBLE_DELAY_TICKS countdown. A block already counting down keeps its time.
+ */
+function leaveTile(world: World, from: Pose, to: Pose): void {
+  const block = cellKey(sub(from.cell, dirVec(from.up)));
+  if (block === cellKey(sub(to.cell, dirVec(to.up))) || world.crumbling.has(block)) return;
+  if (world.level.blockTiles.get(block)?.type === 'crumble') world.crumbling.set(block, world.tick + CRUMBLE_DELAY_TICKS);
+}
+
+/**
+ * Crumble tiles due this tick vanish (the `removed` overlay; balls on them fall), and gone ones regrow after the
+ * tile's regrow time once no ball occupies the block's cell. A block a knockout band took stays gone.
+ */
+function stepCrumbleTiles(world: World): void {
+  if (!world.crumbling.size) return;
+  let res: Reservations | null = null;
+  for (const [key, at] of world.crumbling) {
+    if (world.tick < at) continue;
+    if (!world.removed.has(key)) { world.removed.add(key); continue; }
+    if (world.tick < at + world.level.blockTiles.get(key)!.regrowTicks) continue;
+    res ??= reservations(world);
+    if (res.has(key) || bandRemoved(world, key)) continue;
+    world.removed.delete(key);
+    world.crumbling.delete(key);
+  }
+}
+
+const bandRemoved = (world: World, key: string): boolean =>
+  !!world.knockout && world.knockout.bands.slice(0, world.knockout.next).some((b) => b.includes(key));
 
 /** V is knocked one cell to `dest` by `byId` (push or stomp): it cancels a Turn (keeping its start facing) or a Hop. */
 function knock(v: PlayerState, dest: Vec3, byId: string, tick: number): void {
@@ -350,19 +404,26 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   }
   const finished = p.action;
   if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
+  leaveTile(world, p.pose, p.to);
   p.pose = p.to;
   p.action = Action.Idle;
   p.bounce = false;
   p.jumpOver = false;
   p.stompBump = null;
   if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
-    die(world, p, events);
+    die(world, p, events, 'fall');
     return;
   }
   // Nothing below: a jump or knock into air, a fall step, or ground that crumbled during the action.
   if (startFall(world, p, tick)) return;
+  if (spiked(world, p.pose)) { die(world, p, events, 'spikes'); return; }
+  if (LANDINGS.has(finished)) {
+    if (blockTileAt(world, p.pose)?.type !== 'fire') p.fireCount = 0;
+    else if (++p.fireCount >= FIRE_MAX) { die(world, p, events, 'fire'); return; }
+  }
   if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
   if (finished === Action.Turn || finished === Action.Stunned || finished === Action.Strike) return;
+  p.forced = forcedAfter(world, p.pose, finished);
   if (finished === Action.Knocked) stun(p, tick, false); // stagger: not pushable (§14)
   onLand(world, p, events);
 }

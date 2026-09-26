@@ -1,7 +1,7 @@
-import { HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
+import { CRUMBLE_REGROW_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
 import { parseDir } from '../dir.ts';
 import { cellKey, vec, type Vec3 } from '../vec.ts';
-import type { Level, LevelJson } from './types.ts';
+import { BLOCK_TILES, type Level, type LevelJson, type Tile } from './types.ts';
 
 const v3 = (a: [number, number, number]): Vec3 => vec(a[0], a[1], a[2]);
 
@@ -26,6 +26,18 @@ export function loadLevel(json: LevelJson): Level {
   }
   if (!cells.length) { min.x = min.y = min.z = max.x = max.y = max.z = 0; }
 
+  const tiles: Tile[] = (json.tiles ?? []).map((t) => ({
+    block: v3(t.block), type: t.type, face: BLOCK_TILES.includes(t.type) || !t.face ? null : parseDir(t.face),
+    regrowTicks: Math.round((t.regrowSec ?? CRUMBLE_REGROW_SEC) * TICK_RATE),
+    period: t.period ?? 0, upTicks: t.up ?? 0, phase: t.phase ?? 0,
+    dir: t.dir ? parseDir(t.dir) : null, variant: t.variant ?? 'far',
+  }));
+  const blockTiles = new Map<string, Tile>(), faceTiles = new Map<string, Tile>();
+  for (const t of tiles) {
+    if (t.face === null) blockTiles.set(cellKey(t.block), t);
+    else faceTiles.set(`${cellKey(t.block)}|${t.face}`, t);
+  }
+
   return {
     id: json.id,
     name: json.name,
@@ -44,6 +56,9 @@ export function loadLevel(json: LevelJson): Level {
     exit: json.exit ? { cell: v3(json.exit.cell), up: parseDir(json.exit.up) } : null,
     keysRequired: json.keysRequired ?? 0,
     timeLimitSec: json.timeLimitSec,
+    tiles,
+    blockTiles,
+    faceTiles,
   };
 }
 

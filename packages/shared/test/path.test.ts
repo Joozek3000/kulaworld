@@ -72,8 +72,10 @@ describe('findPath on test-cube', () => {
   });
 });
 
+// traps-lab (phase 13a) is a human test lab outside the rotation: its fire lane is deliberately unplannable (bots
+// treat fire as lethal), so it's left out.
 describe('every race level: all keys and the exit are reachable from every spawn', () => {
-  test.each(levelFiles().filter((f) => readLevelJson(f).mode !== 'knockout'))('%s', (file) => {
+  test.each(levelFiles().filter((f) => readLevelJson(f).mode !== 'knockout' && f !== 'traps-lab.json'))('%s', (file) => {
     const w = worldOf(file);
     for (const s of w.level.spawns) {
       for (const t of [...w.level.keys, w.level.exit!]) {

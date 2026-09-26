@@ -70,6 +70,8 @@ export interface ServerPlayer {
   turnStartTick: number;
   bounce: boolean;
   protectedUntil: number;
+  /** Fire landings in a row (§18). Omitted: keep the predicted count. */
+  fireCount?: number;
 }
 
 /** The local player's predicted state at one tick: its motion plus the input state the sim keeps. */
@@ -82,7 +84,7 @@ function snap(p: PlayerState): Snap {
   return {
     action: p.action, pose: clonePose(p.pose), to: clonePose(p.action === Action.Idle ? p.pose : p.to),
     startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick,
-    bounce: p.bounce, protectedUntil: p.protectedUntil,
+    bounce: p.bounce, protectedUntil: p.protectedUntil, fireCount: p.fireCount,
     fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge,
   };
 }
@@ -103,6 +105,7 @@ function applyServer(p: PlayerState, s: ServerPlayer): void {
   p.turnStartTick = s.turnStartTick;
   p.bounce = s.bounce;
   p.protectedUntil = s.protectedUntil;
+  if (s.fireCount !== undefined) p.fireCount = s.fireCount;
 }
 
 export type ReconcileResult = 'match' | 'mispredict' | 'deferred' | 'reset' | 'paused';
@@ -170,9 +173,14 @@ export class Predictor {
     }
   }
 
-  /** Crumbled blocks and collected keys, from the server. */
-  setWorld(removed: Iterable<string>, collectedKeys: ReadonlySet<number>): void {
+  /**
+   * Crumbled blocks (knockout/sudden-death bands), crumble tiles (§18: block → removal tick, due or not) and collected
+   * keys, from the server. Crumble tiles due by our predicted tick are gone; later ones vanish (and regrow) in step().
+   */
+  setWorld(removed: Iterable<string>, collectedKeys: ReadonlySet<number>, crumbling: ReadonlyMap<string, number> = new Map()): void {
     this.world.removed = new Set(removed);
+    this.world.crumbling = new Map(crumbling);
+    for (const [k, at] of crumbling) if (at <= this.world.tick) this.world.removed.add(k);
     for (const k of this.world.keys) k.collected = collectedKeys.has(k.id);
   }
 

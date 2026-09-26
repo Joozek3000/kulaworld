@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
   Action, ALL_DIRS, BALL_RADIUS, CLIMB_SPIN, cross, dirVec, HOP_HEIGHT, JUMP_GRACE_TICKS, JUMP_HEIGHT, KILL_MARGIN, KNOCK_HOLD, KNOCK_SPIN, KNOCK_TICKS, newRenderPose, perpendicular, poseAt,
   SPIN_PER_CELL, STRIKE_TICKS, STUN_TICKS, TICK_RATE, tileKey, TURN_TICKS,
-  type AirTurn, type Dir, type Pose, type RenderPose,
+  type AirTurn, type Dir, type Level, type Pose, type RenderPose,
 } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 import { tuning } from '../tuning.ts';
@@ -14,7 +14,8 @@ import { art, BALL_MODELS } from './art.ts';
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
  * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
  */
-export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack';
+export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
+  | 'slide' | 'launch' | 'edge';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -52,6 +53,12 @@ const LUNGE_TICKS = 4;
 const STRIKE_CELLS = 0.2;
 const STRIKE_CONTACT_TICKS = 1;
 const CRADLE_HOLD_TICKS = 2;
+/** Per fire landing in a row (§18), the ball's scale grows by this. */
+const FIRE_SWELL = 0.07;
+/** Edge warning line thickness (phase 13a). */
+const EDGE_THICK = 0.12;
+const streakGeo = new THREE.PlaneGeometry(0.9, 0.28);
+const streakM = new THREE.Matrix4(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 const CLACK_WINDOW_MS = (CRADLE_HOLD_TICKS - STRIKE_CONTACT_TICKS) * 1000 / TICK_RATE; // from contact to the end of the hold
 const ringGeo = new THREE.TorusGeometry(0.28, 0.04, 8, 24);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
@@ -168,6 +175,8 @@ class PlayerView {
   private readonly bottom = new THREE.MeshStandardMaterial({ color: 0xfff0d7, roughness: 0.57 });
   /** Knockout spawn protection (server tick): the ball renders translucent until then. */
   private protectedUntil = 0;
+  /** Fire landings in a row (§18): the ball inflates a little per count (visual only; 3 pops it). */
+  private fireCount = 0;
 
   constructor(p: PlayerS, local: boolean, scene: THREE.Scene) {
     this.color = p.color;
@@ -213,6 +222,7 @@ class PlayerView {
 
   track(p: PlayerS): void {
     this.protectedUntil = p.protectedUntil;
+    this.fireCount = p.fireCount ?? 0;
     const s = this.newest;
     if (this.count && s.action === p.action && s.startTick === p.startTick && s.endTick === p.endTick) {
       // Same action. Only a mid-air turn changes it in flight (to.fwd + turn record): update in place.
@@ -520,6 +530,7 @@ class PlayerView {
     if (!driven) this.spring.step(dt, target * sq, tuning.stiffness, tuning.damping);
     const k = Math.min(1.6, Math.max(0.5, 1 + this.spring.x));
     applySquash(this.ball, this.body, this.squashAxis, k, orient);
+    if (this.fireCount) this.ball.scale.multiplyScalar(1 + FIRE_SWELL * this.fireCount);
     // Keep the bottom on the ground: move the centre by the change in the ball's half-height along up.
     const along = Math.abs(this.squashAxis.dot(tmpUp)), side = 1 / Math.sqrt(k);
     this.ball.position.addScaledVector(tmpUp, BALL_RADIUS * (along * k + (1 - along) * side - 1));
@@ -607,13 +618,63 @@ export class PlayersView {
   /** Cradle shudders waiting for their time (`at`, performance.now ms), down the line (phase 12b/12c). */
   private shudders: { view: PlayerView; axis: THREE.Vector3; step: number; of: number; at: number }[] = [];
 
-  /** Edge-proximity glow (phase 12c): a thin line on the local ball's edge when an enemy is just around it. */
-  private readonly edgeMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-  private readonly edgeGlow = new THREE.Mesh(new THREE.BoxGeometry(1, 0.05, 0.05), this.edgeMat);
+  /**
+   * Edge-proximity warning (phase 12c, stronger in 13a): a pulsing line on the local ball's edge and a ring on the
+   * enemy's tile, in the enemy's colour, when an enemy is just around the edge. `edgeEnemy` is who it's showing.
+   */
+  private readonly edgeMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+  private readonly edgeGlow = new THREE.Mesh(new THREE.BoxGeometry(1, EDGE_THICK, EDGE_THICK), this.edgeMat);
+  private readonly edgeRing = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.5, 32), this.edgeMat);
+  private edgeEnemy: PlayerView | null = null;
+  private edgeLevel = 0;
+  /** Tiles for slide streaks and launch sounds (§18), or null without a level. */
+  private level: Level | null = null;
+  private readonly streaks = new Map<PlayerView, THREE.Mesh>();
+  private readonly streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
 
   constructor(private scene: THREE.Scene) {
-    this.edgeGlow.visible = false;
-    scene.add(this.edgeGlow);
+    this.edgeGlow.visible = this.edgeRing.visible = false;
+    scene.add(this.edgeGlow, this.edgeRing);
+  }
+
+  setLevel(level: Level | null): void { this.level = level; }
+
+  /** Where balls are rolling or flipping onto right now (boost pads glow before the launch). */
+  rollingOnto(): Pose[] {
+    return [...this.views.values()].filter((v) => v.shown && (v.action === Action.Roll || v.action === Action.Flip)).map((v) => v.current.to);
+  }
+
+  /** The tile under a pose: its whole-block and face tile types (§18). */
+  private tileTypes(p: Pose): { block?: string; face?: string } {
+    if (!this.level) return {};
+    const u = dirVec(p.up), b = `${p.cell.x - u.x},${p.cell.y - u.y},${p.cell.z - u.z}`;
+    return { block: this.level.blockTiles.get(b)?.type, face: this.level.faceTiles.get(`${b}|${p.up}`)?.type };
+  }
+
+  /**
+   * Ice and boosts on screen (§18): a roll/flip starting from ice is a slide (a streak behind the ball, "ssss" when a
+   * slide starts), a jump starting from a boost pad is a launch ("pwomp").
+   */
+  private trapFeel(v: PlayerView, changed: boolean): void {
+    const s = v.current, t = this.tileTypes(s.from);
+    const sliding = v.shown && t.block === 'ice' && (s.action === Action.Roll || s.action === Action.Flip || s.action === Action.Climb);
+    let streak = this.streaks.get(v);
+    if (changed && sliding && !streak?.visible) this.onFeel?.({ kind: 'slide', at: v.ball.position, local: v.local, intensity: 0.5 });
+    if (changed && s.action === Action.Jump && t.face === 'boost') this.onFeel?.({ kind: 'launch', at: v.ball.position, local: v.local, intensity: 0.5 });
+    if (!streak && sliding) {
+      streak = new THREE.Mesh(streakGeo, this.streakMat);
+      this.scene.add(streak);
+      this.streaks.set(v, streak);
+    }
+    if (!streak) return;
+    streak.visible = sliding;
+    if (!sliding) return;
+    // A pale streak on the ice behind the ball, along its motion.
+    const u = dirVec(s.from.up), f = dirVec(s.from.fwd);
+    streak.position.copy(v.ball.position).add(probe.set(-f.x * 0.55 - u.x * 0.42, -f.y * 0.55 - u.y * 0.42, -f.z * 0.55 - u.z * 0.42));
+    tmpA.set(f.x, f.y, f.z);
+    tmpB.set(u.x, u.y, u.z);
+    streak.quaternion.setFromRotationMatrix(streakM.makeBasis(tmpA, probe.copy(tmpB).cross(tmpA), tmpB));
   }
 
   /** Solid test for blob shadows (the level minus crumbled blocks), or null without a level. */
@@ -676,6 +737,7 @@ export class PlayersView {
         else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
       };
       const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
+      this.trapFeel(v, changed);
       if (changed && id === localId && v.action !== Action.Idle && v.action !== Action.Dead) this.onLocalMotion?.();
       if (v.vanished) {
         this.onVanish?.(v.ball.position, v.color);
@@ -683,7 +745,12 @@ export class PlayersView {
       }
     });
     for (const [id, v] of this.views) {
-      if (!state.players.has(id)) { v.dispose(this.scene); this.views.delete(id); }
+      if (!state.players.has(id)) {
+        v.dispose(this.scene);
+        this.views.delete(id);
+        const streak = this.streaks.get(v);
+        if (streak) { this.scene.remove(streak); this.streaks.delete(v); }
+      }
     }
     while (this.shudders.length && this.shudders[0].at <= nowMs) {
       const sh = this.shudders.shift()!;
@@ -691,7 +758,7 @@ export class PlayersView {
       sh.view.shudder(sh.axis);
       this.onFeel?.({ kind: 'clack', at: sh.view.ball.position, local: sh.view.local, intensity: sh.of > 1 ? sh.step / (sh.of - 1) : 0 });
     }
-    this.placeEdgeGlow(localId, dt);
+    this.placeEdgeGlow(localId, dt, nowMs / 1000);
     const cfg = this.heat;
     for (const v of this.views.values()) {
       const { cell, up } = v.current.from;
@@ -789,7 +856,7 @@ export class PlayersView {
    * Edge push readability (§14): an enemy standing on the adjacent face of the local ball's block, right past an open
    * edge (in T, where a roll over that edge would push it). The shared edge glows in the enemy's colour, fading in.
    */
-  private placeEdgeGlow(localId: string, dt: number): void {
+  private placeEdgeGlow(localId: string, dt: number, timeSec: number): void {
     const me = this.views.get(localId);
     let enemy: PlayerView | null = null;
     if (me?.shown && this.solid) {
@@ -804,14 +871,20 @@ export class PlayersView {
         const along = dirVec(cross(up, d));
         this.edgeGlow.position.set(c.x + (D.x - U.x) / 2, c.y + (D.y - U.y) / 2, c.z + (D.z - U.z) / 2);
         this.edgeGlow.quaternion.setFromUnitVectors(X_AXIS, probe.set(along.x, along.y, along.z));
+        // The ring lies on the enemy's tile: the side face of our block, just under the enemy.
+        this.edgeRing.position.set(T.x - D.x * 0.49, T.y - D.y * 0.49, T.z - D.z * 0.49);
+        this.edgeRing.quaternion.setFromUnitVectors(Z_AXIS, probe.set(D.x, D.y, D.z));
         this.edgeMat.color.set(enemy.color);
         break;
       }
     }
-    const k = Math.min(1, dt * 8);
-    this.edgeMat.opacity += ((enemy ? 0.9 : 0) - this.edgeMat.opacity) * k;
-    if (!enemy && this.edgeMat.opacity < 0.02) this.edgeMat.opacity = 0;
-    this.edgeGlow.visible = this.edgeMat.opacity > 0;
+    // A quiet cue once when an enemy first appears around the edge (not again while the same one stays there).
+    if (enemy && enemy !== this.edgeEnemy) this.onFeel?.({ kind: 'edge', at: enemy.ball.position, local: true, intensity: 0.5 });
+    this.edgeEnemy = enemy;
+    this.edgeLevel += ((enemy ? 1 : 0) - this.edgeLevel) * Math.min(1, dt * 8);
+    if (!enemy && this.edgeLevel < 0.02) this.edgeLevel = 0;
+    this.edgeMat.opacity = this.edgeLevel * (0.65 + 0.3 * Math.sin(timeSec * 7)); // a soft pulse
+    this.edgeGlow.visible = this.edgeRing.visible = this.edgeLevel > 0;
   }
 
   /** Last correction blend of the local ball (cells), for F3. */

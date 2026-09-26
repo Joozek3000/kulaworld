@@ -432,3 +432,46 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
 - `?predict=0` turns prediction off: unstamped inputs, server timeline only (phase 08 behaviour).
 - F3 shows `predTick`, the lead, mispredictions per minute, deferrals and the last correction's size.
 
+## 18. Tiles & traps (phase 13a/13b)
+
+Kula World's special blocks, as data in the level file, simulated in shared (deterministic, tick-based), and working in every mode.
+
+**Addressing.** A *tile* is a block face: `(block cell, face dir)`. A ball stands on tile `(pose.cell − up, up)`. Whole-block types (ice, fire, crumbling) apply to all six faces of that block.
+
+**Level JSON**
+```json
+"tiles": [
+  { "block": [3,0,4], "type": "ice" },
+  { "block": [5,0,2], "type": "fire" },
+  { "block": [6,0,2], "type": "crumble", "regrowSec": 8 },
+  { "block": [2,0,7], "face": "+Y", "type": "spikes", "period": 40, "up": 20, "phase": 0 },
+  { "block": [4,0,7], "face": "+Y", "type": "arrow", "dir": "+Z" },
+  { "block": [1,0,1], "face": "+Y", "type": "boost", "variant": "far" }
+]
+```
+- `spikes` without `period` are static (always up).
+- `boost` variants: `far` (3 cells forward, landing like a jump) or `high` (2 forward + 1 along up).
+- `crumble.regrowSec` is optional (default: never in single player, 8 s in multiplayer).
+
+**13a rules**
+- **Spikes:** a ball whose action *finishes* on a tile with spikes up dies (`death` cause `spikes`). Spikes rising under a standing ball kill it too. Jumping over spikes is safe (mid-air cells don't touch tiles).
+- **Fire:** Kula rule. Each landing on a fire tile increments `fireCount`, and landing on a non-fire tile resets it. At 3 the ball pops (cause `fire`). Standing on fire doesn't count extra (tile heat §12 still applies).
+- **Crumble:** when a ball leaves a crumble block (it finishes an action elsewhere), the block is removed via the `world.removed` overlay after `CRUMBLE_DELAY_TICKS` = 4. It regrows after `regrowSec` if set and nobody occupies the cell. A ball standing on it when removed falls.
+- **Ice:** a roll or flip that finishes on ice immediately continues as a forced roll in the same direction (input ignored) until it finishes on a non-ice tile or is blocked. Blocked means it just stops: a climb happens if it's a wall, because climb is a roll. A jump pulse on ice gives a forward jump even without W (Kula rule). Forced rolls can push (normal push rules).
+- **Arrow:** on an arrow tile, `fwd` moves (roll, flip, climb, jump) are only allowed if the ball's fwd equals the arrow dir. Turning is allowed, and so is hopping.
+- **Boost:** finishing a roll or flip onto a boost tile launches the ball: a forced jump of the variant's length, with normal landing, stomp and fall rules.
+
+**13b rules** (next phase)
+- **Teleporters:** paired by `pair` id. Finishing on one moves you (a `Teleport` action, 6 ticks, render fade) to the partner tile with the same relative facing. If the partner is occupied, you stay put. Per-ball cooldown of 20 ticks.
+- **Lasers and switches:**
+  - A laser is a line of air cells between two emitters, grouped by `color`. When active, a ball whose action finishes in, or passes through, a beam cell dies (cause `laser`).
+  - A switch tile toggles its colour group when any ball finishes on it. It's rate-limited by a 20-tick cooldown per switch.
+  - Initial state comes from the level.
+- **Invisible blocks:** solid, but rendered only within 2 cells of the local ball (or with sunglasses, phase 14).
+- **Vanishing blocks:** solid on a `period`/`on`/`phase` schedule (the `removed` overlay toggles). A ball standing there when it vanishes falls.
+
+**Common**
+- Death causes are added to the `death` event (`fall`, `spikes`, `fire`, `laser`, `burn`) for HUD and toasts.
+- BFS (`findPath`/`resultPose`) must follow forced moves (ice slides, boosts, teleports) and treat lethal outcomes as invalid, like fatal falls. Retracting spikes count as lethal at planning time (bots don't time them in v1).
+- The predictor runs the same rules. The trap state (crumbled blocks, laser groups) comes from server state each patch, like `removed`.
+

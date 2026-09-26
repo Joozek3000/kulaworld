@@ -8,7 +8,7 @@ export interface PlayerS {
   toX: number; toY: number; toZ: number; toUp: number; toFwd: number;
   startTick: number; endTick: number; turnFromFwd: number; turnStartTick: number; bounce: boolean; keys: number; ready: boolean; spectating: boolean;
   lives: number; eliminated: boolean; eliminatedTick: number; eliminatedBy: string; protectedUntil: number; knockouts: number;
-  ackSeq: number; ackTick: number;
+  ackSeq: number; ackTick: number; fireCount: number;
 }
 export interface ItemS { id: string; kind: 'key' | 'exit'; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
@@ -18,6 +18,8 @@ export interface GameState {
   mode: 'race' | 'knockout'; crumbled: number; warnBand: number; nextCrumbleTick: number;
   /** Hot tiles (phase 12c): tileKey → heat in ticks. */
   hot: MapLike<number>;
+  /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). */
+  crumbling: MapLike<number>;
 }
 
 const TICK_MS = 50;

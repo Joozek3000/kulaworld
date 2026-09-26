@@ -1,7 +1,7 @@
 import { dirName, dirVec, perpendicular } from '../dir.ts';
 import { cellKey, sub } from '../vec.ts';
 import { levelSolid } from './load.ts';
-import type { Level, Placement } from './types.ts';
+import { BLOCK_TILES, FACE_TILES, type Level, type Placement } from './types.ts';
 
 /** Returns a list of human-readable errors; empty means valid. */
 export function validateLevel(level: Level): string[] {
@@ -42,5 +42,36 @@ export function validateLevel(level: Level): string[] {
     else errors.push('race level needs an exit');
     if (level.keys.length < level.keysRequired) errors.push(`keysRequired ${level.keysRequired} > ${level.keys.length} keys`);
   } else errors.push(`unknown mode ${level.mode}`);
+  validateTiles(level, errors);
   return errors;
+}
+
+/** Tiles (§18): known type, on a block, a face for face types, arrow ⟂ face, sane spike timing, one type per face. */
+function validateTiles(level: Level, errors: string[]): void {
+  const byBlock = new Map<string, string>(), byFace = new Map<string, string>();
+  level.tiles.forEach((t, i) => {
+    const key = cellKey(t.block), what = `tile ${i} (${t.type} at ${key})`;
+    if (!BLOCK_TILES.includes(t.type) && !FACE_TILES.includes(t.type)) { errors.push(`${what}: unknown type`); return; }
+    if (!levelSolid(level, t.block)) errors.push(`${what}: no block there`);
+    if (FACE_TILES.includes(t.type)) {
+      if (t.face === null) { errors.push(`${what}: needs a face`); return; }
+      const fk = `${key}|${t.face}`;
+      if (byFace.has(fk)) errors.push(`${what}: face ${dirName(t.face)} already has ${byFace.get(fk)}`);
+      byFace.set(fk, t.type);
+    } else {
+      if (byBlock.has(key)) errors.push(`${what}: block already has ${byBlock.get(key)}`);
+      byBlock.set(key, t.type);
+    }
+    if (t.type === 'arrow' && (t.dir === null || t.face === null || !perpendicular(t.dir, t.face))) errors.push(`${what}: arrow dir must be perpendicular to its face`);
+    if (t.type === 'spikes' && t.period && !(Number.isInteger(t.period) && Number.isInteger(t.upTicks) && Number.isInteger(t.phase) && t.upTicks > 0 && t.upTicks < t.period)) {
+      errors.push(`${what}: retracting spikes need integer ticks with 0 < up < period`);
+    }
+    if (t.type === 'boost' && t.variant !== 'far' && t.variant !== 'high') errors.push(`${what}: boost variant must be far or high`);
+    if (t.type === 'crumble' && !(t.regrowTicks > 0)) errors.push(`${what}: regrowSec must be > 0`);
+  });
+  // A whole-block type conflicts with face types on that block, except crumble under arrow/boost/spikes.
+  for (const [fk, type] of byFace) {
+    const block = byBlock.get(fk.split('|')[0]);
+    if (block && block !== 'crumble') errors.push(`${type} on ${fk} conflicts with the ${block} block`);
+  }
 }

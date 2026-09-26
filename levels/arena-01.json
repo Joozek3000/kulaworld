@@ -27,5 +27,10 @@
     { "cell": [4, 1, 8], "up": "+Y", "fwd": "-Z" },
     { "cell": [1, 1, 8], "up": "+Y", "fwd": "-Z" },
     { "cell": [0, 1, 4], "up": "+Y", "fwd": "+X" }
+  ],
+  "tiles": [
+    { "block": [4, 0, 2], "face": "+Y", "type": "spikes", "period": 60, "up": 20, "phase": 0 },
+    { "block": [4, 0, 6], "face": "+Y", "type": "spikes", "period": 60, "up": 20, "phase": 30 },
+    { "block": [1, 0, 4], "face": "+Y", "type": "boost", "variant": "far" }
   ]
 }

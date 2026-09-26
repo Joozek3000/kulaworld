@@ -1,7 +1,9 @@
 import { dirVec } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { cellKey, sub } from '../vec.ts';
+import { FORCED_MAX } from '../constants.ts';
 import { previewAction } from './actions.ts';
+import { forcedAfter, lethalForPlanning } from './tiles.ts';
 import { Action, isSolid, outOfBounds, type Cmd, type Reservations, type World } from './world.ts';
 
 export interface PathStep { cmd: Cmd; to: Pose }
@@ -15,19 +17,32 @@ const poseKey = (p: Pose) => `${cellKey(p.cell)}|${p.up}|${p.fwd}`;
 /**
  * Where `cmd` leaves a player at `pose`, ignoring other players (or, with `res`, treating their cells as obstacles:
  * no pushes, jumps fly over them, landing on one isn't allowed). A forward jump that lands in air
- * follows the fall to where it lands. Returns null if the move is blocked or ends in death.
+ * follows the fall to where it lands, and forced moves (ice slides, boost launches, §18) are followed to where they
+ * stop. Returns null if the move is blocked or ends in death (a fatal fall, spikes, fire: see lethalForPlanning).
  */
 export function resultPose(world: World, pose: Pose, cmd: Cmd, res: Reservations = NO_PLAYERS): Pose | null {
-  const plan = previewAction(world, { id: '', pose }, cmd, res);
-  if (!plan || (res !== NO_PLAYERS && plan.bump)) return null; // routing around players: never through a stomp
-  if (plan.action !== Action.Jump) return plan.to;
-  const down = dirVec(pose.up);
-  let cell = plan.to.cell;
+  let from = pose, next: Cmd | null = cmd;
+  for (let i = 0; next; i++) {
+    const plan = previewAction(world, { id: '', pose: from }, next, res);
+    if (!plan) return i ? from : null; // a forced slide that's blocked just stops
+    if (res !== NO_PLAYERS && plan.bump) return null; // routing around players: never through a stomp
+    const to = plan.action === Action.Jump ? landing(world, plan.to) : plan.to;
+    if (!to || lethalForPlanning(world, to) || i > FORCED_MAX) return null;
+    next = forcedAfter(world, to, plan.action);
+    from = to;
+  }
+  return from;
+}
+
+/** Where a jump to `to` comes down: the first cell with ground below along −up, or null off the map. */
+function landing(world: World, to: Pose): Pose | null {
+  const down = dirVec(to.up);
+  let cell = to.cell;
   while (!isSolid(world, sub(cell, down))) {
     cell = sub(cell, down);
     if (outOfBounds(world.level, cell)) return null;
   }
-  return { ...plan.to, cell };
+  return { ...to, cell };
 }
 
 /**

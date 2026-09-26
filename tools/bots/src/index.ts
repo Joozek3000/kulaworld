@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
-  previewAction, reservations, stompPreview, sub, tileKey, turnFwd,
+  blockTileAt, lethalForPlanning, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
 
@@ -63,13 +63,14 @@ async function connect(client: Client, name: string): Promise<Room> {
  * bands count as gone, so plans never stand on a tile that's about to drop.
  */
 const planWorlds = new Map<string, World>();
-function planWorld(state: { levelId: string; crumbled: number; warnBand: number }): World {
+function planWorld(state: { levelId: string; crumbled: number; warnBand: number; crumbling?: { forEach(cb: (at: number, k: string) => void): void } }): World {
   let w = planWorlds.get(state.levelId);
   if (!w) {
     const json = JSON.parse(readFileSync(new URL(`../../../levels/${state.levelId}.json`, import.meta.url), 'utf8'));
     planWorlds.set(state.levelId, (w = createWorld(loadLevel(json), 0)));
   }
-  if (w.knockout) w.removed = new Set(w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat());
+  w.removed = new Set(w.knockout ? w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat() : []);
+  state.crumbling?.forEach((_, k) => w.removed.add(k)); // crumble tiles (§18): counting down or gone, don't plan on them
   return w;
 }
 
@@ -153,6 +154,8 @@ const AVOID_MS = 3_000;
 /** A bully whose target is this close (cells) detours for AVOID_NEAR_MS instead (phase 12b): back to the shove sooner. */
 const AVOID_NEAR_CELLS = 2;
 const AVOID_NEAR_MS = 1_500;
+/** bully (phase 13a): extra moves it will take to reach a spot that pushes its victim onto spikes or fire. */
+const TRAP_DETOUR = 3;
 
 type PlayerLike = {
   fromX: number; fromY: number; fromZ: number; fromUp: number; toX: number; toY: number; toZ: number;
@@ -179,12 +182,12 @@ function pushSpot(world: World, pose: Pose): { cell: Vec3; up: Dir; dest: Vec3 }
 
 /**
  * An opponent a roll forward would push right now (pushSpot), pushable next tick. With `voidOnly`, only if the knock
- * would drop it into air (nothing under the destination along the victim's gravity).
+ * is lethal: into air (nothing under the destination along the victim's gravity) or onto spikes/fire (§18).
  */
 function pushable(state: { tick: number; players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, pose: Pose, world: World, voidOnly: boolean): boolean {
   const { cell, up, dest } = pushSpot(world, pose);
   if (isSolid(world, dest)) return false; // would bounce
-  if (voidOnly && isSolid(world, sub(dest, dirVec(up)))) return false;
+  if (voidOnly && isSolid(world, sub(dest, dirVec(up))) && !lethalForPlanning(world, { cell: dest, up, fwd: pose.fwd })) return false;
   let hit = false;
   state.players.forEach((o, id) => {
     if (id === selfId || o.fromUp !== up || `${o.fromX},${o.fromY},${o.fromZ}` !== cellKey(cell)) return;
@@ -208,6 +211,25 @@ function besideOpponents(state: { players: { forEach(cb: (p: PlayerLike & { toUp
       if (!isSolid(world, c) && isSolid(world, sub(c, U))) cells.set(cellKey(c), id);
       const e = sub(c, U); // around the edge: the flip from e along +Uo lands on O
       if (!isSolid(world, e) && !isSolid(world, c) && isSolid(world, sub(e, dirVec(d)))) cells.set(cellKey(e), id);
+    }
+  });
+  return cells;
+}
+
+/**
+ * bully (phase 13a): cells beside an opponent from which a push knocks it onto spikes or fire, cellKey → opponent id.
+ * The push goes from c through the opponent O to O + d, on the opponent's face.
+ */
+function trapPushCells(state: { players: { forEach(cb: (p: PlayerLike & { toUp: number }, id: string) => void): void } }, selfId: string, world: World, skip: (id: string) => boolean): Map<string, string> {
+  const cells = new Map<string, string>();
+  state.players.forEach((o, id) => {
+    if (id === selfId || o.action === Action.Dead || skip(id)) return;
+    const up = o.toUp as Dir, O = { x: o.toX, y: o.toY, z: o.toZ }, U = dirVec(up);
+    for (const d of ALL_DIRS) {
+      if (!perpendicular(d, up)) continue;
+      const c = sub(O, dirVec(d)), dest = add(O, dirVec(d));
+      if (isSolid(world, c) || !isSolid(world, sub(c, U)) || isSolid(world, dest)) continue;
+      if (lethalForPlanning(world, { cell: dest, up, fwd: d })) cells.set(cellKey(c), id);
     }
   });
   return cells;
@@ -338,7 +360,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     const me = ctx.room.sessionId;
     const hunter = bully || s.mode === 'knockout';
     // Standing on a warned (or already crumbled) tile: get off it before anything else.
-    const unsafe = !!world.knockout && !isSolid(world, sub(pose.cell, dirVec(pose.up)));
+    const unsafe = !isSolid(world, sub(pose.cell, dirVec(pose.up))); // also a crumble tile counting down (§18)
     // bully: a stomp that kills, or leaves the victim one push from a ledge, beats walking over to push (§16).
     if (bully && !unsafe) {
       const pw = withPlayers(world, s, me);
@@ -373,8 +395,12 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       facing = null;
     }
     let goals = new Set<string>();
+    let trapGoals: Set<string> | null = null; // bully: push spots that knock the victim onto spikes or fire
     if (unsafe) goals = standable(world);
-    else if (hunter) goals = new Set(besideOpponents(s, me, world, skip).keys());
+    else if (hunter) {
+      goals = new Set(besideOpponents(s, me, world, skip).keys());
+      if (bully) trapGoals = new Set(trapPushCells(s, me, world, skip).keys());
+    }
     else if (world.level.exit && p.keys >= world.level.keysRequired) goals.add(cellKey(world.level.exit.cell));
     else s.items.forEach((it: { kind: string; x: number; y: number; z: number }) => { if (it.kind === 'key') goals.add(`${it.x},${it.y},${it.z}`); });
 
@@ -387,6 +413,10 @@ function seekBrain(ctx: Ctx, bully: boolean) {
         if (found?.length) ctx.stats.detours++;
       }
       if (!found?.length) found = goals.size ? findPath(world, pose, goals) : null;
+      if (found && trapGoals?.size) { // worth a short detour: a push onto a trap is a knockout
+        const trap = findPath(world, pose, trapGoals);
+        if (trap?.length && trap.length <= found.length + TRAP_DETOUR) found = trap;
+      }
       if (!found?.length) {
         replan();
         // A hunter with nobody to reach (all ignored, e.g. an opponent tucked where every push bounces) roams instead
@@ -478,7 +508,12 @@ function blockerBrain(ctx: Ctx) {
   };
 
   const choosePost = (world: World, s: Players & { items: { forEach(cb: (it: { kind: string; x: number; y: number; z: number }) => void): void } }, pose: Pose, me: string) => {
-    const corridors = corridorsOf(world);
+    // Never post on a crumble or fire block (§18): the post would drop away or pop the blocker.
+    const corridors = new Map([...corridorsOf(world)].filter(([k, c]) => {
+      const [x, y, z] = k.split(',').map(Number);
+      const t = blockTileAt(world, { cell: { x, y, z }, up: c.up, fwd: c.along })?.type;
+      return t !== 'crumble' && t !== 'fire' && !lethalForPlanning(world, { cell: { x, y, z }, up: c.up, fwd: c.along });
+    }));
     if (!corridors.size) return null;
     const goals = new Set<string>();
     if (world.mode === 'knockout') {
@@ -582,9 +617,12 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
     const playing = room.state.phase === 'playing' && !p.spectating;
     // Hot tile (phase 12): past the warn threshold, step off (any legal move: W rolls, flips or climbs).
-    const heat = planWorld(room.state).level.heat;
+    const pw = planWorld(room.state), heat = pw.level.heat;
     const tileHeat = room.state.hot?.get(tileKey({ x: p.fromX, y: p.fromY, z: p.fromZ }, p.fromUp)) ?? 0;
     if (playing && heat && tileHeat >= heat.warnTicks && p.action === Action.Idle) {
+      // Roll off, unless that's onto a trap or off the map (§18): then turn and try the next direction.
+      const pose: Pose = { cell: { x: p.fromX, y: p.fromY, z: p.fromZ }, up: p.fromUp as Dir, fwd: p.fromFwd as Dir };
+      if (!cooling && !resultPose(pw, pose, 'fwd')) { ctx.send({ turn: 1 }); return; }
       if (!cooling) { ctx.send({ fwdHeld: true }); stats.heatEscapes++; cooling = true; }
       return;
     }

@@ -186,6 +186,25 @@ export const RECIPES: Record<string, Recipe> = {
     noise(c, env(c, out, t, 0.06, 0.2, 0.5), t, 0.7, 'lowpass', 300, 0.7);
     return Math.max(0.7, plucks(c, out, t, [196, 185, 175, 165], 0.12, 0.14, pitch * 0.5, 0.2));
   },
+  /** Edge warning (phase 13a): a quiet creak and two dry ticks, an enemy just around your edge. */
+  edge(c, out, t, { pitch }) {
+    const o = osc(c, env(c, out, t, 0.05, 0.02, 0.16), t, 0.18, 'sawtooth', 180 * pitch, 150 * pitch, 0.18);
+    vibrato(c, o.frequency, t, 0.18, 30, 12);
+    for (const at of [t + 0.02, t + 0.11]) noise(c, env(c, out, at, 0.12, 0.0005, 0.01), at, 0.012, 'highpass', 4000, 0.8);
+    return 0.2;
+  },
+  /** Ice slide (§18): a soft "ssss", band-passed noise gliding down. */
+  slide(c, out, t, { pitch }) {
+    const f = noise(c, env(c, out, t, 0.07, 0.03, 0.3), t, 0.34, 'bandpass', 6500 * pitch, 1.4);
+    f.frequency.exponentialRampToValueAtTime(3500 * pitch, t + 0.34);
+    return 0.35;
+  },
+  /** Boost launch (§18): a rubbery "pwomp", a low sine swooping up under a puff of air. */
+  pwomp(c, out, t, { pitch }) {
+    osc(c, env(c, out, t, 0.32, 0.004, 0.22), t, 0.24, 'sine', 90 * pitch, 320 * pitch, 0.16);
+    noise(c, env(c, out, t, 0.08, 0.01, 0.12), t, 0.14, 'lowpass', 900, 0.7);
+    return 0.25;
+  },
   /** Crumbly low noise: a rumble plus a scatter of short gritty grains. */
   crumble(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.3, 0.01, 0.6), t, 0.62, 'lowpass', 500 * pitch, 0.8);

@@ -26,6 +26,8 @@ export const PlayerS = schema({
   /** Prediction (§17): the last input applied (its seq) and the tick it was applied at. */
   ackSeq: t.int32().default(-1),
   ackTick: t.int32().default(-1),
+  /** Fire landings in a row (§18): the client inflates the ball a little per count. */
+  fireCount: t.uint8().default(0),
   ready: t.boolean().default(false),
   spectating: t.boolean().default(false),
 }, 'PlayerS');
@@ -56,6 +58,8 @@ export const GameState = schema({
   items: t.map(ItemS),
   /** Hot tiles (phase 12c): tileKey → heat in ticks, only tiles with heat > 0. The client glows them from warn. */
   hot: t.map('uint16'),
+  /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). Gone once it regrows. */
+  crumbling: t.map('int32'),
 }, 'GameState');
 export type GameState = SchemaType<typeof GameState>;
 
@@ -70,6 +74,12 @@ function setPose(s: PlayerS, pre: 'from' | 'to', p: Pose): void {
   set(s, `${pre}Z` as const, p.cell.z);
   set(s, `${pre}Up` as const, p.up);
   set(s, `${pre}Fwd` as const, p.fwd);
+}
+
+/** Mirrors a sim map into a schema map, touching only the entries that changed. */
+function syncMap(from: ReadonlyMap<string, number>, to: GameState['hot']): void {
+  for (const [k, v] of from) if (to.get(k) !== v) to.set(k, v);
+  for (const k of [...to.keys()]) if (!from.has(k)) to.delete(k);
 }
 
 /** Copies sim → schema. from* = pose, to* = to (= pose when Idle). Collected keys are removed from items. */
@@ -92,6 +102,7 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'eliminatedBy', p.eliminatedBy ?? '');
     set(s, 'protectedUntil', p.protectedUntil);
     set(s, 'knockouts', p.knockouts);
+    set(s, 'fireCount', p.fireCount);
   }
   for (const k of world.keys) {
     const id = `key-${k.id}`;
@@ -103,8 +114,8 @@ export function syncSchema(world: World, state: GameState): void {
   }
   const exit = world.level.exit;
   if (exit && !state.items.has('exit')) state.items.set('exit', new ItemS({ id: 'exit', kind: 'exit', ...exit.cell, up: exit.up }));
-  for (const [k, h] of world.hot) if (state.hot.get(k) !== h) state.hot.set(k, h);
-  for (const k of [...state.hot.keys()]) if (!world.hot.has(k)) state.hot.delete(k);
+  syncMap(world.hot, state.hot);
+  syncMap(world.crumbling, state.crumbling);
   set(state, 'mode', world.mode);
   set(state, 'crumbled', world.knockout?.next ?? 0);
   set(state, 'warnBand', world.knockout?.warn ?? -1);

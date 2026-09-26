@@ -224,7 +224,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
     const who = 'playerId' in e ? this.nameOf(e.playerId) : '';
     switch (e.type) {
       case 'key': console.log(`event key: ${who} has ${e.keys}`); break;
-      case 'death': console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z}`); break;
+      case 'death': console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z} (${e.cause})`); break;
       case 'respawn': console.log(`event respawn: ${who}`); break;
       case 'push': console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}${e.edge ? ' (edge)' : ''}`); break;
       case 'cradle': console.log(`event cradle: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)} (line of ${e.length})`); break;

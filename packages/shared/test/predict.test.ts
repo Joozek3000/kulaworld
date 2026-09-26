@@ -3,7 +3,7 @@ import {
   Action, addPlayer, createWorld, InputQueue, InputSchedule, loadLevel, mulberry32, Predictor, setInput, step,
   type Input, type PlayerState, type ServerPlayer, type World,
 } from '../src/index.ts';
-import { levelJson, readLevelJson, row, type Spawn } from './util.ts';
+import { levelJson, makeWorld, readLevelJson, row, type Spawn } from './util.ts';
 
 const toServer = (p: PlayerState): ServerPlayer => ({
   action: p.action, pose: p.pose, to: p.action === Action.Idle ? p.pose : p.to, startTick: p.startTick, endTick: p.endTick,
@@ -48,7 +48,7 @@ class Harness {
     }
     step(s);
     // Crumbled blocks and collected keys: the latest server view, as the client syncs them (race-01 crumbles from 75 s).
-    this.pred.setWorld(s.removed, new Set(s.keys.filter((k) => k.collected).map((k) => k.id)));
+    this.pred.setWorld(s.removed, new Set(s.keys.filter((k) => k.collected).map((k) => k.id)), s.crumbling);
     this.pred.advanceTo(s.tick + this.lead);
     this.results.push(this.pred.reconcile(s.tick, toServer(this.local), this.ack));
   }
@@ -244,3 +244,24 @@ describe('predictor', () => {
   });
 });
 
+
+test('traps (§18): an ice slide into a boost, predicted solo with no mispredictions', () => {
+  const tiles = [1, 2, 3].map((x) => ({ block: [x, 0, 0] as [number, number, number], type: 'ice' as const }));
+  const w = makeWorld(row(0, 12), [[[0, 1, 0], '+Y', '+X']], {
+    heat: false, tiles: [...tiles, { block: [4, 0, 0], face: '+Y', type: 'boost' }, { block: [9, 0, 0], type: 'crumble' }],
+  });
+  const h = new Harness(w, 'p0');
+  h.send({ fwdHeld: true });
+  h.run(3);
+  h.send({});
+  h.run(60);
+  expect(w.players[0].pose.cell).toEqual({ x: 7, y: 1, z: 0 });
+  h.send({ fwdHeld: true });
+  h.run(30);
+  h.send({});
+  h.run(40);
+  expect(w.players[0].pose.cell.x).toBeGreaterThan(9);
+  expect(w.removed.has('9,0,0')).toBe(true);
+  expect(h.pred.mispredictions).toBe(0);
+  expect(h.results).not.toContain('mispredict');
+});

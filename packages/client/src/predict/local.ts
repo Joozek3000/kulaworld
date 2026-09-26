@@ -26,7 +26,7 @@ export function toServerPlayer(p: PlayerS): ServerPlayer {
   return {
     action: p.action as Action, pose: pose(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd), to: pose(p.toX, p.toY, p.toZ, p.toUp, p.toFwd),
     startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd as Dir, turnStartTick: p.turnStartTick, bounce: p.bounce,
-    protectedUntil: p.protectedUntil,
+    protectedUntil: p.protectedUntil, fireCount: p.fireCount,
   };
 }
 
@@ -135,7 +135,9 @@ export class LocalPrediction {
     this.pred!.setOthers(others);
     const collected = new Set<number>();
     for (const k of this.pred!.world.keys) if (!s.items.has(`key-${k.id}`)) collected.add(k.id);
-    this.pred!.setWorld(this.bands.slice(0, s.crumbled).flat(), collected);
+    const crumbling = new Map<string, number>();
+    s.crumbling?.forEach((at, k) => crumbling.set(k, at));
+    this.pred!.setWorld(this.bands.slice(0, s.crumbled).flat(), collected, crumbling);
   }
 
   private count(r: ReconcileResult): void {
@@ -205,7 +207,7 @@ export class LocalPrediction {
     return {
       id: b.id, name: b.name, color: b.color, keys: b.keys, ready: b.ready, spectating: b.spectating, lives: b.lives,
       eliminated: b.eliminated, eliminatedTick: b.eliminatedTick, eliminatedBy: b.eliminatedBy, protectedUntil: b.protectedUntil,
-      knockouts: b.knockouts, ackSeq: b.ackSeq, ackTick: b.ackTick, action: p.action,
+      knockouts: b.knockouts, ackSeq: b.ackSeq, ackTick: b.ackTick, fireCount: b.fireCount, action: p.action,
       fromX: p.pose.cell.x, fromY: p.pose.cell.y, fromZ: p.pose.cell.z, fromUp: p.pose.up, fromFwd: p.pose.fwd,
       toX: to.cell.x, toY: to.cell.y, toZ: to.cell.z, toUp: to.up, toFwd: to.fwd,
       startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick, bounce: p.bounce,
