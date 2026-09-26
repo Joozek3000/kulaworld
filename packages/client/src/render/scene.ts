@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { art } from './art.ts';
 
 const DEFAULT_SKY: [string, string] = ['#1a1d2b', '#1a1d2b'];
 
@@ -36,6 +37,12 @@ export function createScene() {
   const scene = new THREE.Scene();
   const sky = createSky();
   scene.add(sky.mesh);
+  if (art.sky) {
+    sky.mesh.visible = false;
+    scene.background = art.sky;
+    scene.environment = art.sky;
+    scene.environmentIntensity = 0.35;
+  }
   const fog = new THREE.Fog(0, 18, 50);
   scene.fog = fog;
 
@@ -58,11 +65,12 @@ export function createScene() {
 
   return {
     renderer, scene, camera,
-    /** Per-level sky (§9 `sky`); the fog takes a faint tint between the two colours to match. */
+    /** Ceramic panorama overrides per-level gradients, which remain the missing-asset fallback. */
     setSky([top, bottom]: [string, string] = DEFAULT_SKY) {
       sky.uniforms.top.value.set(top);
       sky.uniforms.bottom.value.set(bottom);
       fog.color.copy(sky.uniforms.bottom.value).lerp(sky.uniforms.top.value, 0.35);
+      if (art.sky) fog.color.set(0xc8b5d6);
     },
     render() {
       sky.mesh.position.copy(camera.position);

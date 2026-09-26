@@ -8,6 +8,7 @@ import {
 import type { GameState, PlayerS } from '../net.ts';
 import { tuning } from '../tuning.ts';
 import { applySquash, Spring } from './squash.ts';
+import { art, BALL_MODELS } from './art.ts';
 
 /**
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
@@ -162,7 +163,7 @@ class PlayerView {
   action: number = Action.Idle;
   readonly color: string;
   private readonly top: THREE.MeshStandardMaterial;
-  private readonly bottom = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
+  private readonly bottom = new THREE.MeshStandardMaterial({ color: 0xfff0d7, roughness: 0.57 });
   /** Knockout spawn protection (server tick): the ball renders translucent until then. */
   private protectedUntil = 0;
 
@@ -176,7 +177,18 @@ class PlayerView {
     scene.add(this.marker);
     this.hot.visible = false;
     scene.add(this.hot);
-    this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
+    // Hue chooses a stable pattern while the server's player colour still matches labels and markers.
+    const hue = this.top.color.getHSL({ h: 0, s: 0, l: 0 }).h;
+    const model = art.models[BALL_MODELS[Math.floor(hue * BALL_MODELS.length) % BALL_MODELS.length]]?.clone(true);
+    if (model) {
+      model.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          const source = object.material as THREE.MeshStandardMaterial;
+          object.material = source.name.includes('warm white') ? this.bottom : this.top;
+        }
+      });
+      this.body.add(model);
+    } else this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
     this.ball.visible = false;
     this.shadow.visible = false;

@@ -1,0 +1,67 @@
+{
+  "units": "1 unit = 1 game cell",
+  "gltf_up": "+Y",
+  "textures": false,
+  "assets": [
+    {
+      "name": "block-ivory",
+      "file": "block-ivory.glb",
+      "triangles": 108,
+      "description": "Neutral ceramic block. One game cell."
+    },
+    {
+      "name": "block-cobalt",
+      "file": "block-cobalt.glb",
+      "triangles": 108,
+      "description": "Cobalt decorative block. Same geometry and behaviour as ivory."
+    },
+    {
+      "name": "block-capped",
+      "file": "block-capped.glb",
+      "triangles": 108,
+      "description": "Ivory block with cobalt glaze on two opposing faces. Decorative only."
+    },
+    {
+      "name": "ball-orange-bands",
+      "file": "ball-orange-bands.glb",
+      "triangles": 2208,
+      "description": "Rubber player sphere; radius 0.4. Identity pattern uses material faces, no textures."
+    },
+    {
+      "name": "ball-blue-panels",
+      "file": "ball-blue-panels.glb",
+      "triangles": 2208,
+      "description": "Rubber player sphere; radius 0.4. Identity pattern uses material faces, no textures."
+    },
+    {
+      "name": "ball-jade-cross",
+      "file": "ball-jade-cross.glb",
+      "triangles": 2208,
+      "description": "Rubber player sphere; radius 0.4. Identity pattern uses material faces, no textures."
+    },
+    {
+      "name": "ball-raspberry-caps",
+      "file": "ball-raspberry-caps.glb",
+      "triangles": 2208,
+      "description": "Rubber player sphere; radius 0.4. Identity pattern uses material faces, no textures."
+    },
+    {
+      "name": "key-marigold",
+      "file": "key-marigold.glb",
+      "triangles": 444,
+      "description": "Collectible key. Upright along local Z in Blender; +Y in GLB."
+    },
+    {
+      "name": "exit-open",
+      "file": "exit-open.glb",
+      "triangles": 3312,
+      "description": "Exit ring lies on local XY ground plane. +Y is ground normal in GLB. Visual state only."
+    },
+    {
+      "name": "exit-locked",
+      "file": "exit-locked.glb",
+      "triangles": 3420,
+      "description": "Exit ring lies on local XY ground plane. +Y is ground normal in GLB. Visual state only."
+    }
+  ]
+}

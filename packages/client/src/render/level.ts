@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { crumbleBands, loadLevel, type Level, type LevelJson } from '@kula/shared';
+import { art } from './art.ts';
 
 const files = import.meta.glob<LevelJson>('../../../../levels/*.json', { eager: true, import: 'default' });
 
@@ -9,21 +10,19 @@ export function findLevel(id: string): Level | null {
 }
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-const edgeVerts = new THREE.EdgesGeometry(boxGeo).getAttribute('position').array;
 const WARN = new THREE.Color(0xff3b3b);
 const SHAKE = 0.06; // cells
 const m = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0), tint = new THREE.Color();
 
 /**
- * One InstancedMesh for all blocks (checkerboard shading) plus one LineSegments for all edges.
- * Knockout crumble (§15): bands the server reports as removed get a zero-scale matrix and collapsed edges; the
+ * One InstancedMesh of bevelled ceramic blocks; alternating ivory/cobalt glaze works on every gravity face.
+ * Knockout crumble (§15): bands the server reports as removed get a zero-scale matrix; the
  * warned band shakes and blinks red. Bands come from the shared `crumbleBands`, the same as the sim's.
  */
 export class LevelView {
   readonly group = new THREE.Group();
   private readonly cells: number[][];
   private readonly mesh: THREE.InstancedMesh;
-  private readonly edges: THREE.BufferAttribute;
   private readonly bands: number[][]; // instance indices per band
   private crumbled = 0;
   private warnBand = -1;
@@ -35,34 +34,21 @@ export class LevelView {
     const index = new Map(keys.map((k, i) => [k, i]));
     this.bands = level.crumble ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
 
-    this.mesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ roughness: 0.85 }), this.cells.length);
+    this.mesh = new THREE.InstancedMesh(art.block?.geometry ?? boxGeo,
+      art.block?.material.clone() ?? new THREE.MeshStandardMaterial({ roughness: 0.28 }), this.cells.length);
     this.cells.forEach((_, i) => { this.place(i, 0); this.mesh.setColorAt(i, this.baseColor(i)); });
     this.group.add(this.mesh);
-
-    this.edges = new THREE.BufferAttribute(new Float32Array(this.cells.length * edgeVerts.length), 3);
-    this.cells.forEach((_, i) => this.placeEdges(i, true));
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', this.edges);
-    this.group.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x2a2e44 })));
   }
 
   private baseColor(i: number): THREE.Color {
     const [x, y, z] = this.cells[i];
-    return tint.set((x + y + z) & 1 ? 0x7c86ab : 0x9aa4c8);
+    return tint.set((x + y + z) & 1 ? 0x2145aa : 0xf1e5cc);
   }
 
   private place(i: number, shake: number): void {
     const [x, y, z] = this.cells[i];
     const j = shake ? (k: number) => Math.sin(shake * 47 + i * 13 + k) * SHAKE : () => 0;
     this.mesh.setMatrixAt(i, m.makeTranslation(x + j(0), y + j(1), z + j(2)));
-  }
-
-  private placeEdges(i: number, visible: boolean): void {
-    const [x, y, z] = this.cells[i], a = this.edges.array as Float32Array;
-    for (let j = 0; j < edgeVerts.length; j += 3) {
-      const o = i * edgeVerts.length + j, s = visible ? 1.002 : 0;
-      a[o] = edgeVerts[j] * s + x; a[o + 1] = edgeVerts[j + 1] * s + y; a[o + 2] = edgeVerts[j + 2] * s + z;
-    }
   }
 
   /** Per frame, from the synced `crumbled` (bands removed) and `warnBand`. A new round resets both to none. */
@@ -74,9 +60,7 @@ export class LevelView {
         const gone = b < crumbled;
         if (gone) this.mesh.setMatrixAt(i, ZERO); else this.place(i, 0);
         this.mesh.setColorAt(i, this.baseColor(i));
-        this.placeEdges(i, !gone);
       }));
-      this.edges.needsUpdate = true;
       this.removed.clear();
       for (const band of this.bands.slice(0, crumbled)) for (const i of band) this.removed.add(this.cells[i].join(','));
       this.crumbled = crumbled;
@@ -98,6 +82,11 @@ export class LevelView {
     const k = `${x},${y},${z}`;
     return this.level.solid.has(k) && !this.removed.has(k);
   };
+
+  dispose(): void {
+    this.mesh.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+  }
 }
 
 export function levelBounds(level: Level) {

@@ -1,0 +1,42 @@
+{
+  "source": "../pretzl-rubberballbouncing-original.mp3",
+  "note": "Edited from MP3; 24-bit PCM masters preserve edits, not additional source fidelity.",
+  "variants": [
+    {
+      "variant": "soft",
+      "file": "bounce-soft.wav",
+      "duration_sec": 0.24,
+      "sample_rate": 44100,
+      "channels": 1,
+      "runtime_bit_depth": 16,
+      "master_bit_depth": 24,
+      "peak_dbfs": -14.0,
+      "rms_dbfs": -30.86,
+      "ffmpeg_filter": "atrim=start=0.020:end=0.260,asetpts=PTS-STARTPTS,highpass=f=45,lowpass=f=3600,afade=t=in:st=0:d=0.001,afade=t=out:st=0.190:d=0.050,volume=-6.683686dB"
+    },
+    {
+      "variant": "regular",
+      "file": "bounce-regular.wav",
+      "duration_sec": 0.29,
+      "sample_rate": 44100,
+      "channels": 1,
+      "runtime_bit_depth": 16,
+      "master_bit_depth": 24,
+      "peak_dbfs": -8.0,
+      "rms_dbfs": -25.67,
+      "ffmpeg_filter": "atrim=start=0.020:end=0.310,asetpts=PTS-STARTPTS,highpass=f=40,lowpass=f=7500,afade=t=in:st=0:d=0.001,afade=t=out:st=0.235:d=0.055,volume=-0.783748dB"
+    },
+    {
+      "variant": "hard",
+      "file": "bounce-hard.wav",
+      "duration_sec": 0.35,
+      "sample_rate": 44100,
+      "channels": 1,
+      "runtime_bit_depth": 16,
+      "master_bit_depth": 24,
+      "peak_dbfs": -4.5,
+      "rms_dbfs": -23.1,
+      "ffmpeg_filter": "atrim=start=0.020:end=0.370,asetpts=PTS-STARTPTS,highpass=f=35,equalizer=f=160:t=q:w=0.8:g=2,lowpass=f=8000,afade=t=in:st=0:d=0.001,afade=t=out:st=0.280:d=0.070,volume=2.225594dB"
+    }
+  ]
+}

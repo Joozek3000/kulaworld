@@ -14,6 +14,7 @@ import { createTuningPanel } from './ui/tuning.ts';
 import { AudioEngine } from './audio/engine.ts';
 import { latency } from './ui/latency.ts';
 import { LocalPrediction } from './predict/local.ts';
+import { loadArt } from './render/art.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
 const INTERP_TICKS = 2;
@@ -24,9 +25,10 @@ const ACTIVE = new Set(['countdown', 'playing', 'results']);
 const BUMP_AFTER_MS = 150;
 const BUMP_EVERY_MS = 300;
 
+const hud = createHud();
+await loadArt();
 const view = createScene();
 view.setSky();
-const hud = createHud();
 const debug = createDebug();
 const players = new PlayersView(view.scene);
 const items = new ItemsView(view.scene);
@@ -142,13 +144,14 @@ view.renderer.setAnimationLoop((now: number) => {
   const dtMs = Math.min(now - last, 100);
   last = now;
   if (frozen) return;
-  net.update(now, dtMs);
   const s = net.state;
+  if (!s.players || !s.items) return; // The first server snapshot can arrive after join resolves.
+  net.update(now, dtMs);
   const me = net.sessionId;
 
   if (s.levelId && level?.id !== s.levelId) {
     level = findLevel(s.levelId);
-    if (levelView) view.scene.remove(levelView.group);
+    if (levelView) { view.scene.remove(levelView.group); levelView.dispose(); }
     levelView = level ? new LevelView(level) : null;
     players.setSolid(levelView?.solid ?? null);
     players.heat = level?.heat ?? null;
