@@ -84,6 +84,10 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private stalemate = new StalemateMeter();
   /** Boost pads this round (phase 14c): launches, holds, releases. */
   private boostStats = { launch: 0, held: 0, released: 0 };
+  /** Phase 14d: moving collisions this round, knockouts by cause, and each ball's last knock (push, edge, cradle, stomp, headon, side). */
+  private hitStats = { headon: 0, side: 0 };
+  private koCauses: Record<string, number> = {};
+  private readonly lastKnock = new Map<string, string>();
   private round = 0;
   private frame = 0;
   private inputCounts = new Map<string, number>();
@@ -232,6 +236,9 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.world = world;
         this.stalemate = new StalemateMeter();
         this.boostStats = { launch: 0, held: 0, released: 0 };
+        this.hitStats = { headon: 0, side: 0 };
+        this.koCauses = {};
+        this.lastKnock.clear();
         this.queues.clear();
         for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
         s.items.clear();
@@ -254,7 +261,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const stats = w.mode === 'knockout'
           ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
           : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released)`);
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released), hits ${this.hitStats.headon}/${this.hitStats.side} (head-on/side), knockouts ${Object.entries(this.koCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}`);
         break;
       }
     }
@@ -267,10 +274,16 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'key': console.log(`event key: ${who} has ${e.keys}`); break;
       case 'death': console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z} (${e.cause})`); break;
       case 'respawn': console.log(`event respawn: ${who}`); break;
-      case 'push': console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}${e.edge ? ' (edge)' : ''}`); break;
-      case 'cradle': console.log(`event cradle: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)} (line of ${e.length})`); break;
-      case 'knockout': console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
-      case 'stomp': console.log(`event stomp: ${this.nameOf(e.attackerId)} → ${this.nameOf(e.victimId)}`); break;
+      case 'push': // phase 14d: moving collisions say which kind, and every knock is remembered for the knockout's cause
+        this.lastKnock.set(e.victimId, e.moving ?? (e.edge ? 'edge' : 'push'));
+        if (e.moving === 'headon') this.lastKnock.set(e.pusherId, 'headon');
+        if (e.moving) this.hitStats[e.moving]++;
+        console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}${e.edge ? ' (edge)' : ''}${e.moving ? ` (${e.moving})` : ''}`);
+        break;
+      case 'cradle': this.lastKnock.set(e.victimId, 'cradle'); console.log(`event cradle: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)} (line of ${e.length})`); break;
+      case 'knockout': { const cause = this.lastKnock.get(e.victimId) ?? 'other'; this.koCauses[cause] = (this.koCauses[cause] ?? 0) + 1; }
+        console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
+      case 'stomp': this.lastKnock.set(e.victimId, 'stomp'); console.log(`event stomp: ${this.nameOf(e.attackerId)} → ${this.nameOf(e.victimId)}`); break;
       case 'clash': console.log(`event clash: ${this.nameOf(e.attackerId)} ↔ ${this.nameOf(e.victimId)}`); break;
       case 'burn': console.log(`event burn: ${who}`); break;
       case 'boost': { // phase 14c: holds and releases say why; launches are counted, not logged one by one

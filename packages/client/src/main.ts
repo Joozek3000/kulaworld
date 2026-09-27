@@ -51,7 +51,7 @@ players.onFeel = (e) => {
     case 'flip': audio.play('squeak', { at }); break;
     case 'climb': audio.play('squeak', { at, gain: 0.8 }); break; // rubber into the corner (phase 11)
     case 'fall': audio.play('fall', { at }); break;
-    case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
+    case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: (e.victimLocal ? 1.5 : 1) * (e.headOn ? 1.3 : 1) }); break; // head-on: a bit louder (§20)
     case 'boing': audio.play('boing', { at }); break;
     case 'stomp': audio.play('stomp', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
     case 'clash': audio.play('boing', { at, gain: 1.2 }); break;

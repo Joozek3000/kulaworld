@@ -228,7 +228,8 @@ describe('predictor', () => {
   });
 
   test('a move near another player that does not involve it is predicted, not deferred (phase 11)', () => {
-    const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[2, 1, 0], '+Y', '-X']]), 1);
+    // 14d: facing sideways (+Z); one facing x=1 could start into it on the same tick (a head-on), so that's deferred.
+    const w = createWorld(rowLevel([[[0, 1, 0], '+Y', '+X'], [[2, 1, 0], '+Y', '+Z']]), 1);
     w.spawnOrder = [0, 1];
     addPlayer(w, 'me', 'me');
     const other = addPlayer(w, 'other', 'other');

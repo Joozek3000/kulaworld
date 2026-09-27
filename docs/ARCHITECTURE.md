@@ -514,3 +514,24 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
 - BFS (`findPath`/`resultPose`) must follow forced moves (ice slides, boosts, teleports) and treat lethal outcomes as invalid, like fatal falls. Retracting spikes count as lethal at planning time (bots don't time them in v1).
   - Fire (phase 14b): the planning state tracks `fire` (landings on fire in a row, reset by any other landing), so a plan may cross up to 2 fire tiles in a row but never a 3rd. `findPath(..., fire, fireMax)` takes the player's current count; `fireMax` 0 makes fire a wall (level:check's safe routes).
 - The predictor runs the same rules. The trap state (crumbled blocks, laser groups) comes from server state each patch, like `removed`.
+
+## 20. Moving collisions (phase 14d)
+
+Per Jakub, from playing Ice Rink: until now only *standing* balls could be pushed. On ice everyone is moving, so nobody ever got pushed. Moving balls now collide.
+
+A **mover** is a ball in Roll, Flip, Climb, forced slide, Knocked or boost flight on the ground plane (not airborne jumps or hops). `dM` is its motion direction on its face. When a mover M's next move targets cell X, and X is involved with another mover V on the same face (`V.up === M.up`), whose motion direction is `dV`:
+
+| Case | Condition | Result |
+|---|---|---|
+| **Head-on** | V is entering X, or entering M's cell, with `dV = −dM`; or both start into the same empty X from opposite sides on the same tick | **Both bounce back:** each is Knocked one cell *opposite its own motion*, if that cell is free (otherwise it bounce-stuns in place), then bounce-stun. On ice, the knock-back continues as a slide (§18), so on Ice Rink a head-on sends both flying apart. |
+| **Side hit (T-bone)** | V is entering X with `dV ⟂ dM`, and V started its move **earlier** than M | **V is pushed:** V's move is cancelled and V is Knocked from X to `X + dM` (stagger, or fall/slide per the usual rules). M continues into X. If `X + dM` is blocked, M bounces instead. |
+| **Simultaneous T-bone** | Both start into the same empty X on the same tick, perpendicular | Both bounce (as head-on, each knocked back opposite its own motion). |
+| **Dodge** | V is *leaving* X (X is V's from-cell) in any direction | No collision: V dodged. M is blocked until X is free (unchanged). |
+| **Rear-end** | V moves in the same direction as M (`dV = dM`) | No collision: M follows (blocked while X is reserved). |
+| **Standing V** | V isn't moving | The existing push, cradle, edge-push and roll-under rules (§14). |
+
+- Knockout credit and events work as for pushes (`push` with `moving: 'headon' | 'side'`).
+- Stagger rules from §14 apply to everyone knocked. A staggered ball can't be hit again until it recovers.
+- Moving collisions are resolved in the same intent/resolution pass as pushes, in fair order, after escapes.
+- Prediction: involves players, so it's deferred.
+

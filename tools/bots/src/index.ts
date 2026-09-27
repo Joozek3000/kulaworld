@@ -42,7 +42,7 @@ interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
-  cradles: number; edgePushes: number;
+  cradles: number; edgePushes: number; headOns: number; sideHits: number; sideTries: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -123,7 +123,14 @@ interface Ctx { name: string; room: Room; stats: Stats; send(i: Partial<Input>):
 function wanderBrain(ctx: Ctx) {
   let nextPulseAt = 0;
   let wasPlaying = false;
+  let braking = false; // W released: a head-on would knock it off an edge (phase 14d)
   return (playing: boolean) => {
+    const s = ctx.room.state, p: SchemaPlayer | undefined = s.players?.get(ctx.room.sessionId);
+    const moving = p && (p.action === Action.Roll || p.action === Action.Flip);
+    const pose = p && (p.action === Action.Idle || moving) ? (moving ? poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd) : poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd)) : null;
+    const risk = playing && !!pose && headOnRisk(s, ctx.room.sessionId, pose, planWorld(s));
+    if (risk !== braking) { braking = risk; ctx.send({ fwdHeld: !risk }); }
+    if (braking) { wasPlaying = playing; return; }
     if (playing && (!wasPlaying || Date.now() >= nextPulseAt)) {
       // 10% hop (jump with fwd released for this message), 30% left, 30% right, 20% forward jump, 10% just roll.
       const r = wasPlaying ? Math.random() : 1;
@@ -258,6 +265,80 @@ function adjacentOpponent(state: { players: { forEach(cb: (p: PlayerLike, id: st
   return hit;
 }
 
+/** A ball moving along the ground (§20 mover) and its motion vector on its arrival face, or null. */
+function motionOf(o: SchemaPlayer): Vec3 | null {
+  if (o.action === Action.Flip) return dirVec(o.toFwd as Dir);
+  if (o.action !== Action.Roll && o.action !== Action.Knocked) return null;
+  return { x: o.toX - o.fromX, y: o.toY - o.fromY, z: o.toZ - o.fromZ };
+}
+const sameVec = (a: Vec3, b: Vec3) => a.x === b.x && a.y === b.y && a.z === b.z;
+
+/** A head-on's knock-back from `pose` (one cell against fwd, then on across any ice) ends off an edge or on a trap. */
+function bounceLethal(world: World, pose: Pose): boolean {
+  const F = dirVec(pose.fwd), U = dirVec(pose.up);
+  for (let c = sub(pose.cell, F), i = 0; i < 32; c = sub(c, F), i++) {
+    if (isSolid(world, c)) return false; // a wall behind: it bounces in place
+    const here = { cell: c, up: pose.up, fwd: opposite(pose.fwd) };
+    if (!isSolid(world, sub(c, U)) || lethalForPlanning(world, here)) return true;
+    if (blockTileAt(world, here)?.type !== 'ice') return false;
+  }
+  return false;
+}
+
+/**
+ * All bots (phase 14d): rolling forward from `pose` now would meet an opponent head-on (§20) that gets there at least as
+ * soon (already entering A, or arriving next to A this tick), and the knock-back would drop this bot off an edge.
+ */
+function headOnRisk(state: Players & { tick: number }, selfId: string, pose: Pose, world: World): boolean {
+  const F = dirVec(pose.fwd), A = add(pose.cell, F), AF = add(A, F), back = sub({ x: 0, y: 0, z: 0 }, F);
+  let risk = false;
+  state.players.forEach((o, id) => {
+    const m = id === selfId || o.toUp !== pose.up ? null : motionOf(o);
+    if (!m || !sameVec(m, back)) return;
+    const to = { x: o.toX, y: o.toY, z: o.toZ };
+    if (sameVec(to, A) || (sameVec(to, AF) && o.endTick - state.tick <= 1)) risk = true;
+  });
+  return risk && bounceLethal(world, pose);
+}
+
+/**
+ * bully (phase 14d): a side hit (§20) on an opponent rolling into a cell beside this bot, across its path: 'fwd' when
+ * it's entering the cell ahead, or the turn toward one that has only just started (a turn takes 3 of its 5 ticks).
+ */
+function sideHit(state: Players & { tick: number }, selfId: string, pose: Pose, world: World): 'fwd' | 'left' | 'right' | null {
+  let hit: 'fwd' | 'left' | 'right' | null = null;
+  state.players.forEach((o, id) => {
+    if (hit === 'fwd' || id === selfId || o.toUp !== pose.up || o.action === Action.Knocked || o.protectedUntil > state.tick) return;
+    const m = motionOf(o);
+    if (!m) return;
+    const to = { x: o.toX, y: o.toY, z: o.toZ };
+    for (const cmd of ['fwd', 'left', 'right'] as const) {
+      const d = cmd === 'fwd' ? pose.fwd : turnFwd(pose.up, pose.fwd, cmd === 'left' ? -1 : 1), D = dirVec(d);
+      if (!sameVec(add(pose.cell, D), to) || m.x * D.x + m.y * D.y + m.z * D.z !== 0 || isSolid(world, add(to, D))) continue;
+      if (cmd === 'fwd' || state.tick - o.startTick <= 1) hit = cmd;
+    }
+  });
+  return hit;
+}
+
+/** bully (phase 14d): where to be for a side hit: beside the cell each rolling opponent enters next (its target + its motion), across its path. */
+function sideSpots(state: Players, selfId: string, world: World, skip: (id: string) => boolean): Set<string> {
+  const cells = new Set<string>();
+  state.players.forEach((o, id) => {
+    const m = id === selfId || skip(id) || o.action === Action.Knocked ? null : motionOf(o);
+    if (!m) return;
+    const U = dirVec(o.toUp as Dir), N = add({ x: o.toX, y: o.toY, z: o.toZ }, m);
+    if (isSolid(world, N) || !isSolid(world, sub(N, U))) return;
+    for (const d of ALL_DIRS) {
+      const D = dirVec(d);
+      if (!perpendicular(d, o.toUp as Dir) || m.x * D.x + m.y * D.y + m.z * D.z !== 0) continue;
+      const c = add(N, D);
+      if (!isSolid(world, c) && isSolid(world, sub(c, U))) cells.add(cellKey(c));
+    }
+  });
+  return cells;
+}
+
 const poseOf = (x: number, y: number, z: number, up: number, fwd: number): Pose => ({ cell: { x, y, z }, up: up as Dir, fwd: fwd as Dir });
 const samePose = (a: Pose, b: Pose) => cellKey(a.cell) === cellKey(b.cell) && a.up === b.up && a.fwd === b.fwd;
 
@@ -312,6 +393,9 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     }
   };
   const press = (cmd: string, prevStart: number, prevAction: number, tick: number, offPath = false) => {
+    const s = ctx.room.state, p = s.players.get(ctx.room.sessionId);
+    const pose = p && (p.action === Action.Idle ? poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd) : poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd));
+    if (cmd === 'fwd' && pose && headOnRisk(s, ctx.room.sessionId, pose, planWorld(s))) return; // wait it out (phase 14d)
     pending = { cmd, prevStart, prevAction, sentTick: tick, offPath };
     if (cmd === 'fwd') ctx.send({ fwdHeld: true });
     else if (cmd === 'jump') ctx.send({ fwdHeld: true, jump: true });
@@ -385,6 +469,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
         }
       }
     }
+    const side = bully && !unsafe ? sideHit(s, me, pose, world) : null;
+    if (side) {
+      replan();
+      facing = null;
+      ctx.stats.sideTries++;
+      return press(side, p.startTick, p.action, s.tick, true);
+    }
     if (!unsafe && pushable(s, me, pose, world, !bully)) {
       replan();
       facing = null;
@@ -408,7 +499,10 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     if (unsafe) goals = standable(world);
     else if (hunter) {
       goals = new Set(besideOpponents(s, me, world, skip).keys());
-      if (bully) trapGoals = new Set(trapPushCells(s, me, world, skip).keys());
+      if (bully) {
+        trapGoals = new Set(trapPushCells(s, me, world, skip).keys());
+        for (const k of sideSpots(s, me, world, skip)) goals.add(k); // head across a roller's path (phase 14d)
+      }
       // Never stop under someone's hop (§14): it comes down on you. Roll through, stop elsewhere.
       for (const g of [goals, trapGoals]) for (const k of g ?? []) if (occupiedByOther(s, me, k)) g!.delete(k);
     }
@@ -515,6 +609,7 @@ function blockerBrain(ctx: Ctx) {
   let postAt = 0;
   let pending: { prevStart: number; prevAction: number; sentTick: number; fwd: boolean } | null = null;
   const press = (cmd: string, p: SchemaPlayer, tick: number) => {
+    if (cmd === 'fwd' && headOnRisk(ctx.room.state, ctx.room.sessionId, poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd), planWorld(ctx.room.state))) return;
     pending = { prevStart: p.startTick, prevAction: p.action, sentTick: tick, fwd: cmd === 'fwd' || cmd === 'jump' };
     if (cmd === 'fwd') ctx.send({ fwdHeld: true });
     else if (cmd === 'jump') ctx.send({ fwdHeld: true, jump: true });
@@ -591,6 +686,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
     eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0, edgePushes: 0,
+    headOns: 0, sideHits: 0, sideTries: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
@@ -606,7 +702,8 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
       return;
     }
     const me = room.sessionId;
-    if (e.type === 'push' && e.pusherId === me) { stats.pushes++; if (e.edge) stats.edgePushes++; }
+    if (e.type === 'push' && e.pusherId === me) { stats.pushes++; if (e.edge) stats.edgePushes++; if (e.moving === 'side') stats.sideHits++; }
+    if (e.type === 'push' && e.moving === 'headon' && (e.pusherId === me || e.victimId === me)) stats.headOns++;
     if (e.type === 'cradle' && e.pusherId === me) stats.cradles++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
     if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
@@ -691,7 +788,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

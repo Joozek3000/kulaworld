@@ -16,7 +16,7 @@ import { art, BALL_MODELS } from './art.ts';
  */
 export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
   | 'slide' | 'launch' | 'edge' | 'whoosh' | 'charge';
-export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
+export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean; headOn?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
 /**
@@ -89,6 +89,7 @@ const SQUASH = {
   stomp: -0.5, // a stomped victim, flattened under the attacker before it shoots out (§16)
   shudder: -0.18, // a middle ball of a cradle, along the strike
   charge: -0.3, // held on a boost pad, squashed down, ready to fly (phase 14c)
+  headOn: -0.45, // both balls of a head-on (§20), hard along the contact axis
 };
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
 const STOMP_HOLD = 0.4;
@@ -138,6 +139,8 @@ class PlayerView {
   readonly local: boolean;
   /** Knock segments (serials) that are stomps, not pushes: set by PlayersView each frame. */
   stompSerials = new Set<number>();
+  /** Head-on knock-backs (§20, serial → lunge): the ball first lunges this far to where the two touch. By PlayersView. */
+  readonly headOn = new Map<number, THREE.Vector3>();
   /** Hot-tile overlay and its level (0 = cold, 0..1 = warned → burning). */
   private readonly hotMat = new THREE.MeshBasicMaterial({ color: 0xff8a1e, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   private readonly hot = new THREE.Mesh(hotGeo, this.hotMat);
@@ -315,6 +318,12 @@ class PlayerView {
       const [px, py, pz] = this.pose.position;
       tmpUp.fromArray(this.pose.up);
       this.ball.position.set(px, py, pz).addScaledVector(tmpUp, BALL_RADIUS - 0.5); // rest on the block
+      const lunge = s.action === Action.Knocked ? this.headOn.get(s.serial) : undefined;
+      if (lunge) {
+        // Head-on: out to the touch point during the hold (the contact), then eased back into the knock-back slide.
+        const p = len > 0 ? Math.min(1, Math.max(0, (renderTick - s.startTick) / len)) : 1, h = knockHold(s);
+        this.ball.position.addScaledVector(lunge, p < h ? Math.sin((p / h) * Math.PI / 2) : 1 - (p - h) / (1 - h));
+      }
       spinQ.setFromAxisAngle(X_AXIS, this.spinBase + this.pose.spin);
       orient.copy(tmpQ.fromArray(this.pose.quat));
       if (s.action === Action.Stunned) this.stunned(s, renderTick);
@@ -322,6 +331,8 @@ class PlayerView {
       const ghost = renderTick < this.protectedUntil;
       for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
       orient.multiply(spinQ);
+      // Knocked out of a move (a side hit, a head-on, §20): blend from where the ball was drawn instead of snapping.
+      if (changed && s.action === Action.Knocked && (prevAction === Action.Roll || prevAction === Action.Flip || prevAction === Action.Knocked)) this.blendRequested = true;
       this.applyBlend(wasShown, nowMs);
       if (changed && wasShown) this.transition(prevAction, s, solid, feel);
       this.squash(s, renderTick, len, knockHold(s), dt, feel);
@@ -498,14 +509,14 @@ class PlayerView {
           driven = true;
         } else if (this.contactPending && p >= hold) {
           this.contactPending = false;
-          this.kick(knockDir, SQUASH.contact * sq);
+          this.kick(knockDir, (this.headOn.has(s.serial) ? SQUASH.headOn : SQUASH.contact) * sq);
           feel('hit');
         } else if (p > hold && !this.contactPending) {
           // The slide is only ~2 ticks, too short for the spring to swing from the contact squash into a stretch:
           // drive it, squash → stretch over the first third, then hold the stretch until the stop kick.
           const k = (p - hold) / (1 - hold);
           this.squashAxis.copy(knockDir);
-          const from = this.stompSerials.has(s.serial) ? SQUASH.stomp : SQUASH.contact;
+          const from = this.stompSerials.has(s.serial) ? SQUASH.stomp : this.headOn.has(s.serial) ? SQUASH.headOn : SQUASH.contact;
           this.spring.x = (k < 0.35 ? from + (SQUASH.slide - from) * (k / 0.35) : SQUASH.slide) * sq;
           this.spring.v = 0;
           driven = true;
@@ -746,7 +757,12 @@ export class PlayersView {
     });
     for (const [id, v] of this.views) {
       v.stompSerials.clear();
-      for (const q of v.segs) if (q.action === Action.Knocked && this.stomperOf(q, id)) v.stompSerials.add(q.serial);
+      v.headOn.clear();
+      for (const q of v.segs) {
+        if (q.action !== Action.Knocked) continue;
+        if (this.stomperOf(q, id)) v.stompSerials.add(q.serial);
+        if (q.bounce) v.headOn.set(q.serial, this.lungeOf(v, q)); // only a head-on's knock-back has bounce (§20)
+      }
     }
     state.players.forEach((p, id) => {
       const v = this.views.get(id)!;
@@ -874,6 +890,7 @@ export class PlayersView {
    * and the THWACK plays at the victim.
    */
   private contact(victimId: string, victim: PlayerView, localId: string, nowMs: number): void {
+    if (victim.headOn.has(victim.current.serial)) { this.headOnContact(victimId, victim, localId, nowMs); return; }
     const stomperId = this.stomperOf(victim.current, victimId);
     const pusherId = stomperId ?? this.pusherOf(victim.current, victimId);
     const pusher = pusherId ? this.views.get(pusherId) : undefined;
@@ -887,6 +904,55 @@ export class PlayersView {
       kind: stomperId ? 'stomp' : 'hit', at: victim.ball.position, local: victim.local || !!pusher?.local,
       intensity: victim.local ? 1 : 0.6, victimLocal: victimId === localId,
     });
+  }
+
+  /** The other ball of a head-on (§20): a bounce knock or bounce-stun starting on the same tick, close by. */
+  private partnerOf(v: PlayerView, knock: Seg): [string, PlayerView, Seg] | null {
+    const A = knock.from.cell;
+    for (const [id, w] of this.views) {
+      if (w === v) continue;
+      const r = w.segs.find((q) => q.bounce && q.startTick === knock.startTick && (q.action === Action.Knocked || q.action === Action.Stunned)
+        && Math.abs(q.from.cell.x - A.x) + Math.abs(q.from.cell.y - A.y) + Math.abs(q.from.cell.z - A.z) <= 3);
+      if (r) return [id, w, r];
+    }
+    return null;
+  }
+
+  /**
+   * How far a head-on knock-back first lunges, along the ball's own motion (against the knock), to where the two
+   * balls touch: both move toward each other at the same rate (the partner along its motion, or its facing when it
+   * bounced in place) until their centres are two radii apart. The same point on both screens, whatever the lead.
+   */
+  private lungeOf(v: PlayerView, knock: Seg): THREE.Vector3 {
+    const back = (q: Seg) => tmpA.set(q.from.cell.x - q.to.cell.x, q.from.cell.y - q.to.cell.y, q.from.cell.z - q.to.cell.z);
+    const da = back(knock).clone();
+    const partner = this.partnerOf(v, knock);
+    if (!partner) return da.multiplyScalar(0.3);
+    const r = partner[2], f = dirVec(r.from.fwd);
+    const db = r.action === Action.Knocked ? back(r) : tmpA.set(f.x, f.y, f.z);
+    const W = tmpB.copy(da).sub(db);
+    const D = probe.set(knock.from.cell.x - r.from.cell.x, knock.from.cell.y - r.from.cell.y, knock.from.cell.z - r.from.cell.z);
+    const a = W.lengthSq(), b = 2 * D.dot(W), c = D.lengthSq() - (2 * BALL_RADIUS) ** 2, disc = b * b - 4 * a * c;
+    const t = a < 1e-9 ? 0 : disc < 0 ? -b / (2 * a) : (-b - Math.sqrt(disc)) / (2 * a);
+    return da.multiplyScalar(Math.min(1, Math.max(0, t)));
+  }
+
+  /** Head-ons whose hit already played (pair key), so the two balls' contacts make one sound. */
+  private readonly headOnHeard = new Set<string>();
+
+  /** Head-on contact (§20): both balls freeze for the hit-stop, and one hit (a bit louder) plays between them. */
+  private headOnContact(victimId: string, victim: PlayerView, localId: string, nowMs: number): void {
+    const partner = this.partnerOf(victim, victim.current);
+    const pair: [string, PlayerView][] = partner ? [[victimId, victim], [partner[0], partner[1]]] : [[victimId, victim]];
+    if (tuning.hitStopMs > 0) for (const [id, v] of pair) this.frozen.set(id, { until: nowMs + tuning.hitStopMs, tick: v.renderTickNow });
+    const key = `${victim.current.startTick}|${pair.map(([id]) => id).sort().join('|')}`;
+    if (this.headOnHeard.has(key)) return;
+    if (this.headOnHeard.size > 32) this.headOnHeard.clear();
+    this.headOnHeard.add(key);
+    const at = victim.ball.position.clone();
+    if (partner) at.add(partner[1].ball.position).multiplyScalar(0.5);
+    const local = pair.some(([id]) => id === localId);
+    this.onFeel?.({ kind: 'hit', at, local, intensity: local ? 1 : 0.7, victimLocal: local, headOn: true });
   }
 
   /** The player whose roll pushed this knock: a Roll (or an edge push's Flip) starting on the same tick into the victim's cell. */

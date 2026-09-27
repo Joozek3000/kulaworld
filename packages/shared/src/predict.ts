@@ -2,7 +2,8 @@
 // client wraps it (client/src/predict/) and the server shares the input scheduling rule.
 import { INPUT_BUFFER_TICKS } from './constants.ts';
 import type { Level, Pose } from './level/types.ts';
-import { cellKey } from './vec.ts';
+import { dirVec } from './dir.ts';
+import { add, cellKey, eq } from './vec.ts';
 import { previewAction, type Plan } from './sim/actions.ts';
 import { forcedAfter } from './sim/tiles.ts';
 import { step } from './sim/tick.ts';
@@ -273,6 +274,12 @@ export class Predictor {
     this.world.players = [p]; // without them: a high hopper (§14) isn't reserved, but a jump still sees it in L
     const b = pick(new Map());
     this.world.players = all;
+    // Moving collisions (§20): a ball next to the target facing into it (standing, or arriving next to it) may start
+    // into it this tick, a head-on or T-bone the obstacles-only world can't see. The server decides.
+    if (a && (a.action === Action.Roll || a.action === Action.Flip)) {
+      const X = a.to.cell, F = (o: PlayerState) => dirVec(o.to.fwd);
+      if (all.some((o) => o !== p && o.action !== Action.Dead && eq(add(o.to.cell, F(o)), X))) return true;
+    }
     if (!a || !b) return a !== b;
     return a.action !== b.action || !samePose(a.to, b.to) || !!a.over !== !!b.over || !!a.bump !== !!b.bump;
   }

@@ -45,10 +45,13 @@ export function step(world: World): SimEvent[] {
 
   // A hop coming down on a cell another ball is in or passing through (§14 roll under) lands after the moves below.
   const hopLandings: PlayerState[] = [];
+  const arrived = new Set<PlayerState>(); // finished a move this tick: still moving for a mutual push (§20)
   for (const p of order) {
     if (p.action === Action.Idle || p.endTick !== tick || p.eliminated) continue;
-    if (p.action === Action.Hop && world.players.some((v) => under(p, v))) hopLandings.push(p);
-    else finishAction(world, p, events);
+    if (p.action === Action.Hop && world.players.some((v) => under(p, v))) { hopLandings.push(p); continue; }
+    const was = p.action;
+    finishAction(world, p, events);
+    if (MOVERS.has(was) && (p.action as Action) === Action.Idle) arrived.add(p);
   }
   // Spikes rising under a ball standing on them (§18). Finishing onto raised spikes is handled in finishAction.
   for (const p of order) if (STANDING.has(p.action) && spiked(world, p.pose)) die(world, p, events, 'spikes');
@@ -57,7 +60,7 @@ export function step(world: World): SimEvent[] {
   if (world.removed.size) for (const p of order) if (p.action === Action.Idle) startFall(world, p, tick);
 
   const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(world, p) }));
-  resolveMoves(world, intents, events);
+  resolveMoves(world, intents, arrived, events);
   // A knock-slide on ice that couldn't go on (blocked): the stagger it owes starts now.
   for (const p of order) if (p.staggerOwed && p.action === Action.Idle) stun(p, tick, false);
   for (const p of hopLandings) if (p.action === Action.Hop && p.endTick === tick) landHop(world, p, events);
@@ -78,6 +81,11 @@ const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, A
 /** On the ground in place: rising spikes get these (§18). */
 const STANDING: ReadonlySet<Action> = new Set([Action.Idle, Action.Turn, Action.Stunned, Action.Strike, Action.Charge]);
 /** Actions that land a ball on a new tile: fire counts these (§18). A hop, turn or stun in place doesn't. */
+/**
+ * Balls moving along the ground to a new cell (§20 movers). A climb stays in its cell (nothing to enter), jumps and
+ * hops are in the air, and a boost flight is a jump.
+ */
+const MOVERS: ReadonlySet<Action> = new Set([Action.Roll, Action.Flip, Action.Knocked]);
 const LANDINGS: ReadonlySet<Action> = new Set([Action.Roll, Action.Flip, Action.Climb, Action.Jump, Action.Fall, Action.Knocked, Action.Rebound]);
 
 /** `v` is on the ground in, or rolling through, hopper `p`'s cell (its pose or its target is there). Not in the air. */
@@ -158,8 +166,10 @@ type Intent = { p: PlayerState; cmds: Cmd[] };
  * Order: 1. targeted victims escaping (any move but a turn), 2. mutual pushes bounce, 3. other pushes, 4. the rest.
  * Within each stage players go in fair order; a later player sees earlier claims as reserved.
  * With push rules off there are no push intents, so only stage 4 runs: the MVP rules.
+ * A mutual push where either ball `arrived` (was already moving) is a head-on (§20): both are knocked back.
+ * Moving collisions with balls mid-move are found in tryCmds (stages 1 and 4).
  */
-function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void {
+function resolveMoves(world: World, intents: Intent[], arrived: Set<PlayerState>, events: SimEvent[]): void {
   const res = reservations(world);
   const victimOf = new Map<PlayerState, PlayerState>();
   const edge = new Set<PlayerState>();
@@ -180,7 +190,9 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
 
   for (const [p, v] of victimOf) {
     if (victimOf.get(v) !== p || done.has(p)) continue;
-    for (const q of [p, v]) { done.add(q); spendPulse(intents, q); stun(q, world.tick, true); events.push({ type: 'bounce', playerId: q.id }); }
+    for (const q of [p, v]) { done.add(q); spendPulse(intents, q); }
+    if (arrived.has(p) || arrived.has(v)) headOn(world, p, v, res, events);
+    else for (const q of [p, v]) { stun(q, world.tick, true); events.push({ type: 'bounce', playerId: q.id }); }
   }
 
   for (const [p, v] of victimOf) {
@@ -219,6 +231,7 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
 function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, events: SimEvent[]): void {
   for (const cmd of cmds) {
     if (cmd !== 'fwd' && cmd !== 'boost') p.pulse = null;
+    if (cmd === 'fwd' && world.rules.push && movingHit(world, p, res, events)) return;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
     const resting = p.endTick < world.tick; // Idle for at least a tick, not chaining from a finished action
@@ -243,6 +256,88 @@ function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, e
     startAction(p, { action: Action.Charge, to: p.pose, ticks: 1 }, world.tick);
     reserve(res, p);
   }
+}
+
+/** A mover's direction at its from-cell (§20): a roll's or knock's step, else its facing (a flip's, or an Idle ball's). */
+const motionFrom = (v: PlayerState): Dir =>
+  v.action === Action.Roll || v.action === Action.Knocked ? dirFromVec(sub(v.to.cell, v.pose.cell)) : v.pose.fwd;
+/** A mover's direction arriving at its target (§20 dV): a flip's is its facing on the new face. */
+const motionTo = (v: PlayerState): Dir => (v.action === Action.Flip ? v.to.fwd : motionFrom(v));
+
+function unreserve(res: Reservations, p: PlayerState): void {
+  for (const [k, id] of res) if (id === p.id) res.delete(k);
+}
+
+/**
+ * Moving collisions (§20, phase 14d): P's forward move targets X, which a mover V on the same face is entering.
+ * Returns true when the collision took P's decision (a hit or a bounce); false leaves P to the normal (blocked) rules:
+ * rear-end, a staggered or protected V, or no V entering X. (V *leaving* X is a dodge: X stays reserved, P waits.)
+ * - Head-on (dV = -dM), or a start into X on the same tick as V (not a knock): both bounce back (headOn).
+ * - Side hit (V started earlier): V arrives at X and is Knocked on to X + dM, P enters X. X + dM blocked: P bounces.
+ */
+function movingHit(world: World, p: PlayerState, res: Reservations, events: SimEvent[]): boolean {
+  const tick = world.tick;
+  const A = add(p.pose.cell, dirVec(p.pose.fwd)), T = sub(A, dirVec(p.pose.up)); // a roll's or a flip's target
+  for (const v of world.players) {
+    if (v === p || !MOVERS.has(v.action) || (!eq(v.to.cell, A) && !eq(v.to.cell, T))) continue;
+    const plan = previewAction(world, p, 'fwd', new Map([...res].filter(([, id]) => id !== v.id)));
+    if (!plan || plan.action === Action.Climb || !eq(plan.to.cell, v.to.cell) || plan.to.up !== v.to.up) continue;
+    const dM = plan.to.fwd, dV = motionTo(v);
+    if (dV === dM || tick < v.protectedUntil) return false;
+    if (dV === opposite(dM) || (v.startTick === tick && v.action !== Action.Knocked)) {
+      headOn(world, p, v, res, events);
+      return true;
+    }
+    if (v.action === Action.Knocked || v.staggerOwed) return false; // staggered: can't be hit again until it recovers
+    const dest = add(v.to.cell, dirVec(dM));
+    unreserve(res, v);
+    if (!isFree(world, res, v.id, dest)) {
+      reserve(res, v);
+      stun(p, tick, true);
+      events.push({ type: 'bounce', playerId: p.id });
+      return true;
+    }
+    v.pose = { ...v.to };
+    knock(v, dest, p.id, tick);
+    startAction(p, plan, tick);
+    if (p.protectedUntil > tick) p.protectedUntil = tick;
+    reserve(res, v);
+    reserve(res, p);
+    events.push({ type: 'push', pusherId: p.id, victimId: v.id, moving: 'side' });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Head-on (§20): P and V each bounce back opposite their own motion (P's facing; V's from its from-cell), Knocked one
+ * cell if it's free (bounce-stunned after), else bounce-stunned in place. A knocked V whose from-cell was taken (its
+ * pusher is rolling in) keeps its knock and bounce-stuns where it lands.
+ */
+function headOn(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): void {
+  // The reservation map keeps one owner per cell, so ask the players who else holds V's from-cell.
+  const taken = world.players.some((q) => q !== v && !airHop(q, world.tick) && occupiedCells(q).some((c) => eq(c, v.pose.cell)));
+  if (!taken) recoil(world, v, motionFrom(v), p.id, res, events);
+  else {
+    v.bounce = true;
+    reserve(res, v);
+    events.push({ type: 'bounce', playerId: v.id });
+  }
+  recoil(world, p, p.pose.fwd, v.id, res, events);
+  events.push({ type: 'push', pusherId: p.id, victimId: v.id, moving: 'headon' });
+}
+
+/** Q's move (if any) is cancelled; it's knocked back from its cell against `d`, or bounce-stunned in place. */
+function recoil(world: World, q: PlayerState, d: Dir, byId: string, res: Reservations, events: SimEvent[]): void {
+  const back = sub(q.pose.cell, dirVec(d));
+  unreserve(res, q);
+  q.to = q.pose;
+  if (isFree(world, res, q.id, back)) {
+    knock(q, back, byId, world.tick);
+    q.bounce = true; // bounce-stunned when the knock ends (not the stagger)
+  } else stun(q, world.tick, true);
+  reserve(res, q);
+  events.push({ type: 'bounce', playerId: q.id });
 }
 
 /** A pusher tried every command before its roll, so any buffered pulse was spent. */
@@ -470,7 +565,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     } else p.endTick = tick + 1; // no free spawn with ground, retry next tick
     return;
   }
-  const finished = p.action;
+  const finished = p.action, bounced = p.bounce;
   if (finished === Action.Charge) { endCharge(world, p, events); return; }
   if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
   const moved = sub(p.to.cell, p.pose.cell);
@@ -502,6 +597,8 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     p.pose = { ...p.pose, fwd: dirFromVec(moved) };
     p.to = p.pose;
     p.staggerOwed = true;
-  } else if (finished === Action.Knocked || (p.staggerOwed && !p.forced)) stun(p, tick, false); // stagger: not pushable (§14)
+  } else if (finished === Action.Knocked || (p.staggerOwed && !p.forced)) {
+    stun(p, tick, finished === Action.Knocked && bounced); // stagger: not pushable (§14); a head-on's knock-back ends in a bounce-stun (§20)
+  }
   onLand(world, p, events);
 }

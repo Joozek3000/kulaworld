@@ -145,7 +145,7 @@ describe('cradle push', () => {
   test('determinism with cradles (5 players on a beam, random inputs, 2000 ticks)', () => {
     const runOnce = () => {
       const w = makeWorld(row(0, 9), [pusher(), ball(1), ball(2), ball(3), [[9, 1, 0], '+Y', '-X']], { heat: false });
-      const rnd = mulberry32(3);
+      const rnd = mulberry32(4); // 14d: seed 3 no longer lines up a cradle (moving collisions knock balls apart)
       let cradles = 0;
       for (let t = 0; t < 2000; t++) {
         for (const p of w.players) if (rnd() < 0.2) setInput(w, p.id, input({ fwdHeld: rnd() < 0.6, jump: rnd() < 0.05, turn: rnd() < 0.15 ? (rnd() < 0.5 ? -1 : 1) : 0 }));

@@ -41,7 +41,7 @@ export interface PlayerState {
   /** Last mid-air turn, for rendering: facing before it and the tick it happened. Reset at every action start. */
   turnFromFwd: Dir;
   turnStartTick: number;
-  /** Stunned by a failed push (render: lunge and recoil). */
+  /** Stunned by a failed push (render: lunge and recoil); on a Knocked ball, a head-on's knock-back (§20). */
   bounce: boolean;
   /** Who knocked this player last and when, for knockout credit. Cleared on death. */
   lastKnockedBy: string | null;
@@ -126,7 +126,7 @@ export type SimEvent =
   | { type: 'win'; winnerId: string | null; reason: RaceResult['reason'] }
   | { type: 'death'; playerId: string; cell: Vec3; cause: DeathCause }
   | { type: 'respawn'; playerId: string; cell: Vec3 }
-  | { type: 'push'; pusherId: string; victimId: string; edge?: true }
+  | { type: 'push'; pusherId: string; victimId: string; edge?: true; moving?: 'headon' | 'side' }
   | { type: 'bounce'; playerId: string }
   | { type: 'keyDrop'; playerId: string; keyId: number }
   | { type: 'knockout'; pusherId: string; victimId: string }

@@ -185,12 +185,13 @@ describe('reservations', () => {
     return { winner: moving[0].id, tick: w.tick };
   };
 
-  test('two players rolling into the same cell on the same tick: exactly one moves', () => {
+  // With push rules both starting into the same cell is a head-on (§20): both bounce back (moving.test.ts).
+  test.skipIf(rules.push)('two players rolling into the same cell on the same tick: exactly one moves', () => {
     const { winner, tick } = contest(0);
     expect(winner).toBe(`p${tick % 2}`);
   });
 
-  test('fairness rotation alternates the winner across ticks', () => {
+  test.skipIf(rules.push)('fairness rotation alternates the winner across ticks', () => {
     expect(contest(0).winner).not.toBe(contest(1).winner);
   });
 
