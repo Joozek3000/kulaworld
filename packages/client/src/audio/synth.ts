@@ -223,6 +223,36 @@ export const RECIPES: Record<string, Recipe> = {
     vibrato(c, o.frequency, t, 0.55, 18, 6);
     return 0.55;
   },
+  /** Teleport (13b): "vwoop", a sine sweeping down then up with a wobble, over a breathy band of noise. */
+  vwoop(c, out, t, { pitch }) {
+    const o = osc(c, env(c, out, t, 0.2, 0.02, 0.32), t, 0.34, 'sine', 900 * pitch, 180 * pitch, 0.16);
+    o.frequency.exponentialRampToValueAtTime(1200 * pitch, t + 0.32);
+    vibrato(c, o.frequency, t, 0.34, 20, 40);
+    noise(c, env(c, out, t, 0.04, 0.05, 0.25), t, 0.3, 'bandpass', 2000 * pitch, 2);
+    return 0.35;
+  },
+  /** Laser death (13b): a bright crackling zap, a saw diving from 2 kHz plus a burst of high noise. */
+  zap(c, out, t, { pitch }) {
+    osc(c, env(c, out, t, 0.12, 0.002, 0.18), t, 0.2, 'sawtooth', 2000 * pitch, 120 * pitch, 0.18);
+    noise(c, env(c, out, t, 0.2, 0.001, 0.08), t, 0.1, 'highpass', 5000, 0.7);
+    return 0.21;
+  },
+  /** Switch (13b): a ceramic button click, a tick and a short knock. */
+  click(c, out, t, { pitch }) {
+    noise(c, env(c, out, t, 0.25, 0.0005, 0.01), t, 0.012, 'highpass', 3500, 0.8);
+    osc(c, env(c, out, t, 0.25, 0.001, 0.05), t, 0.06, 'square', 520 * pitch, 380 * pitch, 0.03);
+    return 0.07;
+  },
+  /** An active laser beam nearby (13b): a short electric buzz, 100 Hz saw with its harmonics through a band-pass. */
+  buzz(c, out, t, { pitch }) {
+    const g = env(c, out, t, 0.05, 0.03, 0.3);
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 600;
+    f.connect(g);
+    osc(c, f, t, 0.33, 'sawtooth', 100 * pitch);
+    return 0.34;
+  },
   /** Crumbly low noise: a rumble plus a scatter of short gritty grains. */
   crumble(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.3, 0.01, 0.6), t, 0.62, 'lowpass', 500 * pitch, 0.8);

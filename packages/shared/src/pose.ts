@@ -157,6 +157,9 @@ export function poseAt(action: Action, from: Pose, to: Pose, progress: number, o
     case Action.Fall:
       lerp();
       break;
+    case Action.Teleport: // 13b: out on the source pad for the first half, in on the partner for the second (the client fades)
+      if (p >= 0.5) { pos[0] = T.x; pos[1] = T.y; pos[2] = T.z; frameQuat(to.up, to.fwd, out.quat); }
+      break;
     case Action.Knocked: {
       const k = Math.max(0, (p - knockHold) / (1 - knockHold));
       pos[0] += (T.x - C.x) * k; pos[1] += (T.y - C.y) * k; pos[2] += (T.z - C.z) * k;

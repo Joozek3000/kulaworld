@@ -19,6 +19,14 @@
     { "min": [7, 0, 6], "max": [8, 0, 6] },
     { "min": [0, 0, 7], "max": [8, 0, 8] }
   ],
+  "blocks": [
+    { "cell": [2, 0, 2], "vanish": { "period": 60, "on": 40, "phase": 0 } },
+    { "cell": [6, 0, 2], "vanish": { "period": 60, "on": 40, "phase": 15 } },
+    { "cell": [6, 0, 6], "vanish": { "period": 60, "on": 40, "phase": 30 } },
+    { "cell": [2, 0, 6], "vanish": { "period": 60, "on": 40, "phase": 45 } },
+    { "cell": [-2, 0, 4], "invisible": true },
+    { "cell": [10, 0, 4], "invisible": true }
+  ],
   "spawns": [
     { "cell": [1, 1, 0], "up": "+Y", "fwd": "+Z" },
     { "cell": [3, 1, 0], "up": "+Y", "fwd": "+Z" },
@@ -31,7 +39,9 @@
   ],
   "notes": {
     "3.4 4,0,2 +Y": "only when climbing out of the hole beside it; from the floor the spikes are in plain view",
-    "3.4 4,0,6 +Y": "only when climbing out of the hole beside it; from the floor the spikes are in plain view"
+    "3.4 4,0,6 +Y": "only when climbing out of the hole beside it; from the floor the spikes are in plain view",
+    "7.5 4,0,2 +Y": "a push lane only while the vanishing plug in the hole is there: shoving across it into the spikes is the point",
+    "7.5 4,0,6 +Y": "a push lane only while the vanishing plug in the hole is there: shoving across it into the spikes is the point"
   },
   "tiles": [
     { "block": [4, 0, 2], "face": "+Y", "type": "spikes", "period": 60, "up": 20, "phase": 0 },

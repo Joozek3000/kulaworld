@@ -1,0 +1,570 @@
+{
+  "id": "arena-07",
+  "name": "Warp Ring",
+  "version": 1,
+  "mode": "knockout",
+  "pool": true,
+  "lives": 3,
+  "timeLimitSec": 180,
+  "crumble": {
+    "startSec": 45,
+    "intervalSec": 10,
+    "warnSec": 2
+  },
+  "sky": [
+    "#5b4c9c",
+    "#f0c2d8"
+  ],
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        14,
+        0,
+        2
+      ]
+    },
+    {
+      "min": [
+        0,
+        0,
+        12
+      ],
+      "max": [
+        14,
+        0,
+        14
+      ]
+    },
+    {
+      "min": [
+        0,
+        0,
+        3
+      ],
+      "max": [
+        2,
+        0,
+        11
+      ]
+    },
+    {
+      "min": [
+        12,
+        0,
+        3
+      ],
+      "max": [
+        14,
+        0,
+        11
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "cell": [
+        3,
+        0,
+        6
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 0
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        5
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 1
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        4
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 3
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 5
+      }
+    },
+    {
+      "cell": [
+        4,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 7
+      }
+    },
+    {
+      "cell": [
+        5,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 9
+      }
+    },
+    {
+      "cell": [
+        6,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 11
+      }
+    },
+    {
+      "cell": [
+        7,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 13
+      }
+    },
+    {
+      "cell": [
+        8,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 15
+      }
+    },
+    {
+      "cell": [
+        9,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 16
+      }
+    },
+    {
+      "cell": [
+        10,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 18
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        3
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 20
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        4
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 22
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        5
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 24
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        6
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 26
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        7
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 28
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        8
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 30
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        9
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 31
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        10
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 33
+      }
+    },
+    {
+      "cell": [
+        11,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 35
+      }
+    },
+    {
+      "cell": [
+        10,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 37
+      }
+    },
+    {
+      "cell": [
+        9,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 39
+      }
+    },
+    {
+      "cell": [
+        8,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 41
+      }
+    },
+    {
+      "cell": [
+        7,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 43
+      }
+    },
+    {
+      "cell": [
+        6,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 45
+      }
+    },
+    {
+      "cell": [
+        5,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 46
+      }
+    },
+    {
+      "cell": [
+        4,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 48
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        11
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 50
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        10
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 52
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        9
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 54
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        8
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 56
+      }
+    },
+    {
+      "cell": [
+        3,
+        0,
+        7
+      ],
+      "vanish": {
+        "period": 60,
+        "on": 40,
+        "phase": 58
+      }
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        0,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+X"
+    },
+    {
+      "cell": [
+        14,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        14,
+        1,
+        14
+      ],
+      "up": "+Y",
+      "fwd": "-X"
+    },
+    {
+      "cell": [
+        0,
+        1,
+        14
+      ],
+      "up": "+Y",
+      "fwd": "-Z"
+    },
+    {
+      "cell": [
+        4,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+X"
+    },
+    {
+      "cell": [
+        14,
+        1,
+        4
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        10,
+        1,
+        14
+      ],
+      "up": "+Y",
+      "fwd": "-X"
+    },
+    {
+      "cell": [
+        0,
+        1,
+        10
+      ],
+      "up": "+Y",
+      "fwd": "-Z"
+    }
+  ],
+  "tiles": [
+    {
+      "block": [
+        7,
+        0,
+        2
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "A"
+    },
+    {
+      "block": [
+        7,
+        0,
+        12
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "A"
+    },
+    {
+      "block": [
+        2,
+        0,
+        7
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "B"
+    },
+    {
+      "block": [
+        12,
+        0,
+        7
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "B"
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import type { Pose } from '../level/types.ts';
 import { cellKey, sub } from '../vec.ts';
 import { FIRE_MAX, FORCED_MAX } from '../constants.ts';
 import { previewAction } from './actions.ts';
-import { blockTileAt, faceTileAt, forcedAfter } from './tiles.ts';
+import { beamHit, blockTileAt, faceTileAt, forcedAfter, pathCells } from './tiles.ts';
 import { Action, isSolid, outOfBounds, type Cmd, type Reservations, type World } from './world.ts';
 
 /** `fire`: fire landings in a row on arrival (§18), tracked so a plan never takes a third. */
@@ -21,9 +21,10 @@ const poseKey = (p: PlanPose) => `${cellKey(p.cell)}|${p.up}|${p.fwd}|${p.fire}`
 /**
  * Where `cmd` leaves a player at `pose`, ignoring other players (or, with `res`, treating their cells as obstacles:
  * no pushes, jumps fly over them, landing on one isn't allowed). A forward jump that lands in air
- * follows the fall to where it lands, and forced moves (ice slides, boost launches, §18) are followed to where they
- * stop. Returns null if the move is blocked or ends in death: a fatal fall, spikes (retracting ones too: bots don't
- * time them), or a fire landing past `fireMax` in a row. `fire` is the count before the move (turns keep it).
+ * follows the fall to where it lands, and forced moves (ice slides, boost launches, teleports, §18) are followed to
+ * where they stop. Returns null if the move is blocked or ends in death: a fatal fall, spikes (retracting ones too:
+ * bots don't time them), a fire landing past `fireMax` in a row, or passing through a laser beam that is on right now
+ * (13b; an off beam is passable). `fire` is the count before the move (turns keep it).
  */
 export function resultPose(
   world: World, pose: Pose, cmd: Cmd, res: Reservations = NO_PLAYERS, fire = 0, fireMax = PLAN_FIRE_MAX,
@@ -35,7 +36,9 @@ export function resultPose(
     if (res !== NO_PLAYERS && plan.bump) return null; // routing around players: never through a stomp
     const to = plan.action === Action.Jump ? landing(world, plan.to) : plan.to;
     if (!to || faceTileAt(world, to)?.type === 'spikes' || i > FORCED_MAX) return null;
-    const landed = plan.action !== Action.Turn && plan.action !== Action.Hop;
+    const warp = plan.action === Action.Teleport;
+    if (beamHit(world, warp ? [to.cell] : [...pathCells(from, plan.to.cell), ...pathCells(plan.to, to.cell)])) return null;
+    const landed = plan.action !== Action.Turn && plan.action !== Action.Hop && !warp;
     const f = !landed ? from.fire : blockTileAt(world, to)?.type === 'fire' ? from.fire + 1 : 0;
     if (f > fireMax) return null;
     next = forcedAfter(world, to, plan.action);

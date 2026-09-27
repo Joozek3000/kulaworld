@@ -36,7 +36,12 @@
   "timeLimitSec": 120,
   "crumble": { "startSec": 75, "intervalSec": 1.25, "warnSec": 1 },
   "heat": { "warnSec": 3, "burnSec": 5 },
+  "lasers": [
+    { "group": "red", "from": [9, 1, 1], "dir": "+Z", "length": 3, "on": true }
+  ],
   "tiles": [
+    { "block": [8, 0, 1], "face": "+Y", "type": "switch", "group": "red" },
+    { "block": [11, 0, 3], "face": "+Y", "type": "switch", "group": "red" },
     { "block": [5, 0, 8], "type": "crumble", "regrowSec": 8 },
     { "block": [6, 0, 8], "type": "crumble", "regrowSec": 8 },
     { "block": [7, 0, 8], "type": "crumble", "regrowSec": 8 },

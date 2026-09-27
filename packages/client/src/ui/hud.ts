@@ -7,11 +7,14 @@ const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padSt
 const CONTROLS = 'W roll · A/D turn · Space jump (hold to bounce) · R ready · M mute · F3 debug';
 const LOBBY_CONTROLS = '1–4 or click to vote · R ready · M mute';
 /** Lobby cards (phase 14): one icon per trap type a level uses. */
-const TRAP_ICONS: Record<TileType, [string, string]> = {
+const TRAP_ICONS: Record<TileType | 'laser' | 'invisible' | 'vanish', [string, string]> = {
   spikes: ['▲', 'spikes'], fire: ['🔥', 'fire'], crumble: ['▦', 'crumble'], ice: ['❄', 'ice'], arrow: ['➜', 'arrows'], boost: ['⏫', 'boost'],
+  teleport: ['◎', 'teleporters'], switch: ['⚡', 'lasers'], laser: ['⚡', 'lasers'], invisible: ['▢', 'invisible blocks'], vanish: ['◌', 'vanishing blocks'],
 };
-const trapIcons = (level: Level) => [...new Set(level.tiles.map((t) => t.type))]
-  .map((t) => `<span class="trap" title="${TRAP_ICONS[t][1]}">${TRAP_ICONS[t][0]}</span>`).join('');
+const trapIcons = (level: Level) => [...new Set([
+  ...level.tiles.map((t) => (t.type === 'switch' ? 'laser' : t.type)),
+  ...(level.lasers.length ? ['laser' as const] : []), ...(level.invisible.size ? ['invisible' as const] : []), ...(level.vanish.size ? ['vanish' as const] : []),
+])].map((t) => `<span class="trap" title="${TRAP_ICONS[t][1]}">${TRAP_ICONS[t][0]}</span>`).join('');
 const TOAST_MS = 2500;
 const CRUMBLE_COUNTDOWN_SEC = 5;
 const hearts = (lives: number, max: number) =>

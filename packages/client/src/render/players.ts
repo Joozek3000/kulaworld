@@ -15,7 +15,7 @@ import { art, BALL_MODELS } from './art.ts';
  * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
  */
 export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
-  | 'slide' | 'launch' | 'edge' | 'whoosh' | 'charge';
+  | 'slide' | 'launch' | 'edge' | 'whoosh' | 'charge' | 'vwoop';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean; headOn?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -329,7 +329,9 @@ class PlayerView {
       if (s.action === Action.Stunned) this.stunned(s, renderTick);
       if (s.action === Action.Strike) this.strike(s, renderTick, feel);
       const ghost = renderTick < this.protectedUntil;
-      for (const mat of [this.top, this.bottom]) { mat.transparent = ghost; mat.opacity = ghost ? 0.4 : 1; }
+      // A teleport (13b) fades the ball out on the pad and back in on its partner (poseAt jumps at the midpoint).
+      const warp = s.action === Action.Teleport && len > 0 ? Math.min(1, Math.abs(1 - (2 * (renderTick - s.startTick)) / len)) : 1;
+      for (const mat of [this.top, this.bottom]) { mat.transparent = ghost || warp < 1; mat.opacity = (ghost ? 0.4 : 1) * warp; }
       orient.multiply(spinQ);
       // Knocked out of a move (a side hit, a head-on, §20): blend from where the ball was drawn instead of snapping.
       if (changed && s.action === Action.Knocked && (prevAction === Action.Roll || prevAction === Action.Flip || prevAction === Action.Knocked)) this.blendRequested = true;
@@ -693,6 +695,7 @@ export class PlayersView {
     let streak = this.streaks.get(v);
     if (changed && sliding && !streak?.visible) this.onFeel?.({ kind: 'slide', at: v.ball.position, local: v.local, intensity: 0.5 });
     if (changed && s.action === Action.Jump && t.face === 'boost') this.onFeel?.({ kind: 'launch', at: v.ball.position, local: v.local, intensity: 0.5 });
+    if (changed && s.action === Action.Teleport) this.onFeel?.({ kind: 'vwoop', at: v.ball.position, local: v.local, intensity: 0.5 });
     // Held on a pad (phase 14c): one rising hum when the hold starts (a hold is a run of 1-tick Charge segments).
     const charging = v.shown && s.action === Action.Charge;
     if (charging && !this.charging.has(v)) this.onFeel?.({ kind: 'charge', at: v.ball.position, local: v.local, intensity: 0.5 });

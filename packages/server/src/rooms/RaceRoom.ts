@@ -87,6 +87,9 @@ export class RaceRoom extends Room<{ state: GameState }> {
   /** Phase 14d: moving collisions this round, knockouts by cause, and each ball's last knock (push, edge, cradle, stomp, headon, side). */
   private hitStats = { headon: 0, side: 0 };
   private koCauses: Record<string, number> = {};
+  /** Phase 13b: deaths by cause this round, teleports and laser toggles. */
+  private deathCauses: Record<string, number> = {};
+  private trapStats = { teleport: 0, toggles: 0 };
   private readonly lastKnock = new Map<string, string>();
   private round = 0;
   private frame = 0;
@@ -238,6 +241,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.boostStats = { launch: 0, held: 0, released: 0 };
         this.hitStats = { headon: 0, side: 0 };
         this.koCauses = {};
+        this.deathCauses = {};
+        this.trapStats = { teleport: 0, toggles: 0 };
         this.lastKnock.clear();
         this.queues.clear();
         for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
@@ -261,7 +266,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const stats = w.mode === 'knockout'
           ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
           : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released), hits ${this.hitStats.headon}/${this.hitStats.side} (head-on/side), knockouts ${Object.entries(this.koCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}`);
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released), hits ${this.hitStats.headon}/${this.hitStats.side} (head-on/side), knockouts ${Object.entries(this.koCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, deaths ${Object.entries(this.deathCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, teleports ${this.trapStats.teleport}, laser toggles ${this.trapStats.toggles}`);
         break;
       }
     }
@@ -272,7 +277,9 @@ export class RaceRoom extends Room<{ state: GameState }> {
     const who = 'playerId' in e ? this.nameOf(e.playerId) : '';
     switch (e.type) {
       case 'key': console.log(`event key: ${who} has ${e.keys}`); break;
-      case 'death': console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z} (${e.cause})`); break;
+      case 'death': this.deathCauses[e.cause] = (this.deathCauses[e.cause] ?? 0) + 1; console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z} (${e.cause})`); break;
+      case 'teleport': if (e.result === 'go') this.trapStats.teleport++; else console.log(`teleport: ${e.result} ${who}`); break;
+      case 'laser': this.trapStats.toggles++; console.log(`event laser: ${who} turned ${e.group} ${e.on ? 'on' : 'off'}`); break;
       case 'respawn': console.log(`event respawn: ${who}`); break;
       case 'push': // phase 14d: moving collisions say which kind, and every knock is remembered for the knockout's cause
         this.lastKnock.set(e.victimId, e.moving ?? (e.edge ? 'edge' : 'push'));

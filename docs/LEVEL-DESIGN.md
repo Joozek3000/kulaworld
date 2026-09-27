@@ -50,3 +50,14 @@ Pushing, cradling, edge-pushing and stomping people into traps is the multiplaye
 ## 9. Single player (later)
 - Introduce one new trap type per 2–3 levels, first in a safe teaching layout (a trap next to the path, not on it).
 - Density limits can go up to 15 % lethal after level 10.
+
+## 10. Teleporters, lasers, invisible and vanishing blocks (phase 13b)
+- [E] Teleporters come in pairs (exactly 2 per `pair`). Neither end is within 2 moves of a spawn, and neither is a key or exit tile.
+- [E] A teleporter's arrival tile isn't lethal, and the ball doesn't arrive facing straight into void (the next roll along the arrival facing must be a roll, flip or climb, not a fall).
+- [E] Laser beams count as lethal cells for rules 1, 2, 3 and 7.1. A beam cell is never a flip-landing or climb-arrival cell.
+- [E] **Laser soft-lock check:** for every combination of laser group states players can cause (via switches), every key and the exit stay reachable from every spawn, *or* a reachable switch opens them. Max 3 groups per level.
+- [E] Switches aren't within 2 moves of a spawn, and aren't on key/exit tiles.
+- [E] Invisible blocks are never the only route to a key or the exit (they're shortcuts and secrets).
+- [E] Vanishing blocks: `period ≥ 40`, `on ≥ 50 %`; not within 2 moves of a spawn; never the only route to a key unless the on-window lets a ball at walking speed cross (simulated like rule 4.2).
+- [W] Each level uses at most one of {teleporters, lasers} as its main mechanic, so it stays readable.
+- `"lab": true` levels (traps-lab) are exempt from all [E] rules and never pooled.

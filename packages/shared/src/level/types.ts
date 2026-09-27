@@ -5,10 +5,10 @@ type V3 = [number, number, number];
 
 export type Mode = 'race' | 'knockout';
 
-/** Tiles & traps (ARCHITECTURE §18). ice/fire/crumble cover the whole block; spikes/arrow/boost are one face. */
-export type TileType = 'ice' | 'fire' | 'crumble' | 'spikes' | 'arrow' | 'boost';
+/** Tiles & traps (ARCHITECTURE §18). ice/fire/crumble cover the whole block; the rest are one face. */
+export type TileType = 'ice' | 'fire' | 'crumble' | 'spikes' | 'arrow' | 'boost' | 'teleport' | 'switch';
 export const BLOCK_TILES: readonly TileType[] = ['ice', 'fire', 'crumble'];
-export const FACE_TILES: readonly TileType[] = ['spikes', 'arrow', 'boost'];
+export const FACE_TILES: readonly TileType[] = ['spikes', 'arrow', 'boost', 'teleport', 'switch'];
 /** Lethal tile types (LEVEL-DESIGN: "lethal" also means void) and the non-lethal modifiers. */
 export const LETHAL_TILES: readonly TileType[] = ['spikes', 'fire'];
 export const MODIFIER_TILES: readonly TileType[] = ['ice', 'arrow', 'boost', 'crumble'];
@@ -28,6 +28,10 @@ export interface TileJson {
   variant?: 'far' | 'high';
   /** ice/boost: a forced move from here may end in death on purpose (LEVEL-DESIGN 3.3; once per level, race only). */
   deathtrap?: boolean;
+  /** teleport: the pair id (exactly 2 tiles per pair). */
+  pair?: string;
+  /** switch: the laser group it toggles. */
+  group?: string;
 }
 export interface Tile {
   block: Vec3;
@@ -43,7 +47,17 @@ export interface Tile {
   deathtrap: boolean;
   /** crumble: regrowSec was given (without it the block never regrows in single player, §18). */
   regrows: boolean;
+  /** teleport pair / switch group ('' otherwise). */
+  pair: string;
+  group: string;
 }
+/** Vanishing block schedule (phase 13b), in ticks: solid for `on` of every `period`, offset by `phase`. */
+export interface Vanish { period: number; on: number; phase: number }
+/** Block flags (phase 13b), on a box or a block entry. */
+export interface BlockFlags { invisible?: boolean; vanish?: Vanish }
+/** A laser (phase 13b): `length` air cells from `from` along `dir`, in a switchable group. */
+export interface LaserJson { group: string; from: V3; dir: DirName; length: number; on: boolean }
+export interface Laser { group: string; from: Vec3; dir: Dir; length: number; on: boolean; cells: Vec3[] }
 /** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
 export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
 
@@ -61,8 +75,12 @@ export interface LevelJson {
   heat?: { warnSec: number; burnSec: number } | false;
   /** Optional sky gradient, top and bottom colour ("#rrggbb"). Render-only. */
   sky?: [string, string];
-  blocks?: V3[];
-  boxes?: { min: V3; max: V3; hollow?: boolean }[];
+  /** A block is [x,y,z], or { cell, invisible?, vanish? } (phase 13b). */
+  blocks?: (V3 | ({ cell: V3 } & BlockFlags))[];
+  boxes?: ({ min: V3; max: V3; hollow?: boolean } & BlockFlags)[];
+  lasers?: LaserJson[];
+  /** A test level (traps-lab): exempt from the [E] trap rules, never pooled (LEVEL-DESIGN §10). */
+  lab?: boolean;
   spawns: { cell: V3; up: DirName; fwd: DirName }[];
   keys?: { cell: V3; up: DirName }[];
   exit?: { cell: V3; up: DirName };
@@ -84,6 +102,7 @@ export interface Level {
   version: number;
   mode: Mode;
   pool: boolean;
+  lab: boolean;
   /** Knockout: lives per player (0 in race). */
   lives: number;
   crumble: Crumble | null;
@@ -105,4 +124,11 @@ export interface Level {
   /** Whole-block tiles by block cellKey, face tiles by tileKey (block cellKey|face). */
   blockTiles: Map<string, Tile>;
   faceTiles: Map<string, Tile>;
+  /** Phase 13b: invisible blocks (solid, render-only), vanishing blocks by cellKey, lasers and their beam cells
+   * (cellKey → group), and each teleport tile's partner (tileKey → tile). */
+  invisible: Set<string>;
+  vanish: Map<string, Vanish>;
+  lasers: Laser[];
+  beams: Map<string, string[]>;
+  partners: Map<string, Tile>;
 }

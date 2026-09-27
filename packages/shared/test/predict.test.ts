@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   Action, addPlayer, createWorld, InputQueue, InputSchedule, loadLevel, mulberry32, Predictor, setInput, step,
-  type Input, type PlayerState, type ServerPlayer, type World,
+  type Input, type PlayerState, type ServerPlayer, type TileJson, type World,
 } from '../src/index.ts';
 import { levelJson, makeWorld, readLevelJson, row, type Spawn } from './util.ts';
 
@@ -298,4 +298,18 @@ describe('boost pads (phase 14c): prediction', () => {
     expect(h.pred.deferrals).toBeGreaterThan(0);
     expect(h.pred.mispredictions).toBe(0);
   });
+});
+
+test('teleporters (phase 13b): a warp is predicted solo with no mispredictions', () => {
+  const tiles: TileJson[] = [{ block: [3, 0, 0], face: '+Y', type: 'teleport', pair: 'A' }, { block: [12, 0, 5], face: '+Y', type: 'teleport', pair: 'A' }];
+  const w = createWorld(loadLevel(levelJson([...row(0, 6), ...row(10, 14, 0, 5)], [[[1, 1, 0], '+Y', '+X']], { heat: false, tiles })), 1);
+  addPlayer(w, 'me', 'me');
+  const h = new Harness(w);
+  h.send({ fwdHeld: true });
+  h.run(8);
+  h.send({});
+  h.run(30);
+  expect(w.players[0].pose.cell.z).toBe(5); // warped to the island
+  expect(h.pred.mispredictions).toBe(0);
+  expect(h.results).not.toContain('mispredict');
 });

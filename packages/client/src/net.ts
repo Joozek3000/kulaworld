@@ -22,6 +22,8 @@ export interface GameState {
   hot: MapLike<number>;
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). */
   crumbling: MapLike<number>;
+  /** Laser groups (phase 13b): group → 1 on, 0 off. */
+  lasers: MapLike<number>;
   /** Lobby vote (phase 14): candidate level ids, and votes per option (3 candidate slots, then Random). */
   candidates: ArrayLike<string>;
   voteCounts: ArrayLike<number>;

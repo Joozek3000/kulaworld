@@ -77,6 +77,7 @@ describe('findPath on test-cube', () => {
 describe('every race level: all keys and the exit are reachable from every spawn', () => {
   test.each(levelFiles().filter((f) => readLevelJson(f).mode !== 'knockout' && f !== 'traps-lab.json'))('%s', (file) => {
     const w = worldOf(file);
+    for (const g of w.lasers.keys()) w.lasers.set(g, false); // switches open them (level:check 10.4 checks with switches)
     for (const s of w.level.spawns) {
       for (const t of [...w.level.keys, w.level.exit!]) {
         expect(findPath(w, s, new Set([cellKey(t.cell)])), `${file}: spawn ${cellKey(s.cell)} → ${cellKey(t.cell)}`).not.toBe(null);

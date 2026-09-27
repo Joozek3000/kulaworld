@@ -38,5 +38,9 @@ export const FIRE_MAX = 3;
 export const BOOST_TICKS = 12;
 /** A blocked launch holds the ball on its pad (Charge) this long, retrying every tick, before releasing it (phase 14c). */
 export const BOOST_HOLD_TICKS = 10;
+/** A teleport (phase 13b): fade out on one pad, in on its partner. */
+export const TELEPORT_TICKS = 6;
+/** A switch tile toggles its laser group at most once per this many ticks. */
+export const SWITCH_COOLDOWN_TICKS = 20;
 /** BFS gives up following a forced chain (ice slides, boosts) after this many steps: an ice loop. */
 export const FORCED_MAX = 64;

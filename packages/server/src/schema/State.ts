@@ -62,6 +62,8 @@ export const GameState = schema({
   hot: t.map('uint16'),
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). Gone once it regrows. */
   crumbling: t.map('int32'),
+  /** Laser groups (phase 13b): group → 1 on, 0 off. */
+  lasers: t.map('uint8'),
   /** Lobby level vote (phase 14): up to 3 candidate level ids, and votes per option (3 candidate slots, then Random). */
   candidates: t.array('string'),
   voteCounts: t.array('uint8'),
@@ -121,6 +123,7 @@ export function syncSchema(world: World, state: GameState): void {
   if (exit && !state.items.has('exit')) state.items.set('exit', new ItemS({ id: 'exit', kind: 'exit', ...exit.cell, up: exit.up }));
   syncMap(world.hot, state.hot);
   syncMap(world.crumbling, state.crumbling);
+  syncMap(new Map([...world.lasers].map(([g, on]) => [g, on ? 1 : 0])), state.lasers);
   set(state, 'mode', world.mode);
   set(state, 'crumbled', world.knockout?.next ?? 0);
   set(state, 'warnBand', world.knockout?.warn ?? -1);

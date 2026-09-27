@@ -4,7 +4,7 @@ import { INPUT_BUFFER_TICKS } from './constants.ts';
 import type { Level, Pose } from './level/types.ts';
 import { dirVec } from './dir.ts';
 import { add, cellKey, eq } from './vec.ts';
-import { previewAction, type Plan } from './sim/actions.ts';
+import { previewAction, teleportTarget, type Plan } from './sim/actions.ts';
 import { forcedAfter } from './sim/tiles.ts';
 import { step } from './sim/tick.ts';
 import {
@@ -182,7 +182,11 @@ export class Predictor {
    * Crumbled blocks (knockout/sudden-death bands), crumble tiles (§18: block → removal tick, due or not) and collected
    * keys, from the server. Crumble tiles due by our predicted tick are gone; later ones vanish (and regrow) in step().
    */
-  setWorld(removed: Iterable<string>, collectedKeys: ReadonlySet<number>, crumbling: ReadonlyMap<string, number> = new Map()): void {
+  setWorld(
+    removed: Iterable<string>, collectedKeys: ReadonlySet<number>, crumbling: ReadonlyMap<string, number> = new Map(),
+    lasers?: ReadonlyMap<string, boolean>,
+  ): void {
+    if (lasers) for (const [g, on] of lasers) this.world.lasers.set(g, on); // laser groups (13b)
     this.world.removed = new Set(removed);
     this.world.crumbling = new Map(crumbling);
     for (const [k, at] of crumbling) if (at <= this.world.tick) this.world.removed.add(k);
@@ -245,6 +249,11 @@ export class Predictor {
     // A boost launch about to be forced (phase 14c): anyone within BOOST_NEAR cells of the landing may take it or be
     // stomped, so the server decides.
     const forced = p.action === Action.Idle ? p.forced : forcedAfter(this.world, pose, p.action);
+    if (forced === 'teleport') {
+      // A teleport (13b) whose arrival cell another ball is in or entering holds: the server decides.
+      const to = teleportTarget(this.world, pose);
+      return !!to && this.world.players.some((o) => o !== p && (eq(o.pose.cell, to.cell) || eq(o.to.cell, to.cell)));
+    }
     if (forced === 'boost') {
       const all = this.world.players;
       this.world.players = [p];

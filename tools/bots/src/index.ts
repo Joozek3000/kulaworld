@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, airHop, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
+  Action, add, airHop, ALL_DIRS, beamHit, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, pathCells, perpendicular,
   blockTileAt, lethalForPlanning, RANDOM_VOTE, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
@@ -42,7 +42,7 @@ interface Stats {
   rounds: number; wins: number; keys: number; deaths: number; hops: number; replans: number; stuck: number;
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
-  cradles: number; edgePushes: number; headOns: number; sideHits: number; sideTries: number;
+  cradles: number; edgePushes: number; headOns: number; sideHits: number; sideTries: number; teleports: number; zapped: number; toggles: number;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -60,10 +60,12 @@ async function connect(client: Client, name: string): Promise<Room> {
 
 /**
  * Planning worlds per level id: geometry only (the BFS ignores other players). In knockout, crumbled and warned
- * bands count as gone, so plans never stand on a tile that's about to drop.
+ * bands count as gone, so plans never stand on a tile that's about to drop. Vanishing blocks (13b) are never solid
+ * for planning, and the laser groups are the synced ones (active beams are walls, off ones open).
  */
 const planWorlds = new Map<string, World>();
-function planWorld(state: { levelId: string; crumbled: number; warnBand: number; crumbling?: { forEach(cb: (at: number, k: string) => void): void } }): World {
+type MapOf<T> = { forEach(cb: (v: T, k: string) => void): void };
+function planWorld(state: { levelId: string; crumbled: number; warnBand: number; crumbling?: MapOf<number>; lasers?: MapOf<number> }): World {
   let w = planWorlds.get(state.levelId);
   if (!w) {
     const json = JSON.parse(readFileSync(new URL(`../../../levels/${state.levelId}.json`, import.meta.url), 'utf8'));
@@ -71,8 +73,39 @@ function planWorld(state: { levelId: string; crumbled: number; warnBand: number;
   }
   w.removed = new Set(w.knockout ? w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat() : []);
   state.crumbling?.forEach((_, k) => w.removed.add(k)); // crumble tiles (§18): counting down or gone, don't plan on them
+  for (const k of w.level.vanish.keys()) w.removed.add(k);
+  state.lasers?.forEach((on, g) => w.lasers.set(g, on === 1));
   return w;
 }
+
+/** A forward roll (or jump) from `pose` right now would pass through an active laser beam (13b). */
+function beamAhead(world: World, pose: Pose, cmd: 'fwd' | 'jump' = 'fwd'): boolean {
+  const plan = previewAction(world, { id: '', pose }, cmd, new Map());
+  return !!plan && !!beamHit(world, pathCells(pose, plan.to.cell));
+}
+
+/**
+ * bully (13b): the cells of switches that would turn a laser on with an opponent in, or right next to, its beam.
+ */
+function switchTraps(state: Players, selfId: string, world: World, skip: (id: string) => boolean): Set<string> {
+  const out = new Set<string>();
+  for (const t of world.level.tiles) {
+    if (t.type !== 'switch' || world.lasers.get(t.group)) continue;
+    const beams = world.level.lasers.filter((l) => l.group === t.group).flatMap((l) => l.cells);
+    let hit = false;
+    state.players.forEach((o, id) => {
+      if (id === selfId || o.action === Action.Dead || skip(id)) return;
+      const c = { x: o.toX, y: o.toY, z: o.toZ };
+      if (beams.some((b) => Math.max(Math.abs(b.x - c.x), Math.abs(b.y - c.y), Math.abs(b.z - c.z)) <= 1)) hit = true;
+    });
+    if (hit) out.add(cellKey(add(t.block, dirVec(t.face!))));
+  }
+  return out;
+}
+/** bully: extra moves it will take to reach a switch that zaps someone. */
+const SWITCH_DETOUR = 4;
+/** After a head-on bounce with a ball, leave it alone this long (14d soak: two bots re-charging each other). */
+const HEAD_ON_COOLDOWN_MS = 2_000;
 
 type SchemaPlayer = PlayerLike & { fromUp: number; fromFwd: number; toUp: number; toFwd: number; protectedUntil: number; spectating: boolean; fireCount: number };
 const poseOf2 = (x: number, y: number, z: number, up: number, fwd: number): Pose => ({ cell: { x, y, z }, up: up as Dir, fwd: fwd as Dir });
@@ -117,7 +150,7 @@ function standable(world: World): Set<string> {
   return cells;
 }
 
-interface Ctx { name: string; room: Room; stats: Stats; send(i: Partial<Input>): void }
+interface Ctx { name: string; room: Room; stats: Stats; send(i: Partial<Input>): void; headOnUntil: Map<string, number> }
 
 /** wander: hold forward and send a random turn/jump/hop pulse every 300-1200 ms. */
 function wanderBrain(ctx: Ctx) {
@@ -128,8 +161,8 @@ function wanderBrain(ctx: Ctx) {
     const s = ctx.room.state, p: SchemaPlayer | undefined = s.players?.get(ctx.room.sessionId);
     const moving = p && (p.action === Action.Roll || p.action === Action.Flip);
     const pose = p && (p.action === Action.Idle || moving) ? (moving ? poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd) : poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd)) : null;
-    const risk = playing && !!pose && headOnRisk(s, ctx.room.sessionId, pose, planWorld(s));
-    if (risk !== braking) { braking = risk; ctx.send({ fwdHeld: !risk }); }
+    const risk = playing && !!pose && (headOnRisk(s, ctx.room.sessionId, pose, planWorld(s)) || beamAhead(planWorld(s), pose));
+    if (risk !== braking) { braking = risk; ctx.send(risk ? { turn: Math.random() < 0.5 ? -1 : 1 } : { fwdHeld: true }); }
     if (braking) { wasPlaying = playing; return; }
     if (playing && (!wasPlaying || Date.now() >= nextPulseAt)) {
       // 10% hop (jump with fwd released for this message), 30% left, 30% right, 20% forward jump, 10% just roll.
@@ -363,7 +396,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   let lastChange = Date.now();
   let facing: { id: string; since: number } | null = null; // bully: opponent it's waiting to push
   const ignored = new Map<string, number>(); // bully: opponent id → ignored until (ms)
-  const skip = (id: string) => (ignored.get(id) ?? 0) > Date.now();
+  const skip = (id: string) => (ignored.get(id) ?? 0) > Date.now() || (ctx.headOnUntil.get(id) ?? 0) > Date.now();
   // After a bounce, wait a random moment: two bots that bounced off each other recover on the same tick and would
   // otherwise push each other again in lockstep forever.
   let holdUntil = 0;
@@ -396,6 +429,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     const s = ctx.room.state, p = s.players.get(ctx.room.sessionId);
     const pose = p && (p.action === Action.Idle ? poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd) : poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd));
     if (cmd === 'fwd' && pose && headOnRisk(s, ctx.room.sessionId, pose, planWorld(s))) return; // wait it out (phase 14d)
+    if ((cmd === 'fwd' || cmd === 'jump') && pose && beamAhead(planWorld(s), pose, cmd)) { replan(); return; } // a laser came on (13b)
     pending = { cmd, prevStart, prevAction, sentTick: tick, offPath };
     if (cmd === 'fwd') ctx.send({ fwdHeld: true });
     else if (cmd === 'jump') ctx.send({ fwdHeld: true, jump: true });
@@ -496,11 +530,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     }
     let goals = new Set<string>();
     let trapGoals: Set<string> | null = null; // bully: push spots that knock the victim onto spikes or fire
+    let switchGoals: Set<string> | null = null; // bully (13b): switches that turn a laser on at someone
     if (unsafe) goals = standable(world);
     else if (hunter) {
       goals = new Set(besideOpponents(s, me, world, skip).keys());
       if (bully) {
         trapGoals = new Set(trapPushCells(s, me, world, skip).keys());
+        switchGoals = switchTraps(s, me, world, skip);
         for (const k of sideSpots(s, me, world, skip)) goals.add(k); // head across a roller's path (phase 14d)
       }
       // Never stop under someone's hop (§14): it comes down on you. Roll through, stop elsewhere.
@@ -524,6 +560,10 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       if (found && trapGoals?.size) { // worth a short detour: a push onto a trap is a knockout
         const trap = findPath(world, pose, trapGoals, undefined, fire);
         if (trap?.length && trap.length <= found.length + TRAP_DETOUR) found = trap;
+      }
+      if (found && switchGoals?.size) {
+        const zap = findPath(world, pose, switchGoals, undefined, fire);
+        if (zap?.length && zap.length <= found.length + SWITCH_DETOUR) found = zap;
       }
       if (!found?.length) {
         replan();
@@ -686,11 +726,11 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
     eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0, edgePushes: 0,
-    headOns: 0, sideHits: 0, sideTries: 0,
+    headOns: 0, sideHits: 0, sideTries: 0, teleports: 0, zapped: 0, toggles: 0,
   };
   let seq = 0;
   const ctx: Ctx = {
-    name, room, stats,
+    name, room, stats, headOnUntil: new Map(),
     send: (i) => room.send('input', { seq: ++seq, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, ...i }),
   };
   const brain = behaviour === 'wander' ? wanderBrain(ctx) : behaviour === 'blocker' ? blockerBrain(ctx) : seekBrain(ctx, behaviour === 'bully');
@@ -703,7 +743,13 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     }
     const me = room.sessionId;
     if (e.type === 'push' && e.pusherId === me) { stats.pushes++; if (e.edge) stats.edgePushes++; if (e.moving === 'side') stats.sideHits++; }
-    if (e.type === 'push' && e.moving === 'headon' && (e.pusherId === me || e.victimId === me)) stats.headOns++;
+    if (e.type === 'push' && e.moving === 'headon' && (e.pusherId === me || e.victimId === me)) {
+      stats.headOns++;
+      ctx.headOnUntil.set(e.pusherId === me ? e.victimId : e.pusherId, Date.now() + HEAD_ON_COOLDOWN_MS);
+    }
+    if (e.type === 'teleport' && e.playerId === me && e.result === 'go') stats.teleports++;
+    if (e.type === 'death' && e.playerId === me && e.cause === 'laser') stats.zapped++;
+    if (e.type === 'laser' && e.playerId === me) stats.toggles++;
     if (e.type === 'cradle' && e.pusherId === me) stats.cradles++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
     if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
@@ -788,7 +834,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}, teleports ${v.teleports}, zapped ${v.zapped}, toggles ${v.toggles}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

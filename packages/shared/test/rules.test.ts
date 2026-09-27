@@ -75,7 +75,7 @@ describe('one failing fixture per [E] rule', () => {
 });
 
 describe('4.2: retracting spikes in a lane, simulated at walking speed (ROLL_TICKS per tile)', () => {
-  const spike = (phase: number): Tile => ({ block: { x: 0, y: 0, z: 0 }, type: 'spikes', face: 2, regrowTicks: 0, period: 30, upTicks: 18, phase, dir: null, variant: 'far', deathtrap: false, regrows: false });
+  const spike = (phase: number): Tile => ({ block: { x: 0, y: 0, z: 0 }, type: 'spikes', face: 2, regrowTicks: 0, period: 30, upTicks: 18, phase, dir: null, variant: 'far', deathtrap: false, regrows: false, pair: '', group: '' });
   test('a phase-staggered lane (a green wave, 5 ticks per tile) passes', () => {
     expect(lanePassable([null, spike(0), spike(25), spike(20), spike(15), null])).toBe(true);
   });

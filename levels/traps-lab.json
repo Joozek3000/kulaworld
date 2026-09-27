@@ -3,11 +3,12 @@
   "name": "Traps Lab",
   "version": 1,
   "pool": false,
+  "lab": true,
   "mode": "race",
   "timeLimitSec": 600,
   "heat": false,
   "boxes": [
-    { "min": [0, 0, 0], "max": [2, 0, 20] },
+    { "min": [0, 0, 0], "max": [2, 0, 32] },
     { "min": [3, 0, 0], "max": [12, 0, 0] },
     { "min": [3, 0, 3], "max": [12, 0, 3] },
     { "min": [3, 0, 6], "max": [12, 0, 6] },
@@ -16,7 +17,24 @@
     { "min": [3, 0, 15], "max": [12, 0, 15] },
     { "min": [3, 0, 18], "max": [5, 0, 18] },
     { "min": [8, 0, 18], "max": [12, 0, 18] },
-    { "min": [12, 1, 18], "max": [12, 1, 18] }
+    { "min": [12, 1, 18], "max": [12, 1, 18] },
+    { "min": [3, 0, 21], "max": [6, 0, 21] },
+    { "min": [9, 0, 21], "max": [12, 0, 21] },
+    { "min": [3, 0, 24], "max": [12, 0, 24] },
+    { "min": [3, 0, 27], "max": [5, 0, 27] },
+    { "min": [6, 0, 27], "max": [9, 0, 27], "invisible": true },
+    { "min": [10, 0, 27], "max": [12, 0, 27] },
+    { "min": [3, 0, 30], "max": [5, 0, 30] },
+    { "min": [10, 0, 30], "max": [12, 0, 30] }
+  ],
+  "blocks": [
+    { "cell": [6, 0, 30], "vanish": { "period": 40, "on": 24, "phase": 0 } },
+    { "cell": [7, 0, 30], "vanish": { "period": 40, "on": 24, "phase": 35 } },
+    { "cell": [8, 0, 30], "vanish": { "period": 40, "on": 24, "phase": 30 } },
+    { "cell": [9, 0, 30], "vanish": { "period": 40, "on": 24, "phase": 25 } }
+  ],
+  "lasers": [
+    { "group": "red", "from": [8, 1, 23], "dir": "+Z", "length": 3, "on": true }
   ],
   "spawns": [
     { "cell": [1, 1, 1], "up": "+Y", "fwd": "+X" },
@@ -65,6 +83,10 @@
     { "block": [7, 0, 15], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [9, 0, 15], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [5, 0, 18], "face": "+Y", "type": "boost", "dir": "+X", "variant": "far" },
-    { "block": [10, 0, 18], "face": "+Y", "type": "boost", "dir": "+X", "variant": "high" }
+    { "block": [10, 0, 18], "face": "+Y", "type": "boost", "dir": "+X", "variant": "high" },
+    { "block": [5, 0, 21], "face": "+Y", "type": "teleport", "pair": "lab" },
+    { "block": [12, 0, 21], "face": "+X", "type": "teleport", "pair": "lab" },
+    { "block": [5, 0, 24], "face": "+Y", "type": "switch", "group": "red" },
+    { "block": [11, 0, 24], "face": "+Y", "type": "switch", "group": "red" }
   ]
 }

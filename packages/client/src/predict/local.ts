@@ -137,7 +137,9 @@ export class LocalPrediction {
     for (const k of this.pred!.world.keys) if (!s.items.has(`key-${k.id}`)) collected.add(k.id);
     const crumbling = new Map<string, number>();
     s.crumbling?.forEach((at, k) => crumbling.set(k, at));
-    this.pred!.setWorld(this.bands.slice(0, s.crumbled).flat(), collected, crumbling);
+    const lasers = new Map<string, boolean>();
+    s.lasers?.forEach((on, g) => lasers.set(g, !!on)); // laser groups (13b)
+    this.pred!.setWorld(this.bands.slice(0, s.crumbled).flat(), collected, crumbling, lasers);
   }
 
   private count(r: ReconcileResult): void {

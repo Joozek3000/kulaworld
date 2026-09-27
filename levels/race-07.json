@@ -1,0 +1,355 @@
+{
+  "id": "race-07",
+  "name": "Switchyard",
+  "version": 1,
+  "mode": "race",
+  "pool": true,
+  "timeLimitSec": 120,
+  "crumble": {
+    "startSec": 90,
+    "intervalSec": 1.25,
+    "warnSec": 1
+  },
+  "heat": {
+    "warnSec": 3,
+    "burnSec": 5
+  },
+  "sky": [
+    "#8f7fd0",
+    "#f4d0e4"
+  ],
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        12,
+        0,
+        8
+      ]
+    },
+    {
+      "min": [
+        6,
+        0,
+        9
+      ],
+      "max": [
+        6,
+        0,
+        11
+      ]
+    },
+    {
+      "min": [
+        3,
+        0,
+        12
+      ],
+      "max": [
+        9,
+        0,
+        16
+      ]
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        1,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        11,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        0,
+        1,
+        2
+      ],
+      "up": "+Y",
+      "fwd": "+X"
+    },
+    {
+      "cell": [
+        12,
+        1,
+        2
+      ],
+      "up": "+Y",
+      "fwd": "-X"
+    },
+    {
+      "cell": [
+        3,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        9,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        5,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    },
+    {
+      "cell": [
+        7,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    }
+  ],
+  "keys": [
+    {
+      "cell": [
+        3,
+        1,
+        6
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        9,
+        1,
+        6
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        6,
+        -1,
+        4
+      ],
+      "up": "-Y"
+    },
+    {
+      "cell": [
+        1,
+        -1,
+        7
+      ],
+      "up": "-Y"
+    },
+    {
+      "cell": [
+        3,
+        1,
+        13
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        9,
+        -1,
+        16
+      ],
+      "up": "-Y"
+    },
+    {
+      "cell": [
+        7,
+        0,
+        10
+      ],
+      "up": "+X"
+    }
+  ],
+  "exit": {
+    "cell": [
+      6,
+      1,
+      16
+    ],
+    "up": "+Y"
+  },
+  "keysRequired": 3,
+  "lasers": [
+    {
+      "group": "red",
+      "from": [
+        2,
+        1,
+        4
+      ],
+      "dir": "+X",
+      "length": 3,
+      "on": true
+    },
+    {
+      "group": "red",
+      "from": [
+        2,
+        1,
+        7
+      ],
+      "dir": "+X",
+      "length": 3,
+      "on": true
+    },
+    {
+      "group": "red",
+      "from": [
+        2,
+        1,
+        5
+      ],
+      "dir": "+Z",
+      "length": 2,
+      "on": true
+    },
+    {
+      "group": "red",
+      "from": [
+        4,
+        1,
+        5
+      ],
+      "dir": "+Z",
+      "length": 2,
+      "on": true
+    },
+    {
+      "group": "blue",
+      "from": [
+        8,
+        1,
+        4
+      ],
+      "dir": "+X",
+      "length": 3,
+      "on": true
+    },
+    {
+      "group": "blue",
+      "from": [
+        8,
+        1,
+        7
+      ],
+      "dir": "+X",
+      "length": 3,
+      "on": true
+    },
+    {
+      "group": "blue",
+      "from": [
+        8,
+        1,
+        5
+      ],
+      "dir": "+Z",
+      "length": 2,
+      "on": true
+    },
+    {
+      "group": "blue",
+      "from": [
+        10,
+        1,
+        5
+      ],
+      "dir": "+Z",
+      "length": 2,
+      "on": true
+    }
+  ],
+  "tiles": [
+    {
+      "block": [
+        3,
+        0,
+        5
+      ],
+      "face": "+Y",
+      "type": "switch",
+      "group": "red"
+    },
+    {
+      "block": [
+        9,
+        0,
+        5
+      ],
+      "face": "+Y",
+      "type": "switch",
+      "group": "blue"
+    },
+    {
+      "block": [
+        7,
+        0,
+        3
+      ],
+      "face": "+Y",
+      "type": "switch",
+      "group": "red"
+    },
+    {
+      "block": [
+        5,
+        0,
+        3
+      ],
+      "face": "+Y",
+      "type": "switch",
+      "group": "blue"
+    },
+    {
+      "block": [
+        6,
+        0,
+        2
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "home"
+    },
+    {
+      "block": [
+        8,
+        0,
+        14
+      ],
+      "face": "+Y",
+      "type": "teleport",
+      "pair": "home"
+    }
+  ],
+  "notes": {
+    "10.8 level": "lasers are the main mechanic; the one teleporter pair is only the quick way home from the annex"
+  }
+}

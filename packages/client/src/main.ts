@@ -7,6 +7,7 @@ import { ItemsView } from './render/items.ts';
 import { findLevel, levelBounds, LevelView } from './render/level.ts';
 import { PlayersView } from './render/players.ts';
 import { TrapsView } from './render/traps.ts';
+import { groupColor, staticLevel, Traps2View } from './render/traps2.ts';
 import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
 import { levelPreview } from './render/preview.ts';
@@ -60,6 +61,7 @@ players.onFeel = (e) => {
     case 'slide': audio.play('slide', { at }); break;
     case 'launch': audio.play('pwomp', { at }); if (e.local) rig.kick(); break;
     case 'charge': audio.play('hum', { at }); break; // held on a boost pad (phase 14c)
+    case 'vwoop': audio.play('vwoop', { at }); break; // a teleport (13b)
     case 'whoosh': audio.play('whoosh', { at }); break;
     case 'edge': audio.play('edge', { gain: 0.7 }); break; // an enemy just around your edge (phase 13a)
   }
@@ -114,6 +116,7 @@ const DEATH_TOAST: Partial<Record<string, (who: string) => string>> = {
   spikes: (who) => `${who} got spiked`,
   fire: (who) => `${who} popped on fire`,
   fall: (who) => `${who} fell off`,
+  laser: (who) => `${who} got zapped`,
 };
 /** Fall toasts wait a moment: a `knockout` event right after the death replaces them with its own toast. */
 const pendingFall = new Map<string, ReturnType<typeof setTimeout>>();
@@ -126,6 +129,7 @@ net.onEvent((e) => {
       const show = () => { pendingFall.delete(e.playerId); hud.toast(toast(nameOf(e.playerId)), colorOf(e.playerId)); };
       if (e.cause === 'fall') pendingFall.set(e.playerId, setTimeout(show, 150));
       else show();
+      if (e.cause === 'laser') audio.play('zap', { at: e.playerId === net.sessionId ? null : new THREE.Vector3(e.cell.x, e.cell.y, e.cell.z) });
       break;
     }
   }
@@ -142,6 +146,13 @@ net.onEvent((e) => {
       hud.toast(e.byId ? `${nameOf(e.byId)} knocked ${nameOf(e.playerId)} out!` : `${nameOf(e.playerId)} ${e.playerId === net.sessionId ? 'are' : 'is'} out`, colorOf(e.playerId));
       audio.play('eliminated', { mine: e.playerId === net.sessionId }, 'ui');
       break;
+    case 'laser': { // a switch (13b): the button clicks down, and everyone hears which lasers changed
+      const name = e.group[0].toUpperCase() + e.group.slice(1);
+      hud.toast(`${name} lasers ${e.on ? 'ON' : 'OFF'}`, `#${groupColor(e.group).toString(16).padStart(6, '0')}`);
+      traps2View?.press(e.group, performance.now() / 1000);
+      audio.play('click', { at: e.playerId === net.sessionId ? null : players.ballAt(e.playerId) });
+      break;
+    }
     case 'crumbleWarn': audio.play('crumbleWarn', {}, 'ui'); break;
     case 'crumble': audio.play('crumble', {}, 'ui'); break;
     case 'burn': {
@@ -158,6 +169,8 @@ if (import.meta.env.DEV) Object.assign(window, { kula: { net, players, audio, in
 let level: Level | null = null;
 let levelView: LevelView | null = null;
 let trapsView: TrapsView | null = null;
+let traps2View: Traps2View | null = null;
+let nextBuzz = 0;
 let bounds = { center: new THREE.Vector3(), radius: 5 };
 let last = performance.now();
 let lastPhase = '';
@@ -198,13 +211,18 @@ view.renderer.setAnimationLoop((now: number) => {
     level = findLevel(want);
     if (levelView) { view.scene.remove(levelView.group); levelView.dispose(); }
     if (trapsView) { view.scene.remove(trapsView.group); trapsView.dispose(); }
-    levelView = level ? new LevelView(level) : null;
+    if (traps2View) { view.scene.remove(traps2View.group); traps2View.dispose(); }
+    levelView = level ? new LevelView(staticLevel(level)) : null; // invisible and vanishing blocks are Traps2View's (13b)
     trapsView = level ? new TrapsView(level) : null;
+    traps2View = level ? new Traps2View(level) : null;
     if (trapsView) view.scene.add(trapsView.group);
+    if (traps2View) view.scene.add(traps2View.group);
     players.setLevel(level);
-    players.setSolid(levelView?.solid ?? null);
+    const lv = levelView, t2 = traps2View;
+    const solid = lv && t2 ? (x: number, y: number, z: number) => lv.solid(x, y, z) || t2.solid(x, y, z) : null;
+    players.setSolid(solid);
     players.heat = level?.heat ?? null;
-    rig.setSolid(levelView?.solid ?? null);
+    rig.setSolid(solid);
     if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
     view.setSky(level?.sky ?? undefined);
   }
@@ -235,6 +253,14 @@ view.renderer.setAnimationLoop((now: number) => {
   const crumbling = active && s.crumbling ? s.crumbling : noCrumbling;
   levelView?.updateTraps(crumbling, s.tick, now / 1000);
   trapsView?.update(renderTick, s.tick, crumbling, players.rollingOnto(), dtMs / 1000, now / 1000, players.chargingOn());
+  // Phase 13b: laser groups as synced (the level's defaults outside a round), invisible blocks near the local ball.
+  const laserOn = (g: string) => (active && s.lasers?.has(g) ? s.lasers.get(g) === 1 : !!level?.lasers.find((l) => l.group === g)?.on);
+  const localAt = players.poseOf(me)?.position;
+  traps2View?.update(renderTick, laserOn, localAt ? new THREE.Vector3(...localAt) : null, now / 1000);
+  // Active beams buzz nearby (positional), a little faster the closer you are.
+  const beamAt = traps2View && localAt && s.phase === 'playing' ? traps2View.nearestBeam(new THREE.Vector3(...localAt), laserOn) : null;
+  const beamDist = beamAt ? beamAt.distanceTo(new THREE.Vector3(...localAt!)) : Infinity;
+  if (beamAt && beamDist < 6 && now >= nextBuzz) { audio.play('buzz', { at: beamAt, intensity: 1 - beamDist / 6 }); nextBuzz = now + 300 + 60 * beamDist; }
 
   // Knocked out of a knockout round: follow whoever did it while they're on screen, otherwise orbit.
   const out = !!mine?.eliminated && active;

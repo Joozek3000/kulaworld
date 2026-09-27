@@ -1,7 +1,7 @@
-import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
+import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TELEPORT_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
-import { add, cellKey, sub, type Vec3 } from '../vec.ts';
+import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { faceTileAt, fwdAllowed } from './tiles.ts';
 import { Action, isFree, isPushable, isSolid, outOfBounds, reservations, type BoostBlock, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
 
@@ -84,10 +84,37 @@ export function previewAction(
       }
       return null;
     }
+    case 'teleport': {
+      // §18 (phase 13b): to the partner tile, facing the same way relative to the face. Its cell taken (reserved,
+      // or anyone in it, a high hopper too) or its block gone: blocked (the caller holds the ball, like a boost).
+      const to = teleportTarget(world, self.pose);
+      if (!to || !free(to.cell) || world.players.some((v) => v.id !== self.id && v.action !== Action.Dead && eq(v.pose.cell, to.cell))) return null;
+      return { action: Action.Teleport, to, ticks: TELEPORT_TICKS };
+    }
     case 'hop':
       if (isSolid(world, add(C, U))) return null; // low ceiling
       return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: JUMP_TICKS };
   }
+}
+
+/**
+ * Facing after a teleport from face `from` to face `to` (phase 13b): the rotation taking `from` onto `to` applied to
+ * fwd. Same face: unchanged. Opposite faces: the half turn about fwd (unchanged). Perpendicular: the quarter turn
+ * about from × to, which takes `to` to −from and −to to from, and leaves the axis alone.
+ */
+export function teleportFwd(from: Dir, to: Dir, fwd: Dir): Dir {
+  if (from === to || from === opposite(to)) return fwd;
+  if (fwd === to) return opposite(from);
+  if (fwd === opposite(to)) return from;
+  return fwd;
+}
+
+/** Where a teleport from `pose` (on a teleporter) arrives: the partner tile, or null (no partner, or its block is gone). */
+export function teleportTarget(world: World, pose: Pose): Pose | null {
+  const t = faceTileAt(world, pose), dest = t?.type === 'teleport' ? world.level.partners.get(`${cellKey(t.block)}|${t.face}`) : undefined;
+  if (!dest || !isSolid(world, dest.block)) return null;
+  const cell = add(dest.block, dirVec(dest.face!));
+  return isSolid(world, cell) ? null : { cell, up: dest.face!, fwd: teleportFwd(pose.up, dest.face!, pose.fwd) };
 }
 
 /** Why the boost launch from `self`'s pad can't start now (phase 14c), or null if it can. */

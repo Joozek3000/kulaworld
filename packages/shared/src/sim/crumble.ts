@@ -8,7 +8,8 @@ export const MIN_BAND_BLOCKS = 4;
 /**
  * Knockout crumble order (ARCHITECTURE §15): blocks grouped by exact squared distance from the level's bounding-box
  * centre, furthest first, then consecutive groups merged (outside in) until each band has >= MIN_BAND_BLOCKS blocks.
- * A short leftover core joins the band before it. Integer-only: coordinates are doubled so the centre is integral.
+ * A short leftover core joins the band before it. Key/exit blocks and invisible/vanishing blocks never crumble.
+ * Integer-only: coordinates are doubled so the centre is integral.
  * Pure and deterministic, so the client recomputes the same bands from the level.
  */
 export function crumbleBands(level: Level): string[][] {
@@ -17,7 +18,8 @@ export function crumbleBands(level: Level): string[][] {
   // Sudden death in race (phase 12): the blocks carrying a key or the exit never crumble.
   const kept = new Set([...level.keys, ...(level.exit ? [level.exit] : [])].map((p) => cellKey(sub(p.cell, dirVec(p.up)))));
   for (const key of level.solid) {
-    if (kept.has(key)) continue;
+    // Invisible and vanishing blocks (13b) never crumble either: the client draws them apart from the rest.
+    if (kept.has(key) || level.invisible.has(key) || level.vanish.has(key)) continue;
     const c = key.split(',').map(Number);
     const dx = 2 * c[0] - (min.x + max.x), dy = 2 * c[1] - (min.y + max.y), dz = 2 * c[2] - (min.z + max.z);
     const d2 = dx * dx + dy * dy + dz * dz;

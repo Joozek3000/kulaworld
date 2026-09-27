@@ -1,6 +1,6 @@
 import {
   BOOST_HOLD_TICKS, CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, JUMP_TICKS, KNOCK_TICKS, REBOUND_TICKS,
-  RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS,
+  RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS, SWITCH_COOLDOWN_TICKS,
 } from '../constants.ts';
 import { cross, dirFromVec, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
@@ -8,7 +8,7 @@ import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { boostBlock, previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
-import { blockTileAt, forcedAfter, fwdAllowed, onIce, spiked } from './tiles.ts';
+import { beamAt, beamHit, blockTileAt, faceTileAt, forcedAfter, fwdAllowed, onIce, pathCells, spiked } from './tiles.ts';
 import {
   Action, airHop, isFree, isPushable, occupiedCells, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
   type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
@@ -53,11 +53,17 @@ export function step(world: World): SimEvent[] {
     finishAction(world, p, events);
     if (MOVERS.has(was) && (p.action as Action) === Action.Idle) arrived.add(p);
   }
-  // Spikes rising under a ball standing on them (§18). Finishing onto raised spikes is handled in finishAction.
-  for (const p of order) if (STANDING.has(p.action) && spiked(world, p.pose)) die(world, p, events, 'spikes');
+  // Spikes rising under a ball standing on them (§18), or a laser switched on through its cell (13b). Finishing onto
+  // raised spikes or into a beam is handled in finishAction.
+  for (const p of order) {
+    if (!STANDING.has(p.action)) continue;
+    if (spiked(world, p.pose)) die(world, p, events, 'spikes');
+    else if (beamAt(world, p.pose.cell)) die(world, p, events, 'laser');
+  }
   stepCrumbleTiles(world);
-  // Crumbled ground: an Idle player whose block is gone falls (mid-action players are checked when they finish).
-  if (world.removed.size) for (const p of order) if (p.action === Action.Idle) startFall(world, p, tick);
+  // Crumbled or vanished ground (13b): an Idle player whose block is gone falls (mid-action players are checked when
+  // they finish).
+  if (world.removed.size || world.level.vanish.size) for (const p of order) if (p.action === Action.Idle) startFall(world, p, tick);
 
   const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(world, p) }));
   resolveMoves(world, intents, arrived, events);
@@ -93,16 +99,18 @@ const under = (p: PlayerState, v: PlayerState): boolean =>
   v !== p && v.action !== Action.Dead && !AIRBORNE.has(v.action) && (eq(v.pose.cell, p.pose.cell) || eq(v.to.cell, p.pose.cell));
 
 /**
- * A Charge tick ends (phase 14c): retry the launch this tick, or after BOOST_HOLD_TICKS release the ball as on a plain
- * tile. The pad then stays quiet (boostSpent) until the ball leaves it; a stagger owed by a knock starts now.
+ * A Charge tick ends (phase 14c; a teleporter's hold too, 13b): retry the launch this tick, or after BOOST_HOLD_TICKS
+ * release the ball as on a plain tile. The pad then stays quiet (boostSpent) until the ball leaves it; a stagger owed
+ * by a knock starts now.
  */
 function endCharge(world: World, p: PlayerState, events: SimEvent[]): void {
   p.action = Action.Idle;
   p.to = p.pose;
-  if (world.tick - p.boostHold < BOOST_HOLD_TICKS) { p.forced = 'boost'; return; }
+  const teleport = faceTileAt(world, p.pose)?.type === 'teleport';
+  if (world.tick - p.boostHold < BOOST_HOLD_TICKS) { p.forced = teleport ? 'teleport' : 'boost'; return; }
   p.boostHold = -1;
   p.boostSpent = tileKey(p.pose.cell, p.pose.up);
-  events.push({ type: 'boost', playerId: p.id, result: 'released' });
+  events.push(teleport ? { type: 'teleport', playerId: p.id, result: 'released' } : { type: 'boost', playerId: p.id, result: 'released' });
   if (p.staggerOwed) stun(p, world.tick, false);
 }
 
@@ -230,7 +238,7 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
 /** Starts the first command that isn't blocked. A pulse is spent when tried, even if blocked. */
 function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, events: SimEvent[]): void {
   for (const cmd of cmds) {
-    if (cmd !== 'fwd' && cmd !== 'boost') p.pulse = null;
+    if (cmd !== 'fwd' && cmd !== 'boost' && cmd !== 'teleport') p.pulse = null;
     if (cmd === 'fwd' && world.rules.push && movingHit(world, p, res, events)) return;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
@@ -244,14 +252,18 @@ function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, e
       p.boostHold = -1;
       events.push({ type: 'boost', playerId: p.id, result: 'launch' });
     }
+    if (cmd === 'teleport') {
+      p.boostHold = -1;
+      events.push({ type: 'teleport', playerId: p.id, result: 'go' });
+    }
     reserve(res, p);
     return;
   }
-  // A blocked launch (phase 14c): hold on the pad (Charge) and retry next tick, up to BOOST_HOLD_TICKS.
-  if (cmds.length === 1 && cmds[0] === 'boost') {
+  // A blocked launch (phase 14c) or teleport (13b): hold on the pad (Charge) and retry next tick, up to BOOST_HOLD_TICKS.
+  if (cmds.length === 1 && (cmds[0] === 'boost' || cmds[0] === 'teleport')) {
     if (p.boostHold < 0) {
       p.boostHold = world.tick;
-      events.push({ type: 'boost', playerId: p.id, result: 'held', ...boostBlock(world, p, res) });
+      events.push(cmds[0] === 'boost' ? { type: 'boost', playerId: p.id, result: 'held', ...boostBlock(world, p, res) } : { type: 'teleport', playerId: p.id, result: 'held' });
     }
     startAction(p, { action: Action.Charge, to: p.pose, ticks: 1 }, world.tick);
     reserve(res, p);
@@ -569,6 +581,8 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   if (finished === Action.Charge) { endCharge(world, p, events); return; }
   if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
   const moved = sub(p.to.cell, p.pose.cell);
+  // Lasers (13b): finishing in, or having passed through, an active beam cell. A teleport only arrives.
+  const zapped = beamHit(world, finished === Action.Teleport ? [p.to.cell] : pathCells(p.pose, p.to.cell));
   leaveTile(world, p.pose, p.to);
   p.pose = p.to;
   p.action = Action.Idle;
@@ -576,6 +590,11 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   p.jumpOver = false;
   p.stompBump = null;
   if (p.boostSpent && p.boostSpent !== tileKey(p.pose.cell, p.pose.up)) p.boostSpent = null; // left the spent pad
+  if (zapped) {
+    p.pose = { ...p.pose, cell: zapped };
+    die(world, p, events, 'laser');
+    return;
+  }
   if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
     die(world, p, events, 'fall');
     return;
@@ -589,8 +608,9 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   }
   if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
   if (finished === Action.Turn || finished === Action.Stunned || finished === Action.Strike) return;
+  pressSwitch(world, p, events);
   p.forced = forcedAfter(world, p.pose, finished);
-  if (p.forced === 'boost' && p.boostSpent) p.forced = null; // a pad that gave up on this ball: a plain tile until it leaves
+  if ((p.forced === 'boost' || p.forced === 'teleport') && p.boostSpent) p.forced = null; // gave up on this ball: a plain tile until it leaves
   if (finished === Action.Knocked && p.forced) {
     // Knocked onto ice or a pad (§18): it slides on in the knock direction, or launches; the stagger waits until the
     // slide stops or the launch lands.
@@ -601,4 +621,16 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     stun(p, tick, finished === Action.Knocked && bounced); // stagger: not pushable (§14); a head-on's knock-back ends in a bounce-stun (§20)
   }
   onLand(world, p, events);
+}
+
+/** A ball finishing a move (or a hop) on a switch toggles its laser group, at most once per SWITCH_COOLDOWN_TICKS (13b). */
+function pressSwitch(world: World, p: PlayerState, events: SimEvent[]): void {
+  const t = faceTileAt(world, p.pose);
+  if (t?.type !== 'switch') return;
+  const key = tileKey(p.pose.cell, p.pose.up);
+  if (world.tick - (world.switchAt.get(key) ?? -Infinity) < SWITCH_COOLDOWN_TICKS) return;
+  world.switchAt.set(key, world.tick);
+  const on = !world.lasers.get(t.group);
+  world.lasers.set(t.group, on);
+  events.push({ type: 'laser', playerId: p.id, group: t.group, on });
 }

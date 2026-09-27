@@ -48,7 +48,8 @@ describe('crumble bands', () => {
       const level = loadLevel(readLevelJson(f));
       const bands = crumbleBands(level);
       for (const b of bands) expect(b.length, f).toBeGreaterThanOrEqual(MIN_BAND_BLOCKS);
-      expect(bands.flat().sort(), f).toEqual([...level.solid].sort());
+      // Every block crumbles in some band, except invisible and vanishing ones (13b).
+      expect(bands.flat().sort(), f).toEqual([...level.solid].filter((k) => !level.invisible.has(k) && !level.vanish.has(k)).sort());
     }
     // A 1-block tail joins the band before it rather than crumbling on its own.
     const bands = crumbleBands(loadLevel(levelJson(row(0, 4), [], knockout())));

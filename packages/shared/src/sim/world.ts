@@ -1,19 +1,19 @@
 import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
 import { ALL_DIRS, dirVec, perpendicular, type Dir } from '../dir.ts';
 import { mulberry32, rngNext } from '../rng.ts';
-import type { Level, Mode, Pose } from '../level/types.ts';
+import type { Level, Mode, Pose, Vanish } from '../level/types.ts';
 import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12, Charge: 13 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12, Charge: 13, Teleport: 14 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /**
  * 'jump' = jump forward, 'hop' = bounce in place. A jump pulse picks one by fwdHeld (see commands() in tick.ts).
- * 'boost' is never input: it's the forced launch off a boost pad (§18).
+ * 'boost' and 'teleport' are never input: the forced launch off a boost pad, and the warp off a teleporter (§18).
  */
-export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop' | 'boost';
+export type Cmd = 'fwd' | 'left' | 'right' | 'jump' | 'hop' | 'boost' | 'teleport';
 export type Pulse = 'left' | 'right' | 'jump';
 
 /** Client → server input message (ARCHITECTURE §6). `turn` and `jump` are pulses; `jumpHeld` keeps bouncing. */
@@ -70,9 +70,9 @@ export interface PlayerState {
   forced: Cmd | null;
   /** Knocked onto ice (§18): sliding in the knock direction, and staggered once the slide stops. */
   staggerOwed: boolean;
-  /** Boost pad (phase 14c): the tick a blocked launch started holding the ball (Charge), or -1. */
+  /** Boost pad (phase 14c) or teleporter (13b): the tick a blocked launch started holding the ball (Charge), or -1. */
   boostHold: number;
-  /** The pad (tileKey) a held launch gave up on: it doesn't fire again until the ball leaves it. */
+  /** The pad or teleporter (tileKey) a held launch gave up on: it doesn't fire again until the ball leaves it. */
   boostSpent: string | null;
 }
 
@@ -111,6 +111,10 @@ export interface World {
   crumbling: Map<string, number>;
   /** Tile heat (phase 12c), by tileKey; only tiles with heat > 0. */
   hot: Map<string, number>;
+  /** Laser groups (phase 13b): group → on. Starts from the level. */
+  lasers: Map<string, boolean>;
+  /** Switch tiles (tileKey) → the tick they last toggled (20-tick cooldown). */
+  switchAt: Map<string, number>;
   tick: number;
   timeLimitTick: number;
   /** Join order; step() iterates it rotated by tick for fairness. */
@@ -138,13 +142,15 @@ export type SimEvent =
   | { type: 'clash'; attackerId: string; victimId: string }
   | { type: 'burn'; playerId: string }
   | { type: 'cradle'; pusherId: string; victimId: string; length: number }
-  | { type: 'boost'; playerId: string; result: 'launch' | 'held' | 'released'; reason?: BoostBlock; byId?: string };
+  | { type: 'boost'; playerId: string; result: 'launch' | 'held' | 'released'; reason?: BoostBlock; byId?: string }
+  | { type: 'teleport'; playerId: string; result: 'go' | 'held' | 'released' }
+  | { type: 'laser'; playerId: string; group: string; on: boolean };
 
 /** Why a launch is held (phase 14c): a flown-through or landing cell is solid, the landing is taken, or its ball can't be stomped (or bumped). */
 export type BoostBlock = 'solid' | 'reserved' | 'unstompable' | 'bump';
 
 /** Why a ball died (§18), for the HUD and toasts. */
-export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn';
+export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn' | 'laser';
 
 /** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
@@ -159,6 +165,8 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     knockout: level.crumble ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
     heat: level.heat,
     hot: new Map(),
+    lasers: new Map(level.lasers.map((l) => [l.group, l.on])),
+    switchAt: new Map(),
     crumbling: new Map(),
     tick: 0,
     timeLimitTick: level.timeLimitSec * TICK_RATE,
@@ -337,11 +345,19 @@ export function reserve(res: Reservations, p: PlayerState): void {
 /** A tile: the face a ball stands on, as its cell and up (the key of `world.hot`). */
 export const tileKey = (cell: Vec3, up: Dir): string => `${cellKey(cell)}|${up}`;
 
-/** A block here: in the level and not crumbled. Every sim/BFS ground check goes through this. */
+/**
+ * A block here: in the level, not crumbled, and not a vanishing block in its off-window (phase 13b, derived from the
+ * tick). Every sim/BFS ground check goes through this. Planning worlds put vanishing blocks in `removed` instead.
+ */
 export const isSolid = (world: World, v: Vec3): boolean => {
   const k = cellKey(v);
-  return world.level.solid.has(k) && !world.removed.has(k);
+  if (!world.level.solid.has(k) || world.removed.has(k)) return false;
+  const van = world.level.vanish.size ? world.level.vanish.get(k) : undefined;
+  return !van || vanishOn(van, world.tick);
 };
+
+/** A vanishing block is there at `tick`: for `on` ticks of every `period`, offset by `phase`. */
+export const vanishOn = (v: Vanish, tick: number): boolean => (((tick + v.phase) % v.period) + v.period) % v.period < v.on;
 
 /** Not solid, and not reserved by another player. */
 export function isFree(world: World, res: Reservations, selfId: string, v: Vec3): boolean {

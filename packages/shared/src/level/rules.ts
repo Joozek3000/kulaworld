@@ -1,11 +1,11 @@
 import { FORCED_MAX, ROLL_TICKS } from '../constants.ts';
 import { ALL_DIRS, dirName, dirVec, opposite, perpendicular, type Dir } from '../dir.ts';
-import { previewAction } from '../sim/actions.ts';
+import { previewAction, teleportTarget } from '../sim/actions.ts';
 import { PLAN_FIRE_MAX, resultPose, type PlanPose } from '../sim/path.ts';
-import { blockTileAt, faceTileAt, forcedAfter, lethalForPlanning, spikesUp } from '../sim/tiles.ts';
-import { Action, createWorld, isSolid, outOfBounds, type Cmd, type Reservations, type World } from '../sim/world.ts';
+import { beamAt, blockTileAt, faceTileAt, forcedAfter, lethalForPlanning, spikesUp } from '../sim/tiles.ts';
+import { Action, createWorld, isSolid, outOfBounds, vanishOn, type Cmd, type Reservations, type World } from '../sim/world.ts';
 import { add, cellKey, sub, type Vec3 } from '../vec.ts';
-import { LETHAL_TILES, MODIFIER_TILES, type Level, type Pose, type Tile, type TileType } from './types.ts';
+import { LETHAL_TILES, MODIFIER_TILES, type Level, type Pose, type Tile, type TileType, type Vanish } from './types.ts';
 
 /**
  * Trap placement rules (docs/LEVEL-DESIGN.md), checked by `npm run level:check`. Each finding has the rule number,
@@ -46,7 +46,9 @@ function spots(w: World): Spot[] {
 /** Tile types under a spot: its whole-block type and its face type. */
 const types = (w: World, s: Spot): TileType[] =>
   [blockTileAt(w, pose(s))?.type, faceTileAt(w, pose(s))?.type].filter((t): t is TileType => !!t);
-const lethal = (w: World, s: Spot) => lethalForPlanning(w, pose(s));
+const tileLethal = (w: World, s: Spot) => faceTileAt(w, pose(s))?.type === 'spikes' || blockTileAt(w, pose(s))?.type === 'fire';
+/** Lethal for the rules: planning-lethal tiles, and any laser beam cell, on or off (LEVEL-DESIGN 10.3). */
+const lethal = (w: World, s: Spot) => lethalForPlanning(w, pose(s)) || w.level.beams.has(cellKey(s.cell));
 const retracting = (w: World, s: Spot): Tile | null => {
   const t = faceTileAt(w, pose(s));
   return t?.type === 'spikes' && t.period ? t : null;
@@ -71,35 +73,58 @@ function distances(w: World, from: Spot[], max: number): Map<string, { spot: Spo
 }
 
 const MOVES: readonly Cmd[] = ['fwd', 'left', 'right', 'jump'];
-const planKey = (p: PlanPose) => `${cellKey(p.cell)}|${p.up}|${p.fwd}|${p.fire}`;
+/** A plan state with the laser groups' on/off bits (13b: switches are state edges). */
+type Node = PlanPose & { mask: number };
+const planKey = (p: Node) => `${cellKey(p.cell)}|${p.up}|${p.fwd}|${p.fire}|${p.mask}`;
+
+/** Laser groups in level order, and their start states as a bit mask. */
+const groupsOf = (level: Level) => [...new Set(level.lasers.map((l) => l.group))];
+const startMask = (level: Level) => groupsOf(level).reduce((m, g, i) => (level.lasers.find((l) => l.group === g)!.on ? m | (1 << i) : m), 0);
+function setMask(w: World, mask: number): void {
+  groupsOf(w.level).forEach((g, i) => w.lasers.set(g, !!(mask & (1 << i))));
+}
 
 /**
  * Every plan state reachable from `starts` with the bots' moves (lethal outcomes excluded, `fireMax` fire landings
- * in a row), and the reverse edges between them.
+ * in a row), and the reverse edges between them. Standing on a switch toggles its group (both ways: a hop presses
+ * it again), unless that switches a beam on through the ball's own cell. `masks` are the group states to start with.
  */
-function explore(w: World, starts: Pose[], fireMax: number, res: Reservations = new Map()) {
-  const nodes = new Map<string, PlanPose>(), back = new Map<string, string[]>();
-  let frontier: PlanPose[] = starts.map((s) => ({ ...s, fire: 0 }));
-  for (const p of frontier) nodes.set(planKey(p), p);
+function explore(w: World, starts: Pose[], fireMax: number, res: Reservations = new Map(), masks = [startMask(w.level)]) {
+  const nodes = new Map<string, Node>(), back = new Map<string, string[]>();
+  const groups = groupsOf(w.level);
+  let frontier: Node[] = [];
+  const edge = (from: string | null, to: Node) => {
+    const k = planKey(to);
+    if (from !== null) { if (!back.has(k)) back.set(k, []); back.get(k)!.push(from); }
+    if (!nodes.has(k)) { nodes.set(k, to); frontier.push(to); }
+  };
+  for (const s of starts) for (const mask of masks) {
+    setMask(w, mask);
+    if (!beamAt(w, s.cell)) edge(null, { ...s, fire: 0, mask }); // a ball in a beam as it comes on is dead, not stuck
+  }
   while (frontier.length) {
-    const next: PlanPose[] = [];
-    for (const p of frontier) {
+    const cur = frontier;
+    frontier = [];
+    for (const p of cur) {
       const from = planKey(p);
+      setMask(w, p.mask);
+      const sw = faceTileAt(w, p);
+      if (sw?.type === 'switch') {
+        const flipped = { ...p, mask: p.mask ^ (1 << groups.indexOf(sw.group)) };
+        setMask(w, flipped.mask);
+        if (!beamAt(w, p.cell)) edge(from, flipped);
+        setMask(w, p.mask);
+      }
       for (const cmd of MOVES) {
         const to = resultPose(w, p, cmd, res, p.fire, fireMax);
-        if (!to) continue;
-        const k = planKey(to);
-        if (!back.has(k)) back.set(k, []);
-        back.get(k)!.push(from);
-        if (!nodes.has(k)) { nodes.set(k, to); next.push(to); }
+        if (to) edge(from, { ...to, mask: p.mask });
       }
     }
-    frontier = next;
   }
   return { nodes, back };
 }
 
-/** Cells reachable from `start` with lethal tiles (fire too) as walls: the plain safe BFS of rule 2.2. */
+/** Cells reachable from `start` with lethal tiles (fire too) as walls: the plain safe BFS of rule 2.2 (switches allowed). */
 const safeCells = (w: World, start: Pose, res?: Reservations) =>
   new Set([...explore(w, [start], 0, res).nodes.values()].map((p) => cellKey(p.cell)));
 
@@ -151,21 +176,34 @@ function lanes(w: World, all: Spot[]): Spot[][] {
  * raised spikes. Exported for the tests.
  */
 export function lanePassable(lane: (Tile | null)[]): boolean {
-  const spikes = lane.filter((t): t is Tile => !!t);
-  const L = spikes.reduce((l, t) => lcm(l, t.period), 1);
-  const safe = (i: number, t: number) => !lane[i] || !spikesUp(lane[i]!, t);
+  const L = lane.reduce((l, t) => (t ? lcm(l, t.period) : l), 1);
+  return passable(lane.length, L, (i, t) => !lane[i] || !spikesUp(lane[i]!, t), (i) => !lane[i]);
+}
+
+/**
+ * Rule 10.7: the same walk along a lane of vanishing blocks (null = a plain tile): a ball arrives on a tile only while
+ * its block is there, and waits on one only while it stays there.
+ */
+export function vanishLanePassable(lane: (Vanish | null)[]): boolean {
+  const L = lane.reduce((l, v) => (v ? lcm(l, v.period) : l), 1);
+  const on = (i: number, t: number) => !lane[i] || vanishOn(lane[i]!, t);
+  return passable(lane.length, L, on, (i, t) => on(i, t + 1));
+}
+
+/** BFS over (tile, tick mod L): arrive(i, t) may a ball arrive on tile i at t; wait(i, t) may it stay from t to t + 1. */
+function passable(n: number, L: number, arrive: (i: number, t: number) => boolean, wait: (i: number, t: number) => boolean): boolean {
   const seen = new Set<number>();
   let frontier: number[] = [];
-  for (let t = 0; t < L; t++) if (safe(0, t)) frontier.push(t);
+  for (let t = 0; t < L; t++) if (arrive(0, t)) frontier.push(t);
   for (const t of frontier) seen.add(t);
   while (frontier.length) {
     const next: number[] = [];
     for (const s of frontier) {
       const i = Math.floor(s / L), t = s % L;
-      if (i === lane.length - 1) return true;
+      if (i === n - 1) return true;
       const go = (j: number, u: number) => { const k = j * L + (u % L); if (!seen.has(k)) { seen.add(k); next.push(k); } };
-      if (!lane[i]) go(i, t + 1); // wait
-      if (safe(i + 1, t + ROLL_TICKS)) go(i + 1, t + ROLL_TICKS);
+      if (wait(i, t)) go(i, t + 1); // wait
+      if (arrive(i + 1, t + ROLL_TICKS)) go(i + 1, t + ROLL_TICKS);
     }
     frontier = next;
   }
@@ -176,12 +214,14 @@ const lcm = (a: number, b: number) => (a / gcd(a, b)) * b;
 
 /** Checks every LEVEL-DESIGN rule. Rule 7.3 (2–5 trap types) applies to pool levels only. */
 export function checkTrapRules(level: Level): RuleFinding[] {
-  const w = createWorld(level, 0);
+  // Vanishing blocks count as there for the geometry (13b); rule 10.7 checks they can be crossed.
+  const geo: Level = level.vanish.size ? { ...level, vanish: new Map() } : level;
+  const w = createWorld(geo, 0);
   const out: RuleFinding[] = [];
   const seen = new Set<string>();
   const add1 = (rule: string, error: boolean, where: string, msg: string) => {
     const id = findingId({ rule, where });
-    if (seen.has(id)) return;
+    if (seen.has(id) || (error && level.lab)) return; // lab levels are exempt from [E] rules (LEVEL-DESIGN §10)
     seen.add(id);
     out.push({ rule, error, where, msg, note: error ? undefined : level.notes[id] });
   };
@@ -196,10 +236,17 @@ export function checkTrapRules(level: Level): RuleFinding[] {
     const exits = sides(s.up).filter((d) => { const m = move(w, s, d); return m.kind !== 'climb' && !lethal(w, m); });
     if (exits.length < 2) add1('1.3', false, `spawn ${i}`, `only ${exits.length} exit direction(s)`);
   });
+  const beam = (s: Spot) => level.beams.has(cellKey(s.cell));
+  const vanishing = (s: Spot) => level.vanish.has(cellKey(sub(s.cell, dirVec(s.up))));
   for (const { spot, d } of distances(w, spawnSpots, 3).values()) {
     const t = types(w, spot);
-    if (d <= 2 && t.some((x) => x !== 'arrow')) add1('1.2', true, at(spot), `${t.join('+')} ${d} move(s) from a spawn`);
-    else if (d === 3 && t.includes('boost')) add1('6.2', true, at(spot), `boost ${d} moves from a spawn`);
+    if (d <= 2) {
+      if (t.some((x) => x !== 'arrow' && x !== 'teleport' && x !== 'switch')) add1('1.2', true, at(spot), `${t.join('+')} ${d} move(s) from a spawn`);
+      if (beam(spot)) add1('1.2', true, at(spot), `a laser beam ${d} move(s) from a spawn`);
+      if (t.includes('teleport')) add1('10.1', true, at(spot), `teleporter ${d} move(s) from a spawn`);
+      if (t.includes('switch')) add1('10.5', true, at(spot), `switch ${d} move(s) from a spawn`);
+      if (vanishing(spot)) add1('10.7', true, at(spot), `vanishing block ${d} move(s) from a spawn`);
+    } else if (t.includes('boost')) add1('6.2', true, at(spot), `boost ${d} moves from a spawn`);
   }
 
   // 2. Keys, exit and goals.
@@ -309,15 +356,19 @@ export function checkTrapRules(level: Level): RuleFinding[] {
 
   // 7. Density and variety.
   const n = all.length;
-  const nLethal = all.filter((s) => types(w, s).some((t) => LETHAL_TILES.includes(t))).length;
+  const nLethal = all.filter((s) => beam(s) || types(w, s).some((t) => LETHAL_TILES.includes(t))).length;
   if (nLethal > 0.1 * n) add1('7.1', true, 'level', `${nLethal} of ${n} standable tiles are lethal (max 10 %)`);
   const nMod = all.filter((s) => types(w, s).some((t) => MODIFIER_TILES.includes(t) && t !== level.theme)).length;
   if (nMod > 0.25 * n) add1('7.2', true, 'level', `${nMod} of ${n} standable tiles are modifiers${level.theme ? ` (theme ${level.theme} exempt)` : ''} (max 25 %)`);
-  const kinds = new Set(level.tiles.map((t) => t.type));
+  // Trap types: tile types, with lasers (and their switches) one type, and invisible and vanishing blocks (13b).
+  const kinds = new Set<string>(level.tiles.map((t) => (t.type === 'switch' ? 'laser' : t.type)));
+  if (level.lasers.length) kinds.add('laser');
+  if (level.invisible.size) kinds.add('invisible');
+  if (level.vanish.size) kinds.add('vanish');
   if (level.pool && (kinds.size < 2 || kinds.size > 5)) add1('7.3', true, 'level', `${kinds.size} trap types (pool levels use 2-5)`);
   const third = (a: number, lo: number, hi: number) => a > lo + (hi - lo) / 3 && a < hi - (hi - lo) / 3;
   for (const s of all) {
-    if (!lethal(w, s)) continue;
+    if (!tileLethal(w, s)) continue; // laser beams count for rules 1, 2, 3 and 7.1 only (10.3)
     const b = sub(s.cell, dirVec(s.up));
     if (!race && third(b.x, level.min.x, level.max.x) && third(b.z, level.min.z, level.max.z)) add1('7.4', false, at(s), 'lethal tile in the central third');
     for (const d of sides(s.up)) {
@@ -330,5 +381,75 @@ export function checkTrapRules(level: Level): RuleFinding[] {
       if (plain === 3) add1('7.5', false, at(s), `lethal at the end of a push lane along ${dirName(d)}`);
     }
   }
+  check13b(level, w, all, goals, reach, add1);
   return out;
+}
+
+type Goal = { what: string; p: { cell: Vec3; up: Dir } };
+type Add = (rule: string, error: boolean, where: string, msg: string) => void;
+
+/** LEVEL-DESIGN §10 (phase 13b): teleporters, lasers and switches, invisible and vanishing blocks. */
+function check13b(level: Level, w: World, all: Spot[], goals: Goal[], reach: Set<string>[], add1: Add): void {
+  const tileAt = (t: Tile): Spot => ({ cell: add(t.block, dirVec(t.face!)), up: t.face! });
+  const onGoal = (s: Spot) => goals.find((g) => spotKey(g.p) === spotKey(s));
+  // 10.1 pairs (spawn distance is checked with rule 1.2), 10.2 arrivals, 10.5 switches on goals.
+  const tps = level.tiles.filter((t) => t.type === 'teleport');
+  for (const id of new Set(tps.map((t) => t.pair))) {
+    const n = tps.filter((t) => t.pair === id).length;
+    if (n !== 2) add1('10.1', true, `pair ${id}`, `${n} teleporter(s) (pairs are exactly 2)`);
+  }
+  for (const t of level.tiles) {
+    if (t.type !== 'teleport' && t.type !== 'switch') continue;
+    const s = tileAt(t), g = onGoal(s);
+    if (g) add1(t.type === 'teleport' ? '10.1' : '10.5', true, at(s), `${t.type} on the ${g.what} tile`);
+    if (t.type !== 'teleport') continue;
+    for (const fwd of sides(s.up)) {
+      const to = teleportTarget(w, pose(s, fwd));
+      if (!to) continue;
+      if (lethal(w, to)) add1('10.2', true, at(s), `arrives on a lethal tile (${at(to)})`);
+      else if (!resultPose(w, to, 'fwd')) add1('10.2', true, `${at(s)} entered ${dirName(fwd)}`, `arrives facing ${dirName(to.fwd)} into a fall, a trap or a dead end (${at(to)})`);
+    }
+  }
+  // 10.4: at most 3 groups, and no laser soft-lock: from every state the players can cause (any spot reachable from
+  // a spawn, with any group states the switches allow), every key and the exit can still be reached, switches included.
+  const groups = groupsOf(level);
+  if (groups.length > 3) add1('10.4', true, 'level', `${groups.length} laser groups (max 3)`);
+  if (groups.length && goals.length) {
+    // Every spot a ball can reach, with every group state the switches allow (another player may flip them any time).
+    const first = [...explore(w, level.spawns, 0).nodes.values()];
+    const masks = [...new Set(first.map((n) => n.mask))];
+    const spots = [...new Map(first.map((n) => [`${cellKey(n.cell)}|${n.up}|${n.fwd}`, { cell: n.cell, up: n.up, fwd: n.fwd }])).values()];
+    const { nodes, back } = explore(w, spots, 0, new Map(), masks);
+    for (const g of goals) {
+      const ok = new Set([...nodes].filter(([, p]) => cellKey(p.cell) === cellKey(g.p.cell)).map(([k]) => k));
+      for (let frontier = [...ok]; frontier.length;) {
+        const next: string[] = [];
+        for (const k of frontier) for (const b of back.get(k) ?? []) if (!ok.has(b)) { ok.add(b); next.push(b); }
+        frontier = next;
+      }
+      const stuck = [...nodes].find(([k]) => !ok.has(k));
+      if (stuck) {
+        const on = groups.filter((_, i) => stuck[1].mask & (1 << i));
+        add1('10.4', true, g.what, `unreachable from ${at(stuck[1])} with lasers on: ${on.join(', ') || 'none'} (a laser soft-lock)`);
+      }
+    }
+  }
+  // 10.6 / 10.7: invisible blocks, and vanishing ones gone, never cut a spawn off a goal (vanishing: unless each lane
+  // of them can be crossed at walking speed).
+  const cut = (drop: Iterable<string>) => { const c = createWorld(w.level, 0); c.removed = new Set(drop); return c; };
+  const lost = (c: World) => goals.filter((g) => level.spawns.some((s, i) => reach[i].has(cellKey(g.p.cell)) && !safeCells(c, s).has(cellKey(g.p.cell))));
+  if (level.invisible.size) for (const g of lost(cut(level.invisible))) add1('10.6', true, g.what, 'only reachable over invisible blocks');
+  if (level.vanish.size) {
+    for (const [k, v] of level.vanish) if (v.period < 40 || 2 * v.on < v.period) add1('10.7', true, k, `period ${v.period} on ${v.on}: needs period >= 40 and on >= 50 %`);
+    if (lost(cut(level.vanish.keys())).length) {
+      for (const lane of lanes(w, all)) {
+        const seq = lane.map((s) => level.vanish.get(cellKey(sub(s.cell, dirVec(s.up)))) ?? null);
+        if (seq.some((v) => v) && (!vanishLanePassable(seq) || !vanishLanePassable([...seq].reverse()))) {
+          add1('10.7', true, at(lane[seq.findIndex((v) => v)]), "on the only route to a goal, and this lane of vanishing blocks can't be crossed at walking speed");
+        }
+      }
+    }
+  }
+  // 10.8: one main mechanic.
+  if (tps.length && level.lasers.length) add1('10.8', false, 'level', 'both teleporters and lasers (use one as the main mechanic)');
 }

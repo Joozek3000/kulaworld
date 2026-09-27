@@ -33,7 +33,7 @@ Workflow:
 | 14b | Roll-under + trap rules | Roll under a high hop (stomped if you stop); LEVEL-DESIGN.md rules enforced by level:check |
 | 14c | Boost fix | Pads launch from any entry along their arrow; hold-and-retry when blocked; knock/slide onto pad launches |
 | 14d | Moving collisions | Head-on = both bounce back; side hit = pushed; works on ice slides |
-| 13b | Traps 2 (planned) | Teleporters, lasers + switches, invisible/vanishing blocks |
+| 13b | Traps 2 | Teleporters, lasers + switches, invisible/vanishing blocks |
 | 15a | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15b | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
 | 16 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |

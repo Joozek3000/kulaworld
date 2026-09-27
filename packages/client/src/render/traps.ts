@@ -31,7 +31,7 @@ function chevronGeo(): THREE.BufferGeometry {
 
 const v = (d: Dir) => { const u = dirVec(d); return new THREE.Vector3(u.x, u.y, u.z); };
 /** A group on the centre of face `face` of `block`: local +Y is the face normal, local +Z is `fwd` (⟂ face). */
-function onFace(block: { x: number; y: number; z: number }, face: Dir, fwd?: Dir): THREE.Group {
+export function onFace(block: { x: number; y: number; z: number }, face: Dir, fwd?: Dir): THREE.Group {
   const g = new THREE.Group();
   const n = v(face), f = v(fwd ?? ALL_DIRS.find((d) => d >> 1 !== face >> 1)!), r = new THREE.Vector3().crossVectors(n, f);
   g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, n, f));

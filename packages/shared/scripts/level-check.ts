@@ -23,7 +23,8 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     const tag = f.error ? 'E' : f.note ? 'noted' : 'W';
     console.log(`     ${f.error ? '!' : '~'} [${tag}] ${findingId(f)}: ${f.msg}${f.note ? ` (${f.note})` : ''}`);
   }
-  console.log(`     rules: ${trapErrors} error(s), ${findings.filter((f) => !f.error && !f.note).length} warning(s), ${findings.filter((f) => f.note).length} noted${level.pool ? '' : ' (not in the pool: errors are informational)'}`);
+  const why = level.lab ? ' (a lab level: exempt from [E] rules)' : level.pool ? '' : ' (not in the pool: errors are informational)';
+  console.log(`     rules: ${trapErrors} error(s), ${findings.filter((f) => !f.error && !f.note).length} warning(s), ${findings.filter((f) => f.note).length} noted${why}`);
   // Lint (phase 12, warnings only): 1-wide corridors with no way round, where balls get stuck behind each other.
   for (const c of lintCorridors(level)) {
     const where = `corridor ${c.length} long on ${dirName(c.up)} along ${dirName(c.along)}: ${cellKey(c.from)} .. ${cellKey(c.to)}`;

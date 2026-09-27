@@ -1,21 +1,30 @@
 import { CRUMBLE_REGROW_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
-import { parseDir } from '../dir.ts';
-import { cellKey, vec, type Vec3 } from '../vec.ts';
-import { BLOCK_TILES, type Level, type LevelJson, type Tile } from './types.ts';
+import { dirVec, parseDir } from '../dir.ts';
+import { add, cellKey, scale, vec, type Vec3 } from '../vec.ts';
+import { BLOCK_TILES, type BlockFlags, type Level, type LevelJson, type Tile, type Vanish } from './types.ts';
 
 const v3 = (a: [number, number, number]): Vec3 => vec(a[0], a[1], a[2]);
 
 /** Expands boxes, parses dirs and computes the AABB. Throws on malformed dirs; use validateLevel for rule checks. */
 export function loadLevel(json: LevelJson): Level {
-  const solid = new Set<string>();
-  const cells: Vec3[] = (json.blocks ?? []).map(v3);
+  const solid = new Set<string>(), invisible = new Set<string>(), vanish = new Map<string, Vanish>();
+  const cells: Vec3[] = [];
+  const flag = (c: Vec3, f: BlockFlags) => {
+    if (f.invisible) invisible.add(cellKey(c));
+    if (f.vanish) vanish.set(cellKey(c), { period: f.vanish.period, on: f.vanish.on, phase: f.vanish.phase ?? 0 });
+  };
+  for (const b of json.blocks ?? []) {
+    const c = v3(Array.isArray(b) ? b : b.cell);
+    cells.push(c);
+    if (!Array.isArray(b)) flag(c, b);
+  }
   for (const b of json.boxes ?? []) {
     const [x0, y0, z0] = b.min, [x1, y1, z1] = b.max;
     for (let x = x0; x <= x1; x++)
       for (let y = y0; y <= y1; y++)
         for (let z = z0; z <= z1; z++) {
           const surface = x === x0 || x === x1 || y === y0 || y === y1 || z === z0 || z === z1;
-          if (!b.hollow || surface) cells.push(vec(x, y, z));
+          if (!b.hollow || surface) { cells.push(vec(x, y, z)); flag(vec(x, y, z), b); }
         }
   }
   const min = vec(Infinity, Infinity, Infinity), max = vec(-Infinity, -Infinity, -Infinity);
@@ -31,12 +40,26 @@ export function loadLevel(json: LevelJson): Level {
     regrowTicks: Math.round((t.regrowSec ?? CRUMBLE_REGROW_SEC) * TICK_RATE),
     period: t.period ?? 0, upTicks: t.up ?? 0, phase: t.phase ?? 0,
     dir: t.dir ? parseDir(t.dir) : null, variant: t.variant ?? 'far', deathtrap: t.deathtrap ?? false, regrows: t.regrowSec !== undefined,
+    pair: t.pair ?? '', group: t.group ?? '',
   }));
   const blockTiles = new Map<string, Tile>(), faceTiles = new Map<string, Tile>();
   for (const t of tiles) {
     if (t.face === null) blockTiles.set(cellKey(t.block), t);
     else faceTiles.set(`${cellKey(t.block)}|${t.face}`, t);
   }
+  // Teleporters (phase 13b): each end of a pair of exactly two points at the other.
+  const partners = new Map<string, Tile>();
+  for (const t of tiles) {
+    if (t.type !== 'teleport' || t.face === null) continue;
+    const ends = tiles.filter((u) => u.type === 'teleport' && u.pair === t.pair);
+    if (ends.length === 2) partners.set(`${cellKey(t.block)}|${t.face}`, ends[0] === t ? ends[1] : ends[0]);
+  }
+  const lasers = (json.lasers ?? []).map((l) => {
+    const from = v3(l.from), dir = parseDir(l.dir);
+    return { group: l.group, from, dir, length: l.length, on: l.on, cells: Array.from({ length: l.length }, (_, i) => add(from, scale(dirVec(dir), i))) };
+  });
+  const beams = new Map<string, string[]>();
+  for (const l of lasers) for (const c of l.cells) beams.set(cellKey(c), [...(beams.get(cellKey(c)) ?? []), l.group]);
 
   return {
     id: json.id,
@@ -44,6 +67,7 @@ export function loadLevel(json: LevelJson): Level {
     version: json.version,
     mode: json.mode ?? 'race',
     pool: json.pool ?? false,
+    lab: json.lab ?? false,
     lives: json.lives ?? 0,
     crumble: json.crumble ?? null,
     heat: json.heat === false ? null
@@ -62,6 +86,11 @@ export function loadLevel(json: LevelJson): Level {
     notes: json.notes ?? {},
     blockTiles,
     faceTiles,
+    invisible,
+    vanish,
+    lasers,
+    beams,
+    partners,
   };
 }
 

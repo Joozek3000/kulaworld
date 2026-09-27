@@ -43,6 +43,8 @@ export function validateLevel(level: Level): string[] {
     if (level.keys.length < level.keysRequired) errors.push(`keysRequired ${level.keysRequired} > ${level.keys.length} keys`);
   } else errors.push(`unknown mode ${level.mode}`);
   validateTiles(level, errors);
+  validate13b(level, errors);
+  if (level.lab && level.pool) errors.push('a lab level is never in the pool');
   if (level.theme !== null && !MODIFIER_TILES.includes(level.theme)) errors.push(`theme must be a non-lethal trap type (${MODIFIER_TILES.join(', ')}), got ${level.theme}`);
   if (typeof level.notes !== 'object' || Array.isArray(level.notes) || Object.values(level.notes).some((n) => typeof n !== 'string')) {
     errors.push('notes must be an object of strings');
@@ -74,10 +76,32 @@ function validateTiles(level: Level, errors: string[]): void {
     if (t.type === 'boost' && (t.dir === null || t.face === null || !perpendicular(t.dir, t.face))) errors.push(`${what}: boost needs a dir perpendicular to its face`);
     if (t.deathtrap && t.type !== 'ice' && t.type !== 'boost') errors.push(`${what}: deathtrap is only for ice or boost tiles`);
     if (t.type === 'crumble' && !(t.regrowTicks > 0)) errors.push(`${what}: regrowSec must be > 0`);
+    if (t.type === 'teleport' && !t.pair) errors.push(`${what}: teleport needs a pair id`);
+    if (t.type === 'switch' && !level.lasers.some((l) => l.group === t.group)) errors.push(`${what}: switch group "${t.group}" has no laser`);
   });
   // A whole-block type conflicts with face types on that block, except crumble under arrow/boost/spikes.
   for (const [fk, type] of byFace) {
     const block = byBlock.get(fk.split('|')[0]);
     if (block && block !== 'crumble') errors.push(`${type} on ${fk} conflicts with the ${block} block`);
+  }
+}
+
+/** Phase 13b: laser beams run through air and agree on their group's start state; vanish schedules are sane. */
+function validate13b(level: Level, errors: string[]): void {
+  const start = new Map<string, boolean>();
+  level.lasers.forEach((l, i) => {
+    const what = `laser ${i} (${l.group})`;
+    if (!l.group) errors.push(`${what}: needs a group`);
+    if (!Number.isInteger(l.length) || l.length < 1) errors.push(`${what}: length must be a positive integer`);
+    if (typeof l.on !== 'boolean') errors.push(`${what}: on must be true or false`);
+    for (const c of l.cells) if (levelSolid(level, c)) errors.push(`${what}: beam cell ${cellKey(c)} is inside a block`);
+    if (start.has(l.group) && start.get(l.group) !== l.on) errors.push(`${what}: group ${l.group} starts both on and off`);
+    start.set(l.group, l.on);
+  });
+  for (const [k, v] of level.vanish) {
+    if (!(Number.isInteger(v.period) && Number.isInteger(v.on) && Number.isInteger(v.phase) && v.on > 0 && v.on < v.period)) {
+      errors.push(`vanishing block ${k}: needs integer ticks with 0 < on < period`);
+    }
+    if (level.blockTiles.get(k)?.type === 'crumble') errors.push(`vanishing block ${k}: can't also crumble`);
   }
 }

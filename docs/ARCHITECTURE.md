@@ -499,18 +499,26 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
   - Prediction: a launch with another player within `BOOST_NEAR` (3) cells of its landing is deferred to the server; `Charge` is server-only (prediction pauses).
   - The pad's chevrons run along `dir` all the time and speed up while it glows. The local launch kicks the camera back briefly.
 
-**13b rules** (next phase)
-- **Teleporters:** paired by `pair` id. Finishing on one moves you (a `Teleport` action, 6 ticks, render fade) to the partner tile with the same relative facing. If the partner is occupied, you stay put. Per-ball cooldown of 20 ticks.
+**13b rules** (phase 13b)
+```json
+"blocks": [[1,0,1], { "cell": [3,0,6], "vanish": { "period": 60, "on": 40, "phase": 0 } }, { "cell": [9,0,4], "invisible": true }],
+"boxes": [{ "min": [2,0,5], "max": [9,0,5], "invisible": true }],
+"lasers": [{ "group": "red", "from": [2,1,4], "dir": "+X", "length": 3, "on": true }],
+"tiles": [{ "block": [6,0,2], "face": "+Y", "type": "teleport", "pair": "home" }, { "block": [3,0,5], "face": "+Y", "type": "switch", "group": "red" }]
+```
+- **Teleporters:** exactly two tiles per `pair`. Arriving on one by a roll, flip, climb, knock or ice slide starts `Teleport` (Action 14, TELEPORT_TICKS 6, reserves both cells; render: fade out, then in on the partner). The facing is rotated by the rotation taking the source face onto the target face (same or opposite face: unchanged). Partner cell taken (reserved, or any ball in it): the ball holds (`Charge`, as a boost) up to BOOST_HOLD_TICKS, then is released as on a plain tile until it leaves. Arriving by teleport never re-triggers. Events `teleport {result: go | held | released}`.
 - **Lasers and switches:**
-  - A laser is a line of air cells between two emitters, grouped by `color`. When active, a ball whose action finishes in, or passes through, a beam cell dies (cause `laser`).
-  - A switch tile toggles its colour group when any ball finishes on it. It's rate-limited by a 20-tick cooldown per switch.
-  - Initial state comes from the level.
-- **Invisible blocks:** solid, but rendered only within 2 cells of the local ball (or with sunglasses, phase 14).
-  - race-05 gets an invisible beam at z=5 from x=2 to x=9 as the counter-direction shortcut across its one-way ring (decided in phase 14b, built in 13b).
-- **Vanishing blocks:** solid on a `period`/`on`/`phase` schedule (the `removed` overlay toggles). A ball standing there when it vanishes falls.
+  - A laser covers `length` air cells from `from` along `dir`, in a `group`. Group states (`world.lasers`, synced as the `lasers` map) start from the level (`on`).
+  - A ball whose action finishes in, or passed through, an active beam cell dies (cause `laser`), checked over the action's path cells when it finishes. A beam switched on through a standing ball kills it.
+  - A switch tile toggles its group when an action finishes on it (a hop too), at most once per SWITCH_COOLDOWN_TICKS (20) per switch. Event `laser {group, on}`.
+- **Invisible blocks:** solid, rendered only within 2 cells of the local ball (fading out to 3), or everywhere with `revealInvisible` (sunglasses, 15a).
+  - race-05 has an invisible beam at z=5 from x=2 to x=9 as the counter-direction shortcut across its one-way ring.
+- **Vanishing blocks:** solid for `on` of every `period` ticks, offset by `phase`, derived from the tick inside `isSolid`. A ball standing there when it vanishes falls. Planning treats them as gaps. Invisible and vanishing blocks never crumble.
+- **Levels:** race-07 Switchyard (two laser cages, a teleporter home), arena-07 Warp Ring (two teleporter pairs, a blinking vanishing inner ring); race-01 got a laser fence with a switch each side, arena-01 blinking hole plugs and two invisible ledges. traps-lab is `"lab": true`: exempt from the [E] rules, never pooled.
 
 **Common**
 - Death causes are added to the `death` event (`fall`, `spikes`, `fire`, `laser`, `burn`) for HUD and toasts.
+- Planning (13b): `resultPose` follows teleports and rejects any move through an active beam (an off beam is open); planning worlds have no vanishing blocks.
 - BFS (`findPath`/`resultPose`) must follow forced moves (ice slides, boosts, teleports) and treat lethal outcomes as invalid, like fatal falls. Retracting spikes count as lethal at planning time (bots don't time them in v1).
   - Fire (phase 14b): the planning state tracks `fire` (landings on fire in a row, reset by any other landing), so a plan may cross up to 2 fire tiles in a row but never a 3rd. `findPath(..., fire, fireMax)` takes the player's current count; `fireMax` 0 makes fire a wall (level:check's safe routes).
 - The predictor runs the same rules. The trap state (crumbled blocks, laser groups) comes from server state each patch, like `removed`.
