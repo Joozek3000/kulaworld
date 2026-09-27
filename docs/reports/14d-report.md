@@ -75,11 +75,27 @@ Headless Chrome over CDP on the real GPU (the Chrome extension wasn't connected)
 - Screenshots were too slow to catch the contact frame. The squash itself wasn't checked by eye (render code only).
 
 ## Soak
-**Not run.** The background processes were stopped for low memory, and I didn't restart them without being asked. Command, when you want it:
+Pool soak after the phase commit: one server on :2568 (`MIN_PLAYERS=4`, no `LEVEL`, bots voting) and one bot process (`--count 4 --behaviour seek,bully,blocker,wander`, skill 0.5). Only one of each, to save memory.
 
-`PORT=2568 MIN_PLAYERS=4 npx tsx packages/server/src/index.ts` and `npm run bots -- --count 4 --behaviour seek,bully,blocker,wander --server ws://localhost:2568`
+**8 rounds: 0 STUCK, no errors.**
 
-Per level, the results lines will give `hits H/S` and `knockouts cause:n`.
+| # | Level | Winner | Hits (head-on/side) | Knockouts by cause |
+|---:|---|---|---|---|
+| 1 | arena-03 | bully (lastAlive) | 0/1 | push 4, edge 2 |
+| 2 | race-04 | seek (exit) | 0/0 | none |
+| 3 | race-05 | seek (exit) | 1/0 | headon 1 |
+| 4 | race-02 | seek (exit) | 0/0 | edge 2, push 1 |
+| 5 | arena-04 | bully (lastAlive) | 1/0 | push 2, edge 3 |
+| 6 | arena-06 | seek (lastAlive) | 1/2 | edge 2, push 3, headon 1, side 1 |
+| 7 | arena-03 | bully (lastAlive) | 0/0 | push 3, edge 3 |
+| 8 | race-04 | seek (exit) | 0/0 | push 1 |
+
+- **Totals:**
+  - Hits: 3 head-on, 3 side.
+  - Knockouts: push 14, edge 12, headon 2, side 1.
+- **Moving collisions are rare between bots.** Most knockouts are still pushes on standing balls, and bully's side hits need a target crossing right in front of it.
+- **Arena-03 (Ice Rink) had only 1 side hit in 2 rounds.** On ice the bots mostly stand still and push, rather than sliding at each other.
+- **A 9th round was cut off when the processes were stopped.** In it, bully and seek met head-on 6 times in quick succession: two bots re-charging each other after every recovery. It isn't a STUCK (they bounce apart each time), but bots may need a "don't charge the same ball again straight away" rule.
 
 ## Deviations (details in DECISIONS.md)
 1. **race-06 pads didn't move one tile in.** A far launch goes exactly 3 cells, so from one tile in it would land in the 2-cell gap. Instead the two edge tiles beside each pad are removed (40 blocks): the pad is a tongue reachable only from behind, heading for its gap. Landings are unchanged, and `level:check` is clean (0 errors, 0 warnings).
