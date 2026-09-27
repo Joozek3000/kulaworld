@@ -100,7 +100,7 @@ Boost launches / holds / releases per level (summed over its rounds):
 - The pad-less levels show 0, as they should.
 - The 4 holds, from the log:
   - `held bully-2 (no room to bump blocker-3)` → released
-  - `held blocker-3 (can't stomp seek-1)` → launched within the hold (the landing cleared)
+  - `held blocker-3 (can't stomp seek-1)` → no release logged (it launched, or was shoved off the pad, within the hold)
   - `held bully-2 (no room to bump seek-1)` → released
   - `held seek-1 (can't stomp blocker-3)` → released
 - Most launches are bots crossing arena-05's ring gap (29 in one round). Winners: seek on all 9 races, and bully, blocker or seek on the knockouts.
