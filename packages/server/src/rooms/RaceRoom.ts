@@ -82,6 +82,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private rng = mulberry32(Date.now() >>> 0);
   private world: World | null = null;
   private stalemate = new StalemateMeter();
+  /** Boost pads this round (phase 14c): launches, holds, releases. */
+  private boostStats = { launch: 0, held: 0, released: 0 };
   private round = 0;
   private frame = 0;
   private inputCounts = new Map<string, number>();
@@ -229,6 +231,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;
         this.stalemate = new StalemateMeter();
+        this.boostStats = { launch: 0, held: 0, released: 0 };
         this.queues.clear();
         for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
         s.items.clear();
@@ -251,7 +254,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const stats = w.mode === 'knockout'
           ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
           : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s`);
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released)`);
         break;
       }
     }
@@ -270,6 +273,13 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'stomp': console.log(`event stomp: ${this.nameOf(e.attackerId)} → ${this.nameOf(e.victimId)}`); break;
       case 'clash': console.log(`event clash: ${this.nameOf(e.attackerId)} ↔ ${this.nameOf(e.victimId)}`); break;
       case 'burn': console.log(`event burn: ${who}`); break;
+      case 'boost': { // phase 14c: holds and releases say why; launches are counted, not logged one by one
+        this.boostStats[e.result]++;
+        if (e.result === 'launch') break;
+        const why = { solid: 'a cell on the flight path is solid', reserved: 'landing reserved by', unstompable: "can't stomp", bump: 'no room to bump' }[e.reason ?? 'solid'];
+        console.log(`boost: ${e.result} ${who}${e.result === 'held' ? ` (${why}${e.byId ? ` ${this.nameOf(e.byId)}` : ''})` : ''}`);
+        break;
+      }
       case 'keyDrop': console.log(`event keyDrop: ${who} dropped key ${e.keyId}`); break;
       case 'lifeLost': console.log(`event lifeLost: ${who} has ${e.livesLeft}`); break;
       case 'eliminated': console.log(`event eliminated: ${who}${e.byId ? ` by ${this.nameOf(e.byId)}` : ''}`); break;

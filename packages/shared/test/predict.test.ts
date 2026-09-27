@@ -265,3 +265,36 @@ test('traps (§18): an ice slide into a boost, predicted solo with no mispredict
   expect(h.pred.mispredictions).toBe(0);
   expect(h.results).not.toContain('mispredict');
 });
+
+describe('boost pads (phase 14c): prediction', () => {
+  const padWorld = (spawns: Spawn[]) => {
+    const blocks: [number, number, number][] = [...row(0, 12, 0, -1), ...row(0, 12), ...row(0, 12, 0, 1)];
+    const w = makeWorld(blocks, spawns, { heat: false, tiles: [{ block: [3, 0, 0], face: '+Y', type: 'boost', dir: '+X' }] });
+    return w;
+  };
+
+  test('a solo launch from a side entry is predicted with no mispredictions', () => {
+    const w = padWorld([[[3, 1, 1], '+Y', '-Z']]);
+    const h = new Harness(w, 'p0');
+    h.send({ fwdHeld: true });
+    h.run(2);
+    h.send({});
+    h.run(40);
+    expect(w.players[0].pose.cell).toEqual({ x: 6, y: 1, z: 0 });
+    expect(h.pred.mispredictions).toBe(0);
+    expect(h.results).not.toContain('mispredict');
+  });
+
+  test('a launch with another player within 3 cells of the landing is left to the server (deferred)', () => {
+    const w = padWorld([[[3, 1, 1], '+Y', '-Z'], [[7, 1, 1], '+Y', '-X']]); // 2 cells from the landing (6,1,0)
+    const h = new Harness(w, 'p0');
+    h.pred.setOthers([{ id: 'p1', ...toServer(w.players[1]) }]);
+    h.send({ fwdHeld: true });
+    h.run(2);
+    h.send({});
+    h.run(40);
+    expect(w.players[0].pose.cell).toEqual({ x: 6, y: 1, z: 0 });
+    expect(h.pred.deferrals).toBeGreaterThan(0);
+    expect(h.pred.mispredictions).toBe(0);
+  });
+});

@@ -34,7 +34,7 @@ These rules apply to every level in the pool and to future editor levels.
 
 ## 6. Ice and boosts
 - [E] Every ice field has a non-lethal stopping tile at the end of every slide direction.
-- [E] Boost pads have a `dir` and only launch when you enter them moving in that direction (from any other direction they're plain tiles). The landing tile for that direction is clear (not lethal, not void), and no boost is within 3 moves of a spawn.
+- [E] Boost pads have a `dir`. A ball arriving on a pad from any direction (roll, flip, climb, knock or slide) is launched along `dir`, so the arrow shows exactly where you'll fly. The landing tile for `dir` is clear (not lethal, not void), and no boost is within 3 moves of a spawn. (Phase 14c; `npm test` also checks that every pool pad launches along its arrow from each open neighbour.)
 - [W] Ice arenas have a non-ice rim at least 1 tile wide.
 
 ## 7. Density and variety (readability budget)

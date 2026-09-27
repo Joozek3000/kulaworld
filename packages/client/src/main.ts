@@ -58,7 +58,8 @@ players.onFeel = (e) => {
     case 'pop': audio.play('pop', { at }); break;
     case 'clack': audio.play('clack', { at, intensity: e.intensity }); break;
     case 'slide': audio.play('slide', { at }); break;
-    case 'launch': audio.play('pwomp', { at }); break;
+    case 'launch': audio.play('pwomp', { at }); if (e.local) rig.kick(); break;
+    case 'charge': audio.play('hum', { at }); break; // held on a boost pad (phase 14c)
     case 'whoosh': audio.play('whoosh', { at }); break;
     case 'edge': audio.play('edge', { gain: 0.7 }); break; // an enemy just around your edge (phase 13a)
   }
@@ -233,7 +234,7 @@ view.renderer.setAnimationLoop((now: number) => {
   const noCrumbling = { get: () => undefined };
   const crumbling = active && s.crumbling ? s.crumbling : noCrumbling;
   levelView?.updateTraps(crumbling, s.tick, now / 1000);
-  trapsView?.update(renderTick, s.tick, crumbling, players.rollingOnto(), dtMs / 1000, now / 1000);
+  trapsView?.update(renderTick, s.tick, crumbling, players.rollingOnto(), dtMs / 1000, now / 1000, players.chargingOn());
 
   // Knocked out of a knockout round: follow whoever did it while they're on screen, otherwise orbit.
   const out = !!mine?.eliminated && active;

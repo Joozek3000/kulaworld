@@ -244,21 +244,6 @@ describe('boost', () => {
     for (let i = 0; i < 100; i++) died.push(...step(pit));
     expect(of(died, 'death').map((e) => e.cause)).toEqual(['fall']);
   });
-
-  test("phase 14b: a pad launches only a ball entering along its dir; from any other way it's a plain tile", () => {
-    const along = trapWorld(row(0, 6), [east(0)], [face(1, 'boost', { dir: '+X' })]);
-    tap(along, { fwdHeld: true });
-    run(along, ROLL_TICKS);
-    expect(player(along).action).toBe(Action.Jump);
-    const against = trapWorld(row(0, 6), [[[2, 1, 0], '+Y', '-X']], [face(1, 'boost', { dir: '+X' })]);
-    tap(against, { fwdHeld: true });
-    settle(against, player(against));
-    expect([player(against).action, player(against).pose.cell]).toEqual([Action.Idle, vec(1, 1, 0)]);
-    const side = trapWorld([...row(0, 6), [1, 0, 1]], [[[1, 1, 1], '+Y', '-Z']], [face(1, 'boost', { dir: '+X' })]);
-    tap(side, { fwdHeld: true });
-    settle(side, player(side));
-    expect([player(side).action, player(side).pose.cell]).toEqual([Action.Idle, vec(1, 1, 0)]);
-  });
 });
 
 describe('knocked onto ice (phase 14b)', () => {

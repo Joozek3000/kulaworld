@@ -6,7 +6,7 @@ import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
 /** Extend by appending; values go over the network. */
-export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12 } as const;
+export const Action = { Idle: 0, Roll: 1, Turn: 2, Flip: 3, Jump: 4, Fall: 5, Dead: 6, Hop: 7, Knocked: 8, Stunned: 9, Rebound: 10, Climb: 11, Strike: 12, Charge: 13 } as const;
 export type Action = (typeof Action)[keyof typeof Action];
 
 /**
@@ -70,6 +70,10 @@ export interface PlayerState {
   forced: Cmd | null;
   /** Knocked onto ice (§18): sliding in the knock direction, and staggered once the slide stops. */
   staggerOwed: boolean;
+  /** Boost pad (phase 14c): the tick a blocked launch started holding the ball (Charge), or -1. */
+  boostHold: number;
+  /** The pad (tileKey) a held launch gave up on: it doesn't fire again until the ball leaves it. */
+  boostSpent: string | null;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -133,7 +137,11 @@ export type SimEvent =
   | { type: 'stomp'; attackerId: string; victimId: string }
   | { type: 'clash'; attackerId: string; victimId: string }
   | { type: 'burn'; playerId: string }
-  | { type: 'cradle'; pusherId: string; victimId: string; length: number };
+  | { type: 'cradle'; pusherId: string; victimId: string; length: number }
+  | { type: 'boost'; playerId: string; result: 'launch' | 'held' | 'released'; reason?: BoostBlock; byId?: string };
+
+/** Why a launch is held (phase 14c): a flown-through or landing cell is solid, the landing is taken, or its ball can't be stomped (or bumped). */
+export type BoostBlock = 'solid' | 'reserved' | 'unstompable' | 'bump';
 
 /** Why a ball died (§18), for the HUD and toasts. */
 export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn';
@@ -227,6 +235,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
     jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null, staggerOwed: false,
+    boostHold: -1, boostSpent: null,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -252,7 +261,7 @@ export function occupiedCells(p: PlayerState): Vec3[] {
   const { cell, fwd } = p.pose;
   switch (p.action) {
     case Action.Dead: return [];
-    case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: case Action.Strike: return [cell];
+    case Action.Idle: case Action.Turn: case Action.Hop: case Action.Stunned: case Action.Strike: case Action.Charge: return [cell];
     case Action.Flip: return [cell, add(cell, dirVec(fwd)), p.to.cell];
     case Action.Jump: {
       // Over a player on A1: A1 stays theirs. A stomp jump also holds the bump cell B.
@@ -272,7 +281,7 @@ export function occupiedCells(p: PlayerState): Vec3[] {
 export function isPushable(v: PlayerState, tick: number): boolean {
   if (tick < v.protectedUntil) return false; // knockout spawn protection
   switch (v.action) {
-    case Action.Idle: case Action.Turn: case Action.Strike: return true;
+    case Action.Idle: case Action.Turn: case Action.Strike: case Action.Charge: return true; // a charging ball can be shoved off its pad
     case Action.Stunned: return v.bounce; // a knocked victim staggers; a bounced pusher is fair game
     case Action.Hop: return lowHop(v, tick);
     default: return false;
@@ -299,7 +308,7 @@ function lowHop(v: PlayerState, tick: number): boolean {
  */
 export function transmits(v: PlayerState, tick: number): boolean {
   switch (v.action) {
-    case Action.Idle: case Action.Turn: case Action.Strike: case Action.Stunned: return true;
+    case Action.Idle: case Action.Turn: case Action.Strike: case Action.Stunned: case Action.Charge: return true;
     case Action.Hop: return lowHop(v, tick);
     default: return false;
   }

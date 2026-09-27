@@ -40,7 +40,7 @@ function onFace(block: { x: number; y: number; z: number }, face: Dir, fwd?: Dir
 }
 
 interface Spikes { tile: Tile; cones: THREE.Mesh[]; holes: THREE.Mesh[]; h: number }
-interface Pad { tile: Tile; mat: THREE.MeshStandardMaterial; glow: number }
+interface Pad { tile: Tile; mat: THREE.MeshStandardMaterial; glow: number; chevrons: THREE.Mesh[]; run: number }
 interface Crumble { key: string; group: THREE.Group }
 interface Fragment { mesh: THREE.Mesh; vel: THREE.Vector3; born: number }
 
@@ -100,13 +100,15 @@ export class TrapsView {
           const pad = new THREE.Mesh(padGeo, mat);
           pad.position.y = 0.025;
           g.add(pad);
-          for (let k = -1; k <= 1; k++) { // three chevrons in a row, pointing along dir: "launch this way"
+          const chevrons: THREE.Mesh[] = [];
+          for (let k = 0; k < 3; k++) { // three chevrons running along dir (update() moves them): "you fly this way"
             const c = new THREE.Mesh(chevron, arrowMat);
             c.rotation.set(-Math.PI / 2, 0, Math.PI); // as the arrow: tip along local +Z
-            c.position.set(0, 0.052, 0.2 * k);
+            c.position.y = 0.052;
             g.add(c);
+            chevrons.push(c);
           }
-          this.pads.push({ tile: t, mat, glow: 0 });
+          this.pads.push({ tile: t, mat, glow: 0, chevrons, run: 0 });
           this.group.add(g);
           break;
         }
@@ -155,9 +157,10 @@ export class TrapsView {
 
   /**
    * Per frame. `renderTick` drives the spikes; `crumbling` (block → vanish tick) and `serverTick` the crumble cracks
-   * (shake while pending, gone, fade back in on regrow); `onto` is where balls are rolling onto right now (boost glow).
+   * (shake while pending, gone, fade back in on regrow); `onto` is where balls are rolling onto right now (boost glow),
+   * `charging` where balls are held on a pad (brightest glow, phase 14c).
    */
-  update(renderTick: number, serverTick: number, crumbling: { get(k: string): number | undefined }, onto: Pose[], dt: number, timeSec: number): void {
+  update(renderTick: number, serverTick: number, crumbling: { get(k: string): number | undefined }, onto: Pose[], dt: number, timeSec: number, charging: Pose[] = []): void {
     const k = Math.min(1, dt * 18);
     for (const s of this.spikes) {
       s.h += ((spikesUp(s.tile, Math.floor(renderTick)) ? 1 : 0) - s.h) * k;
@@ -166,9 +169,13 @@ export class TrapsView {
     this.fireMat.emissiveIntensity = 0.7 + 0.35 * Math.sin(timeSec * 13) + 0.15 * Math.sin(timeSec * 31);
     for (const p of this.pads) {
       const b = p.tile.block, u = dirVec(p.tile.face!);
-      const hit = onto.some((o) => o.up === p.tile.face && o.fwd === p.tile.dir && o.cell.x === b.x + u.x && o.cell.y === b.y + u.y && o.cell.z === b.z + u.z);
-      p.glow += ((hit ? 1 : 0) - p.glow) * Math.min(1, dt * (hit ? 20 : 4));
+      const on = (o: Pose) => o.up === p.tile.face && o.cell.x === b.x + u.x && o.cell.y === b.y + u.y && o.cell.z === b.z + u.z;
+      const want = charging.some(on) ? 1.6 : onto.some(on) ? 1 : 0; // any direction launches now (phase 14c)
+      p.glow += (want - p.glow) * Math.min(1, dt * (want > p.glow ? 20 : 4));
       p.mat.emissiveIntensity = 0.1 + 1.4 * p.glow;
+      // The chevrons run along dir all the time, faster while the pad glows; each wraps round in the pad's length.
+      p.run = (p.run + dt * (0.35 + 1.2 * p.glow)) % 0.6;
+      p.chevrons.forEach((c, k) => { c.position.z = ((p.run + 0.2 * k) % 0.6) - 0.3; });
     }
     for (const c of this.crumbles) {
       const at = crumbling.get(c.key);

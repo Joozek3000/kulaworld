@@ -36,5 +36,7 @@ export const CRUMBLE_REGROW_SEC = 8;
 export const FIRE_MAX = 3;
 /** A boost launch's flight time (a normal jump is JUMP_TICKS). */
 export const BOOST_TICKS = 12;
+/** A blocked launch holds the ball on its pad (Charge) this long, retrying every tick, before releasing it (phase 14c). */
+export const BOOST_HOLD_TICKS = 10;
 /** BFS gives up following a forced chain (ice slides, boosts) after this many steps: an ice loop. */
 export const FORCED_MAX = 64;

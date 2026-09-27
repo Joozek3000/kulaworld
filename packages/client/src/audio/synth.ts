@@ -211,6 +211,18 @@ export const RECIPES: Record<string, Recipe> = {
     f.frequency.exponentialRampToValueAtTime(700 * pitch, t + 0.2);
     return 0.22;
   },
+  /** Held on a boost pad (phase 14c): a hum rising over the hold (BOOST_HOLD_TICKS, half a second), with a wobble. */
+  hum(c, out, t, { pitch }) {
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.09, t + 0.08);
+    g.gain.setValueAtTime(0.09, t + 0.42);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    g.connect(out);
+    const o = osc(c, g, t, 0.55, 'triangle', 110 * pitch, 330 * pitch, 0.5);
+    vibrato(c, o.frequency, t, 0.55, 18, 6);
+    return 0.55;
+  },
   /** Crumbly low noise: a rumble plus a scatter of short gritty grains. */
   crumble(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.3, 0.01, 0.6), t, 0.62, 'lowpass', 500 * pitch, 0.8);

@@ -1,9 +1,9 @@
 import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
-import { add, sub, type Vec3 } from '../vec.ts';
+import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { faceTileAt, fwdAllowed } from './tiles.ts';
-import { Action, isFree, isSolid, outOfBounds, reservations, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
+import { Action, isFree, isPushable, isSolid, outOfBounds, reservations, type BoostBlock, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
 
 /** `over`: a forward jump over a player on A1. `bump`: a stomp jump's bump cell B (§16). */
 export interface Plan { action: Action; to: Pose; ticks: number; over?: boolean; bump?: Vec3 }
@@ -65,10 +65,12 @@ export function previewAction(
       return null;
     }
     case 'boost': {
-      // §18: a forced jump off a boost pad. far: 3 cells forward; high: 2 forward and 1 up. The cells flown through
-      // must be open (no fallback to a shorter launch). Landing, stomp and fall rules are the jump's.
+      // §18: a forced jump off a boost pad, always along the pad's dir (phase 14c; the ball turns to face it). far: 3
+      // cells ahead; high: 2 ahead and 1 up. The cells flown through must be open (no fallback to a shorter launch).
+      // Landing, stomp and fall rules are the jump's, but a ball on the landing that can't be stomped blocks it.
       const t = faceTileAt(world, self.pose);
-      if (t?.type !== 'boost') return null;
+      if (t?.type !== 'boost' || boostBlock(world, self, res)) return null;
+      const fwd = t.dir!, F = dirVec(fwd);
       const high = t.variant === 'high';
       const L = high ? add(add(C, F), add(F, U)) : add(add(C, F), add(F, F));
       const through = high ? [add(C, U), add(add(C, F), U)] : [add(C, F), add(add(C, F), F)];
@@ -86,6 +88,27 @@ export function previewAction(
       if (isSolid(world, add(C, U))) return null; // low ceiling
       return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: JUMP_TICKS };
   }
+}
+
+/** Why the boost launch from `self`'s pad can't start now (phase 14c), or null if it can. */
+export function boostBlock(
+  world: World, self: Pick<PlayerState, 'id' | 'pose'>, res: Reservations = reservations(world),
+): { reason: BoostBlock; byId?: string } | null {
+  const t = faceTileAt(world, self.pose);
+  if (t?.type !== 'boost') return null;
+  const { cell: C, up } = self.pose, U = dirVec(up), F = dirVec(t.dir!);
+  const high = t.variant === 'high';
+  const L = high ? add(add(C, F), add(F, U)) : add(add(C, F), add(F, F));
+  const through = high ? [add(C, U), add(add(C, F), U)] : [add(C, F), add(add(C, F), F)];
+  if (through.some((c) => isSolid(world, c)) || isSolid(world, L)) return { reason: 'solid' };
+  const owner = res.get(cellKey(L));
+  const onL = standingAt(world, L, up, self.id);
+  if (onL) {
+    if (!world.rules.push || !isPushable(onL, world.tick)) return { reason: 'unstompable', byId: onL.id };
+    const B = add(L, F);
+    return isFree(world, res, self.id, B) ? null : { reason: 'bump', byId: onL.id };
+  }
+  return owner === undefined || owner === self.id ? null : { reason: 'reserved', byId: owner };
 }
 
 export interface StompPreview { victimId: string; bumpCell: Vec3; lethal: boolean }

@@ -15,7 +15,7 @@ import { art, BALL_MODELS } from './art.ts';
  * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
  */
 export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
-  | 'slide' | 'launch' | 'edge' | 'whoosh';
+  | 'slide' | 'launch' | 'edge' | 'whoosh' | 'charge';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -88,6 +88,7 @@ const SQUASH = {
   climb: -0.12, // rolling into a wall's corner
   stomp: -0.5, // a stomped victim, flattened under the attacker before it shoots out (§16)
   shudder: -0.18, // a middle ball of a cradle, along the strike
+  charge: -0.3, // held on a boost pad, squashed down, ready to fly (phase 14c)
 };
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
 const STOMP_HOLD = 0.4;
@@ -484,6 +485,7 @@ class PlayerView {
         break;
       }
       case Action.Fall: target = SQUASH.fall; this.squashAxis.copy(tmpUp); break;
+      case Action.Charge: target = SQUASH.charge; this.squashAxis.copy(tmpUp); break;
       case Action.Knocked: {
         knockDir.set(s.to.cell.x - s.from.cell.x, s.to.cell.y - s.from.cell.y, s.to.cell.z - s.from.cell.z).normalize();
         this.knockAxis.copy(knockDir);
@@ -641,6 +643,8 @@ export class PlayersView {
   private level: Level | null = null;
   private readonly streaks = new Map<PlayerView, THREE.Mesh>();
   private readonly streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+  /** Balls holding on a boost pad right now (for the charge hum's start). */
+  private readonly charging = new WeakSet<PlayerView>();
   /** Roll under (§14): the last roll segment (serial) per ball that whooshed under a hop, so it plays once. */
   private readonly whooshed = new WeakMap<PlayerView, number>();
 
@@ -651,9 +655,14 @@ export class PlayersView {
 
   setLevel(level: Level | null): void { this.level = level; }
 
-  /** Where balls are rolling or flipping onto right now (boost pads glow before the launch). */
+  /** Where balls are rolling, flipping or climbing onto right now (boost pads glow before the launch). */
   rollingOnto(): Pose[] {
-    return [...this.views.values()].filter((v) => v.shown && (v.action === Action.Roll || v.action === Action.Flip)).map((v) => v.current.to);
+    return [...this.views.values()].filter((v) => v.shown && (v.action === Action.Roll || v.action === Action.Flip || v.action === Action.Climb)).map((v) => v.current.to);
+  }
+
+  /** Where balls are held on a boost pad (Charge, phase 14c): those pads glow brightest. */
+  chargingOn(): Pose[] {
+    return [...this.views.values()].filter((v) => v.shown && v.action === Action.Charge).map((v) => v.current.from);
   }
 
   /** The tile under a pose: its whole-block and face tile types (§18). */
@@ -673,6 +682,10 @@ export class PlayersView {
     let streak = this.streaks.get(v);
     if (changed && sliding && !streak?.visible) this.onFeel?.({ kind: 'slide', at: v.ball.position, local: v.local, intensity: 0.5 });
     if (changed && s.action === Action.Jump && t.face === 'boost') this.onFeel?.({ kind: 'launch', at: v.ball.position, local: v.local, intensity: 0.5 });
+    // Held on a pad (phase 14c): one rising hum when the hold starts (a hold is a run of 1-tick Charge segments).
+    const charging = v.shown && s.action === Action.Charge;
+    if (charging && !this.charging.has(v)) this.onFeel?.({ kind: 'charge', at: v.ball.position, local: v.local, intensity: 0.5 });
+    if (charging) this.charging.add(v); else this.charging.delete(v);
     if (!streak && sliding) {
       streak = new THREE.Mesh(streakGeo, this.streakMat);
       this.scene.add(streak);

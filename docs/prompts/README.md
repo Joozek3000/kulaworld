@@ -31,6 +31,7 @@ Workflow:
 | 13a | Traps 1 | Spikes (static/retracting), fire, crumble, ice, arrows, boost pads; race-02 Ice Garden; traps-lab; clearer edge glow |
 | 14 | Levels + vote | 8 new trap levels, trap pass on old ones, lobby level vote with previews |
 | 14b | Roll-under + trap rules | Roll under a high hop (stomped if you stop); LEVEL-DESIGN.md rules enforced by level:check |
+| 14c | Boost fix | Pads launch from any entry along their arrow; hold-and-retry when blocked; knock/slide onto pad launches |
 | 13b | Traps 2 (planned) | Teleporters, lasers + switches, invisible/vanishing blocks |
 | 15a | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15b | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |

@@ -4,6 +4,7 @@ import { INPUT_BUFFER_TICKS } from './constants.ts';
 import type { Level, Pose } from './level/types.ts';
 import { cellKey } from './vec.ts';
 import { previewAction, type Plan } from './sim/actions.ts';
+import { forcedAfter } from './sim/tiles.ts';
 import { step } from './sim/tick.ts';
 import {
   Action, addPlayer, createWorld, reserve, setInput,
@@ -108,10 +109,13 @@ function applyServer(p: PlayerState, s: ServerPlayer): void {
   if (s.fireCount !== undefined) p.fireCount = s.fireCount;
 }
 
+/** A boost launch with another player this close (cells, Manhattan) to its landing is left to the server (phase 14c). */
+export const BOOST_NEAR = 3;
+
 export type ReconcileResult = 'match' | 'mispredict' | 'deferred' | 'reset' | 'paused';
 
 /** Server-only states: while the local player is in one (on the server or in our prediction), prediction pauses. */
-export const UNPREDICTED: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, Action.Dead, Action.Rebound, Action.Strike]);
+export const UNPREDICTED: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, Action.Dead, Action.Rebound, Action.Strike, Action.Charge]);
 
 /**
  * The local player's predicted timeline (§17). A private World holds the local player plus the other players frozen
@@ -237,6 +241,18 @@ export class Predictor {
    * the others are.
    */
   private towardOthers(p: PlayerState, pose: Pose): boolean {
+    // A boost launch about to be forced (phase 14c): anyone within BOOST_NEAR cells of the landing may take it or be
+    // stomped, so the server decides.
+    const forced = p.action === Action.Idle ? p.forced : forcedAfter(this.world, pose, p.action);
+    if (forced === 'boost') {
+      const all = this.world.players;
+      this.world.players = [p];
+      const plan = previewAction(this.world, { id: p.id, pose }, 'boost', new Map());
+      this.world.players = all;
+      const near = (c: { x: number; y: number; z: number }) => !!plan
+        && Math.abs(c.x - plan.to.cell.x) + Math.abs(c.y - plan.to.cell.y) + Math.abs(c.z - plan.to.cell.z) <= BOOST_NEAR;
+      return all.some((o) => o !== p && (near(o.pose.cell) || near(o.to.cell)));
+    }
     const pulse = p.pulse && p.pulseAge <= INPUT_BUFFER_TICKS ? p.pulse : null;
     const jumps = (fwd: boolean): Cmd[] => (fwd ? ['jump', 'hop'] : ['hop']);
     const cmds: Cmd[] = [];

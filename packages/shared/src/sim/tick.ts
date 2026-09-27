@@ -1,11 +1,11 @@
 import {
-  CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, JUMP_TICKS, KNOCK_TICKS, REBOUND_TICKS,
+  BOOST_HOLD_TICKS, CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, JUMP_TICKS, KNOCK_TICKS, REBOUND_TICKS,
   RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS,
 } from '../constants.ts';
 import { cross, dirFromVec, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
-import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
+import { boostBlock, previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
 import { blockTileAt, forcedAfter, fwdAllowed, onIce, spiked } from './tiles.ts';
@@ -74,15 +74,29 @@ export function step(world: World): SimEvent[] {
 
 const AIRBORNE: ReadonlySet<Action> = new Set([Action.Hop, Action.Jump, Action.Fall, Action.Rebound]);
 /** Pushed around: buffered pulses wait (don't age) until the player is back in control. */
-const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned]);
+const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned, Action.Charge]);
 /** On the ground in place: rising spikes get these (§18). */
-const STANDING: ReadonlySet<Action> = new Set([Action.Idle, Action.Turn, Action.Stunned, Action.Strike]);
+const STANDING: ReadonlySet<Action> = new Set([Action.Idle, Action.Turn, Action.Stunned, Action.Strike, Action.Charge]);
 /** Actions that land a ball on a new tile: fire counts these (§18). A hop, turn or stun in place doesn't. */
 const LANDINGS: ReadonlySet<Action> = new Set([Action.Roll, Action.Flip, Action.Climb, Action.Jump, Action.Fall, Action.Knocked, Action.Rebound]);
 
 /** `v` is on the ground in, or rolling through, hopper `p`'s cell (its pose or its target is there). Not in the air. */
 const under = (p: PlayerState, v: PlayerState): boolean =>
   v !== p && v.action !== Action.Dead && !AIRBORNE.has(v.action) && (eq(v.pose.cell, p.pose.cell) || eq(v.to.cell, p.pose.cell));
+
+/**
+ * A Charge tick ends (phase 14c): retry the launch this tick, or after BOOST_HOLD_TICKS release the ball as on a plain
+ * tile. The pad then stays quiet (boostSpent) until the ball leaves it; a stagger owed by a knock starts now.
+ */
+function endCharge(world: World, p: PlayerState, events: SimEvent[]): void {
+  p.action = Action.Idle;
+  p.to = p.pose;
+  if (world.tick - p.boostHold < BOOST_HOLD_TICKS) { p.forced = 'boost'; return; }
+  p.boostHold = -1;
+  p.boostSpent = tileKey(p.pose.cell, p.pose.up);
+  events.push({ type: 'boost', playerId: p.id, result: 'released' });
+  if (p.staggerOwed) stun(p, world.tick, false);
+}
 
 /**
  * A hop lands on a cell with another ball in it (§14 roll under), after this tick's moves so a ball that rolls on
@@ -160,7 +174,7 @@ function resolveMoves(world: World, intents: Intent[], events: SimEvent[]): void
   // Every ball in a pushed line may escape first (cradle push, §14); one that does breaks the line there.
   const targeted = new Set([...victimOf].flatMap(([p, v]) => (edge.has(p) ? [v] : chainLine(world, p, v))));
   const done = new Set<PlayerState>();
-  const act = ({ p, cmds }: Intent) => { done.add(p); tryCmds(world, p, cmds, res); };
+  const act = ({ p, cmds }: Intent) => { done.add(p); tryCmds(world, p, cmds, res, events); };
 
   for (const it of intents) if (targeted.has(it.p) && plans.has(it.p) && plans.get(it.p)!.action !== Action.Turn) act(it);
 
@@ -202,16 +216,32 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
 }
 
 /** Starts the first command that isn't blocked. A pulse is spent when tried, even if blocked. */
-function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): void {
+function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, events: SimEvent[]): void {
   for (const cmd of cmds) {
     if (cmd !== 'fwd' && cmd !== 'boost') p.pulse = null;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
     const resting = p.endTick < world.tick; // Idle for at least a tick, not chaining from a finished action
+    const facing = p.pose.fwd;
     startAction(p, plan, world.tick);
     p.graceUntil = plan.action === Action.Roll && resting ? world.tick + JUMP_GRACE_TICKS : -1;
+    if (cmd === 'boost') {
+      // The launch goes along the pad's dir: the ball spins to face it in the air (the mid-air turn record).
+      if (plan.to.fwd !== facing) { p.turnFromFwd = facing; p.turnStartTick = world.tick; }
+      p.boostHold = -1;
+      events.push({ type: 'boost', playerId: p.id, result: 'launch' });
+    }
     reserve(res, p);
     return;
+  }
+  // A blocked launch (phase 14c): hold on the pad (Charge) and retry next tick, up to BOOST_HOLD_TICKS.
+  if (cmds.length === 1 && cmds[0] === 'boost') {
+    if (p.boostHold < 0) {
+      p.boostHold = world.tick;
+      events.push({ type: 'boost', playerId: p.id, result: 'held', ...boostBlock(world, p, res) });
+    }
+    startAction(p, { action: Action.Charge, to: p.pose, ticks: 1 }, world.tick);
+    reserve(res, p);
   }
 }
 
@@ -309,6 +339,7 @@ function die(world: World, p: PlayerState, events: SimEvent[], cause: DeathCause
   p.fireCount = 0;
   p.forced = null;
   p.staggerOwed = false;
+  p.boostHold = -1;
   events.push({ type: 'death', playerId: p.id, cell: p.pose.cell, cause });
   const creditId = onDeath(world, p, events);
   if (world.mode === 'knockout') loseLife(world, p, creditId, events);
@@ -378,6 +409,7 @@ function knock(v: PlayerState, dest: Vec3, byId: string, tick: number): void {
   v.pose = { ...v.pose, fwd };
   startAction(v, { action: Action.Knocked, to: { cell: dest, up: v.pose.up, fwd }, ticks: KNOCK_TICKS }, tick);
   v.bounce = false;
+  v.boostHold = -1; // shoved off its pad mid-Charge
   v.lastKnockedBy = byId;
   v.lastKnockedTick = tick;
 }
@@ -439,6 +471,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     return;
   }
   const finished = p.action;
+  if (finished === Action.Charge) { endCharge(world, p, events); return; }
   if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
   const moved = sub(p.to.cell, p.pose.cell);
   leaveTile(world, p.pose, p.to);
@@ -447,6 +480,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   p.bounce = false;
   p.jumpOver = false;
   p.stompBump = null;
+  if (p.boostSpent && p.boostSpent !== tileKey(p.pose.cell, p.pose.up)) p.boostSpent = null; // left the spent pad
   if (finished === Action.Fall && outOfBounds(world.level, p.pose.cell)) {
     die(world, p, events, 'fall');
     return;
@@ -461,8 +495,10 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
   if (finished === Action.Turn || finished === Action.Stunned || finished === Action.Strike) return;
   p.forced = forcedAfter(world, p.pose, finished);
+  if (p.forced === 'boost' && p.boostSpent) p.forced = null; // a pad that gave up on this ball: a plain tile until it leaves
   if (finished === Action.Knocked && p.forced) {
-    // Knocked onto ice (§18): it slides on in the knock direction; the stagger waits until the slide stops.
+    // Knocked onto ice or a pad (§18): it slides on in the knock direction, or launches; the stagger waits until the
+    // slide stops or the launch lands.
     p.pose = { ...p.pose, fwd: dirFromVec(moved) };
     p.to = p.pose;
     p.staggerOwed = true;

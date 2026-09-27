@@ -51,14 +51,20 @@ export const dampAlpha = (k: number, dt: number) => 1 - Math.exp(-k * dt);
 
 export type CameraMode = 'follow' | 'hold' | 'orbit';
 
+const kickDir = new THREE.Vector3();
+
 export class CameraRig {
   private orbitAngle = 0;
   private snap = true;
   /** The damped camera position before occlusion (damping continues from here, not from the clamped spot). */
   private readonly pos = new THREE.Vector3();
   private solid: SolidFn | null = null;
+  /** A short jolt (a boost launch, phase 14c): cells the camera is pushed back along its view, easing out. */
+  private kickAmt = 0;
 
   constructor(private camera: THREE.Camera) {}
+
+  kick(amount = 0.45): void { this.kickAmt = amount; }
 
   /** Solid test for camera occlusion (the level minus crumbled blocks). */
   setSolid(solid: SolidFn | null): void { this.solid = solid; }
@@ -90,5 +96,9 @@ export class CameraRig {
     this.camera.quaternion.slerp(goalQuat, a);
     if (mode === 'follow' && pose && this.solid) clampToOpen(ball, this.pos, this.solid, this.camera.position);
     else this.camera.position.copy(this.pos);
+    if (this.kickAmt > 0.005) {
+      this.camera.position.add(kickDir.set(0, 0, 1).applyQuaternion(this.camera.quaternion).multiplyScalar(this.kickAmt));
+      this.kickAmt *= Math.exp(-dt * 9);
+    } else this.kickAmt = 0;
   }
 }
