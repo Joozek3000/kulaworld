@@ -29,10 +29,20 @@
     { "cell": [0, 1, 8], "up": "+Y", "fwd": "+X" },
     { "cell": [0, 1, 4], "up": "+Y", "fwd": "+X" }
   ],
+  "notes": {
+    "7.5 2,0,2 +Y": "the spike tiles sit in the open lanes between pillars on purpose: shove fights around them",
+    "7.5 2,0,6 +Y": "the spike tiles sit in the open lanes between pillars on purpose: shove fights around them",
+    "7.5 6,0,2 +Y": "the spike tiles sit in the open lanes between pillars on purpose: shove fights around them",
+    "7.5 6,0,6 +Y": "the spike tiles sit in the open lanes between pillars on purpose: shove fights around them"
+  },
   "tiles": [
-    { "block": [4, 2, 1], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
-    { "block": [4, 2, 7], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
-    { "block": [1, 2, 4], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 },
-    { "block": [7, 2, 4], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 }
+    { "block": [2, 0, 2], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
+    { "block": [6, 0, 6], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 0 },
+    { "block": [2, 0, 6], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 },
+    { "block": [6, 0, 2], "face": "+Y", "type": "spikes", "period": 60, "up": 24, "phase": 30 },
+    { "block": [1, 2, 1], "type": "crumble" },
+    { "block": [7, 2, 7], "type": "crumble" },
+    { "block": [1, 2, 7], "type": "crumble" },
+    { "block": [7, 2, 1], "type": "crumble" }
   ]
 }

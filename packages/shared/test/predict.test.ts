@@ -248,7 +248,7 @@ describe('predictor', () => {
 test('traps (§18): an ice slide into a boost, predicted solo with no mispredictions', () => {
   const tiles = [1, 2, 3].map((x) => ({ block: [x, 0, 0] as [number, number, number], type: 'ice' as const }));
   const w = makeWorld(row(0, 12), [[[0, 1, 0], '+Y', '+X']], {
-    heat: false, tiles: [...tiles, { block: [4, 0, 0], face: '+Y', type: 'boost' }, { block: [9, 0, 0], type: 'crumble' }],
+    heat: false, tiles: [...tiles, { block: [4, 0, 0], face: '+Y', type: 'boost', dir: '+X' }, { block: [9, 0, 0], type: 'crumble' }],
   });
   const h = new Harness(w, 'p0');
   h.send({ fwdHeld: true });

@@ -40,6 +40,6 @@
     { "block": [4, 3, 2], "type": "crumble", "regrowSec": 8 },
     { "block": [4, 3, 3], "type": "crumble", "regrowSec": 8 },
     { "block": [4, 3, 4], "type": "crumble", "regrowSec": 8 },
-    { "block": [-2, 2, 3], "face": "+X", "type": "boost", "variant": "far" }
+    { "block": [-2, 2, 3], "face": "+X", "type": "boost", "dir": "+Y", "variant": "far" }
   ]
 }

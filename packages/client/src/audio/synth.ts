@@ -205,6 +205,12 @@ export const RECIPES: Record<string, Recipe> = {
     noise(c, env(c, out, t, 0.08, 0.01, 0.12), t, 0.14, 'lowpass', 900, 0.7);
     return 0.25;
   },
+  /** Roll under a hop (§14): a quick airy "whff", band-passed noise sweeping down past the ball overhead. */
+  whoosh(c, out, t, { pitch }) {
+    const f = noise(c, env(c, out, t, 0.09, 0.04, 0.16), t, 0.22, 'bandpass', 2400 * pitch, 1.1);
+    f.frequency.exponentialRampToValueAtTime(700 * pitch, t + 0.2);
+    return 0.22;
+  },
   /** Crumbly low noise: a rumble plus a scatter of short gritty grains. */
   crumble(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.3, 0.01, 0.6), t, 0.62, 'lowpass', 500 * pitch, 0.8);

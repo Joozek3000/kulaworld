@@ -59,6 +59,7 @@ players.onFeel = (e) => {
     case 'clack': audio.play('clack', { at, intensity: e.intensity }); break;
     case 'slide': audio.play('slide', { at }); break;
     case 'launch': audio.play('pwomp', { at }); break;
+    case 'whoosh': audio.play('whoosh', { at }); break;
     case 'edge': audio.play('edge', { gain: 0.7 }); break; // an enemy just around your edge (phase 13a)
   }
 };
@@ -164,6 +165,19 @@ let wasUnlocked = false;
 let lastLocalPose = '';
 const nextSizzle = new Map<string, number>();
 let blockedSince = 0, lastBump = 0;
+const FADE_MS = 150;
+const fade = document.createElement('div');
+fade.style.cssText = `position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity ${FADE_MS}ms`;
+view.renderer.domElement.after(fade); // over the scene, under the labels and the HUD
+let fadeUntil = 0;
+/** The level to show: the round's, or in the lobby the candidate with the most votes (the first one on a tie or none). */
+function backdropId(s: typeof net.state): string {
+  const c = s.candidates;
+  if (s.phase !== 'lobby' || !c?.length) return s.levelId;
+  let best = 0;
+  for (let i = 1; i < c.length; i++) if ((s.voteCounts?.[i] ?? 0) > (s.voteCounts?.[best] ?? 0)) best = i;
+  return c[best];
+}
 
 view.renderer.setAnimationLoop((now: number) => {
   const dtMs = Math.min(now - last, 100);
@@ -174,8 +188,13 @@ view.renderer.setAnimationLoop((now: number) => {
   net.update(now, dtMs);
   const me = net.sessionId;
 
-  if (s.levelId && level?.id !== s.levelId) {
-    level = findLevel(s.levelId);
+  // Lobby backdrop (phase 14b): the scene shows the leading vote candidate, with a quick fade between levels.
+  const want = backdropId(s);
+  if (want && level?.id === want && fadeUntil) { fadeUntil = 0; fade.style.opacity = '0'; } // the lead went back
+  else if (want && level && level.id !== want && !fadeUntil) { fadeUntil = now + FADE_MS; fade.style.opacity = '1'; }
+  if (want && level?.id !== want && (!level || now >= fadeUntil)) {
+    if (fadeUntil) { fadeUntil = 0; fade.style.opacity = '0'; }
+    level = findLevel(want);
     if (levelView) { view.scene.remove(levelView.group); levelView.dispose(); }
     if (trapsView) { view.scene.remove(trapsView.group); trapsView.dispose(); }
     levelView = level ? new LevelView(level) : null;

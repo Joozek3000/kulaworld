@@ -1,8 +1,8 @@
 import {
-  CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS,
+  CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, JUMP_TICKS, KNOCK_TICKS, REBOUND_TICKS,
   RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS,
 } from '../constants.ts';
-import { cross, dirVec, opposite, type Dir } from '../dir.ts';
+import { cross, dirFromVec, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
@@ -10,7 +10,7 @@ import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
 import { blockTileAt, forcedAfter, fwdAllowed, onIce, spiked } from './tiles.ts';
 import {
-  Action, isFree, isPushable, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
+  Action, airHop, isFree, isPushable, occupiedCells, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
   type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
@@ -43,7 +43,13 @@ export function step(world: World): SimEvent[] {
     }
   }
 
-  for (const p of order) if (p.action !== Action.Idle && p.endTick === tick && !p.eliminated) finishAction(world, p, events);
+  // A hop coming down on a cell another ball is in or passing through (§14 roll under) lands after the moves below.
+  const hopLandings: PlayerState[] = [];
+  for (const p of order) {
+    if (p.action === Action.Idle || p.endTick !== tick || p.eliminated) continue;
+    if (p.action === Action.Hop && world.players.some((v) => under(p, v))) hopLandings.push(p);
+    else finishAction(world, p, events);
+  }
   // Spikes rising under a ball standing on them (§18). Finishing onto raised spikes is handled in finishAction.
   for (const p of order) if (STANDING.has(p.action) && spiked(world, p.pose)) die(world, p, events, 'spikes');
   stepCrumbleTiles(world);
@@ -52,6 +58,9 @@ export function step(world: World): SimEvent[] {
 
   const intents = order.filter((p) => p.action === Action.Idle).map((p) => ({ p, cmds: commands(world, p) }));
   resolveMoves(world, intents, events);
+  // A knock-slide on ice that couldn't go on (blocked): the stagger it owes starts now.
+  for (const p of order) if (p.staggerOwed && p.action === Action.Idle) stun(p, tick, false);
+  for (const p of hopLandings) if (p.action === Action.Hop && p.endTick === tick) landHop(world, p, events);
 
   updateHeat(world, events);
 
@@ -70,6 +79,27 @@ const HELPLESS: ReadonlySet<Action> = new Set([Action.Knocked, Action.Stunned]);
 const STANDING: ReadonlySet<Action> = new Set([Action.Idle, Action.Turn, Action.Stunned, Action.Strike]);
 /** Actions that land a ball on a new tile: fire counts these (§18). A hop, turn or stun in place doesn't. */
 const LANDINGS: ReadonlySet<Action> = new Set([Action.Roll, Action.Flip, Action.Climb, Action.Jump, Action.Fall, Action.Knocked, Action.Rebound]);
+
+/** `v` is on the ground in, or rolling through, hopper `p`'s cell (its pose or its target is there). Not in the air. */
+const under = (p: PlayerState, v: PlayerState): boolean =>
+  v !== p && v.action !== Action.Dead && !AIRBORNE.has(v.action) && (eq(v.pose.cell, p.pose.cell) || eq(v.to.cell, p.pose.cell));
+
+/**
+ * A hop lands on a cell with another ball in it (§14 roll under), after this tick's moves so a ball that rolls on
+ * counts as passing. One standing there (not leaving) is stomped like a fall landing (§16); one that can't be stomped
+ * (staggered, protected), or balls only passing through, keep the hopper up: it hops again at once. With push rules
+ * off it just lands (the MVP overlap).
+ */
+function landHop(world: World, p: PlayerState, events: SimEvent[]): void {
+  const near = world.players.filter((v) => under(p, v));
+  const standing = near.find((v) => eq(v.pose.cell, p.pose.cell) && eq(v.to.cell, p.pose.cell));
+  if (standing ? world.rules.push && !isPushable(standing, world.tick) : near.length) {
+    startAction(p, { action: Action.Hop, to: p.pose, ticks: JUMP_TICKS }, world.tick);
+    return;
+  }
+  finishAction(world, p, events);
+  if (standing && world.rules.push && p.action === Action.Idle) fallStomp(world, p, events);
+}
 
 /** Join order rotated by tick % playerCount so no player always wins contested cells. */
 function fairOrder(players: PlayerState[], tick: number): PlayerState[] {
@@ -158,10 +188,11 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
   for (const cmd of cmds) {
     if (cmd === 'fwd' && world.rules.push && fwdAllowed(world, p.pose)) {
       const A = add(p.pose.cell, dirVec(p.pose.fwd));
-      const victim = world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.up && eq(v.pose.cell, A));
-      if (victim) return { victim };
+      // A high hopper isn't a victim: the roll goes under it (§14). Two balls in A (one under a landing hop) block.
+      const inA = world.players.filter((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.up && eq(v.pose.cell, A) && !airHop(v, world.tick));
+      if (inA.length === 1) return { victim: inA[0] };
       const T = flipTarget(world, p, res);
-      const onT = T && world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.fwd && eq(v.pose.cell, T));
+      const onT = T && world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.fwd && eq(v.pose.cell, T) && !airHop(v, world.tick));
       if (onT) return { victim: onT, edge: true };
     }
     const plan = previewAction(world, p, cmd, res);
@@ -192,13 +223,17 @@ function spendPulse(intents: Intent[], p: PlayerState): void {
 function stun(p: PlayerState, tick: number, bounce: boolean): void {
   startAction(p, { action: Action.Stunned, to: p.pose, ticks: STUN_TICKS }, tick);
   p.bounce = bounce;
+  p.staggerOwed = false;
 }
 
-/** V1 and the balls lined up behind it along P's fwd on P's face, each in the next cell (at most CHAIN_MAX). */
+/**
+ * V1 and the balls lined up behind it along P's fwd on P's face, each in the next cell (at most CHAIN_MAX). A high
+ * hopper ends the line: it's in the air, so the last ball is knocked under it (§14).
+ */
 function chainLine(world: World, p: PlayerState, v: PlayerState): PlayerState[] {
   const F = dirVec(p.pose.fwd), line = [v], max = world.rules.chain === false ? 1 : CHAIN_MAX;
   for (let cell = add(v.pose.cell, F); line.length < max; cell = add(cell, F)) {
-    const next = world.players.find((q) => q !== p && q.action !== Action.Dead && q.pose.up === p.pose.up && eq(q.pose.cell, cell));
+    const next = world.players.find((q) => q !== p && q.action !== Action.Dead && q.pose.up === p.pose.up && eq(q.pose.cell, cell) && !airHop(q, world.tick));
     if (!next) break;
     line.push(next);
   }
@@ -273,6 +308,7 @@ function die(world: World, p: PlayerState, events: SimEvent[], cause: DeathCause
   p.heat = 0;
   p.fireCount = 0;
   p.forced = null;
+  p.staggerOwed = false;
   events.push({ type: 'death', playerId: p.id, cell: p.pose.cell, cause });
   const creditId = onDeath(world, p, events);
   if (world.mode === 'knockout') loseLife(world, p, creditId, events);
@@ -321,13 +357,13 @@ function leaveTile(world: World, from: Pose, to: Pose): void {
  */
 function stepCrumbleTiles(world: World): void {
   if (!world.crumbling.size) return;
-  let res: Reservations | null = null;
+  let taken: Set<string> | null = null;
   for (const [key, at] of world.crumbling) {
     if (world.tick < at) continue;
     if (!world.removed.has(key)) { world.removed.add(key); continue; }
     if (world.tick < at + world.level.blockTiles.get(key)!.regrowTicks) continue;
-    res ??= reservations(world);
-    if (res.has(key) || bandRemoved(world, key)) continue;
+    taken ??= new Set(world.players.flatMap((p) => occupiedCells(p).map(cellKey))); // high hoppers too
+    if (taken.has(key) || bandRemoved(world, key)) continue;
     world.removed.delete(key);
     world.crumbling.delete(key);
   }
@@ -404,6 +440,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   }
   const finished = p.action;
   if (finished === Action.Jump && p.stompBump && landStomp(world, p, events)) return;
+  const moved = sub(p.to.cell, p.pose.cell);
   leaveTile(world, p.pose, p.to);
   p.pose = p.to;
   p.action = Action.Idle;
@@ -424,6 +461,11 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   if (finished === Action.Fall && world.rules.push) fallStomp(world, p, events);
   if (finished === Action.Turn || finished === Action.Stunned || finished === Action.Strike) return;
   p.forced = forcedAfter(world, p.pose, finished);
-  if (finished === Action.Knocked) stun(p, tick, false); // stagger: not pushable (§14)
+  if (finished === Action.Knocked && p.forced) {
+    // Knocked onto ice (§18): it slides on in the knock direction; the stagger waits until the slide stops.
+    p.pose = { ...p.pose, fwd: dirFromVec(moved) };
+    p.to = p.pose;
+    p.staggerOwed = true;
+  } else if (finished === Action.Knocked || (p.staggerOwed && !p.forced)) stun(p, tick, false); // stagger: not pushable (§14)
   onLand(world, p, events);
 }

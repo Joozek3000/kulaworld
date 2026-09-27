@@ -30,7 +30,7 @@ export function loadLevel(json: LevelJson): Level {
     block: v3(t.block), type: t.type, face: BLOCK_TILES.includes(t.type) || !t.face ? null : parseDir(t.face),
     regrowTicks: Math.round((t.regrowSec ?? CRUMBLE_REGROW_SEC) * TICK_RATE),
     period: t.period ?? 0, upTicks: t.up ?? 0, phase: t.phase ?? 0,
-    dir: t.dir ? parseDir(t.dir) : null, variant: t.variant ?? 'far',
+    dir: t.dir ? parseDir(t.dir) : null, variant: t.variant ?? 'far', deathtrap: t.deathtrap ?? false, regrows: t.regrowSec !== undefined,
   }));
   const blockTiles = new Map<string, Tile>(), faceTiles = new Map<string, Tile>();
   for (const t of tiles) {
@@ -58,6 +58,8 @@ export function loadLevel(json: LevelJson): Level {
     keysRequired: json.keysRequired ?? 0,
     timeLimitSec: json.timeLimitSec,
     tiles,
+    theme: json.theme ?? null,
+    notes: json.notes ?? {},
     blockTiles,
     faceTiles,
   };

@@ -87,22 +87,23 @@ export class TrapsView {
         }
         case 'arrow': {
           const g = onFace(b, t.face!, t.dir!), m = new THREE.Mesh(arrow, arrowMat);
-          m.rotation.x = -Math.PI / 2; // shape +Y → local +Z (the arrow dir), extruded along the normal
+          m.rotation.set(-Math.PI / 2, 0, Math.PI); // shape +Y → local +Z (the arrow dir), extruded along the normal
           m.position.y = 0.002;
           g.add(m);
           this.group.add(g);
           break;
         }
         case 'boost': {
-          const g = onFace(b, t.face!), mat = new THREE.MeshStandardMaterial({ color: CORAL, emissive: CORAL, emissiveIntensity: 0.1, roughness: 0.3 });
+          // Local +Z is the pad's dir (phase 14b): it launches only a ball rolling on along it.
+          const g = onFace(b, t.face!, t.dir!), mat = new THREE.MeshStandardMaterial({ color: CORAL, emissive: CORAL, emissiveIntensity: 0.1, roughness: 0.3 });
           this.owned.push(mat);
           const pad = new THREE.Mesh(padGeo, mat);
           pad.position.y = 0.025;
           g.add(pad);
-          for (let k = 0; k < 4; k++) { // chevrons pointing out from the centre: "launch"
+          for (let k = -1; k <= 1; k++) { // three chevrons in a row, pointing along dir: "launch this way"
             const c = new THREE.Mesh(chevron, arrowMat);
-            c.rotation.set(-Math.PI / 2, 0, (k * Math.PI) / 2);
-            c.position.set(-0.2 * Math.sin((k * Math.PI) / 2), 0.052, 0.2 * Math.cos((k * Math.PI) / 2));
+            c.rotation.set(-Math.PI / 2, 0, Math.PI); // as the arrow: tip along local +Z
+            c.position.set(0, 0.052, 0.2 * k);
             g.add(c);
           }
           this.pads.push({ tile: t, mat, glow: 0 });
@@ -165,7 +166,7 @@ export class TrapsView {
     this.fireMat.emissiveIntensity = 0.7 + 0.35 * Math.sin(timeSec * 13) + 0.15 * Math.sin(timeSec * 31);
     for (const p of this.pads) {
       const b = p.tile.block, u = dirVec(p.tile.face!);
-      const hit = onto.some((o) => o.up === p.tile.face && o.cell.x === b.x + u.x && o.cell.y === b.y + u.y && o.cell.z === b.z + u.z);
+      const hit = onto.some((o) => o.up === p.tile.face && o.fwd === p.tile.dir && o.cell.x === b.x + u.x && o.cell.y === b.y + u.y && o.cell.z === b.z + u.z);
       p.glow += ((hit ? 1 : 0) - p.glow) * Math.min(1, dt * (hit ? 20 : 4));
       p.mat.emissiveIntensity = 0.1 + 1.4 * p.glow;
     }

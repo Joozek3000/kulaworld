@@ -295,14 +295,16 @@ describe('hop', () => {
     expect(p.to.cell).toEqual(target);
   });
 
-  test("a player can't roll into a hopping player's cell", () => {
+  test("a player can't roll into a low hop's cell, and rolls under it once it's high (§14 roll under)", () => {
     const w = makeWorld(row(0, 3), [onRow(), [[1, 1, 0], '+Y', '+X']]);
-    w.rules = { push: false }; // MVP rule; with push, a low hop is pushable (push.test.ts)
+    w.rules = { push: false }; // with push, a low hop is pushable (push.test.ts)
     setInput(w, 'p1', input({ jump: true }));
     step(w);
     expect(player(w, 'p1').action).toBe(Action.Hop);
     setInput(w, 'p0', input({ fwdHeld: true }));
-    run(w, 3);
+    run(w, 2); // the low window
     expect(player(w).action).toBe(Action.Idle);
+    step(w);
+    expect([player(w).action, player(w).to.cell]).toEqual([Action.Roll, vec(1, 1, 0)]);
   });
 });

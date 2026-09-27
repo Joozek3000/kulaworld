@@ -21,17 +21,21 @@
   ],
   "spawns": [
     { "cell": [1, 1, 0], "up": "+Y", "fwd": "+Z" },
-    { "cell": [4, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [3, 1, 0], "up": "+Y", "fwd": "+Z" },
     { "cell": [7, 1, 0], "up": "+Y", "fwd": "+Z" },
     { "cell": [8, 1, 4], "up": "+Y", "fwd": "-X" },
     { "cell": [7, 1, 8], "up": "+Y", "fwd": "-Z" },
-    { "cell": [4, 1, 8], "up": "+Y", "fwd": "-Z" },
+    { "cell": [5, 1, 8], "up": "+Y", "fwd": "-Z" },
     { "cell": [1, 1, 8], "up": "+Y", "fwd": "-Z" },
     { "cell": [0, 1, 4], "up": "+Y", "fwd": "+X" }
   ],
+  "notes": {
+    "3.4 4,0,2 +Y": "only when climbing out of the hole beside it; from the floor the spikes are in plain view",
+    "3.4 4,0,6 +Y": "only when climbing out of the hole beside it; from the floor the spikes are in plain view"
+  },
   "tiles": [
     { "block": [4, 0, 2], "face": "+Y", "type": "spikes", "period": 60, "up": 20, "phase": 0 },
     { "block": [4, 0, 6], "face": "+Y", "type": "spikes", "period": 60, "up": 20, "phase": 30 },
-    { "block": [1, 0, 4], "face": "+Y", "type": "boost", "variant": "far" }
+    { "block": [4, 0, 4], "face": "+Y", "type": "boost", "dir": "+X", "variant": "far" }
   ]
 }

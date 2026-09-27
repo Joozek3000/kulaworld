@@ -37,25 +37,16 @@
     { "cell": [1, 1, 4], "up": "+Y", "fwd": "-Z" },
     { "cell": [3, -1, 4], "up": "-Y", "fwd": "-Z" }
   ],
+  "notes": {
+    "7.5 11,0,2 +Y": "the east beam leads straight into the pad: pushing someone down the beam onto the centre spikes is the pad's point",
+    "7.5 11,0,2 -Y": "the east beam leads straight into the pad: pushing someone down the beam onto the centre spikes is the pad's point"
+  },
   "tiles": [
-    { "block": [12, 0, 1], "face": "+X", "type": "spikes" },
-    { "block": [12, 0, 2], "face": "+X", "type": "spikes" },
-    { "block": [12, 0, 3], "face": "+X", "type": "spikes" },
-    { "block": [10, 0, 1], "face": "-Z", "type": "spikes" },
-    { "block": [11, 0, 1], "face": "-Z", "type": "spikes" },
-    { "block": [12, 0, 1], "face": "-Z", "type": "spikes" },
-    { "block": [10, 0, 3], "face": "+Z", "type": "spikes" },
-    { "block": [11, 0, 3], "face": "+Z", "type": "spikes" },
-    { "block": [12, 0, 3], "face": "+Z", "type": "spikes" },
-    { "block": [1, 0, 5], "type": "ice" },
-    { "block": [1, 0, 6], "type": "ice" },
-    { "block": [1, 0, 7], "type": "ice" },
-    { "block": [1, 0, 8], "type": "ice" },
-    { "block": [1, 0, 9], "type": "ice" },
-    { "block": [3, 0, 5], "type": "ice" },
-    { "block": [3, 0, 6], "type": "ice" },
-    { "block": [3, 0, 7], "type": "ice" },
-    { "block": [3, 0, 8], "type": "ice" },
-    { "block": [3, 0, 9], "type": "ice" }
+    { "block": [11, 0, 2], "face": "+Y", "type": "spikes" },
+    { "block": [11, 0, 2], "face": "-Y", "type": "spikes" },
+    { "block": [1, 0, 7], "type": "crumble" },
+    { "block": [1, 0, 8], "type": "crumble" },
+    { "block": [3, 0, 7], "type": "crumble" },
+    { "block": [3, 0, 8], "type": "crumble" }
   ]
 }

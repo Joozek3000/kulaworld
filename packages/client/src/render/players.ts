@@ -15,7 +15,7 @@ import { art, BALL_MODELS } from './art.ts';
  * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
  */
 export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
-  | 'slide' | 'launch' | 'edge';
+  | 'slide' | 'launch' | 'edge' | 'whoosh';
 export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean }
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
@@ -589,6 +589,16 @@ class PlayerView {
     return false;
   }
 
+  /** Roll under (§14): this (hopping) ball's shadow sits on top of the ball below it instead of the floor. */
+  shadowOn(below: THREE.Vector3): void {
+    tmpUp.fromArray(this.pose.up);
+    this.shadow.position.copy(below).addScaledVector(tmpUp, BALL_RADIUS + 0.02);
+    this.shadow.quaternion.setFromUnitVectors(Z_AXIS, tmpUp);
+    this.shadow.scale.setScalar(0.6 * this.shadowWidth);
+    this.shadowMat.opacity = SHADOW_OPACITY;
+    this.shadow.visible = true;
+  }
+
   dispose(scene: THREE.Scene): void {
     scene.remove(this.ball, this.shadow, this.ring, this.marker, this.hot);
     this.markerMat.dispose();
@@ -631,6 +641,8 @@ export class PlayersView {
   private level: Level | null = null;
   private readonly streaks = new Map<PlayerView, THREE.Mesh>();
   private readonly streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+  /** Roll under (§14): the last roll segment (serial) per ball that whooshed under a hop, so it plays once. */
+  private readonly whooshed = new WeakMap<PlayerView, number>();
 
   constructor(private scene: THREE.Scene) {
     this.edgeGlow.visible = this.edgeRing.visible = false;
@@ -759,6 +771,7 @@ export class PlayersView {
       this.onFeel?.({ kind: 'clack', at: sh.view.ball.position, local: sh.view.local, intensity: sh.of > 1 ? sh.step / (sh.of - 1) : 0 });
     }
     this.placeEdgeGlow(localId, dt, nowMs / 1000);
+    this.rollUnder();
     const cfg = this.heat;
     for (const v of this.views.values()) {
       const { cell, up } = v.current.from;
@@ -768,6 +781,27 @@ export class PlayersView {
     const standing = new Set<string>();
     for (const v of this.views.values()) if (v.shown) standing.add(`${cellOf(v.current.from)}|${v.current.from.up}`);
     for (const v of this.views.values()) if (v.markerCell) v.setMarkerTaken(standing.has(v.markerCell));
+  }
+
+  /**
+   * Roll under a hop (§14): a ball on the ground in (or rolling through) a hopper's cell gets the hopper's shadow on
+   * top of it, and a whoosh once per roll that goes under.
+   */
+  private rollUnder(): void {
+    for (const v of this.views.values()) {
+      if (!v.shown || v.action !== Action.Hop || v.pose.lift < 0.25) continue;
+      const cell = cellOf(v.current.from);
+      tmpA.fromArray(v.pose.position).addScaledVector(tmpB.fromArray(v.pose.up), -v.pose.lift); // its ground point
+      for (const w of this.views.values()) {
+        if (w === v || !w.shown || (cellOf(w.current.from) !== cell && cellOf(w.current.to) !== cell)) continue;
+        if (w.ball.position.distanceTo(tmpA) < 0.8) v.shadowOn(w.ball.position);
+        const rolling = w.action === Action.Roll || w.action === Action.Flip;
+        if (rolling && this.whooshed.get(w) !== w.current.serial) {
+          this.whooshed.set(w, w.current.serial);
+          this.onFeel?.({ kind: 'whoosh', at: w.ball.position, local: w.local, intensity: 0.5 });
+        }
+      }
+    }
   }
 
   /**
@@ -810,13 +844,13 @@ export class PlayersView {
   }
 
   /**
-   * The player whose landing stomped this knock: a Jump (or a Fall, §16 fall stomp) ending on the knock's start tick
+   * The player whose landing stomped this knock: a Jump (or a Fall or a Hop, §16 fall stomp, §14 roll under) ending on the knock's start tick
    * in the victim's cell.
    */
   private stomperOf(knock: Seg, victimId: string): string | null {
     for (const [id, v] of this.views) {
       if (id === victimId) continue;
-      if (v.segs.some((q) => (q.action === Action.Jump || q.action === Action.Fall) && q.endTick === knock.startTick
+      if (v.segs.some((q) => (q.action === Action.Jump || q.action === Action.Fall || q.action === Action.Hop) && q.endTick === knock.startTick
         && q.to.cell.x === knock.from.cell.x && q.to.cell.y === knock.from.cell.y && q.to.cell.z === knock.from.cell.z)) return id;
     }
     return null;

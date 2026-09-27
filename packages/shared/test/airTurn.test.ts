@@ -106,12 +106,12 @@ describe('spawn shuffle', () => {
     expect(createWorld(level, 7).spawnOrder).toEqual(createWorld(level, 7).spawnOrder);
     const orders = new Set(Array.from({ length: 20 }, (_, s) => createWorld(level, s + 1).spawnOrder.join()));
     expect(orders.size).toBeGreaterThan(5);
-    for (const o of orders) expect(o.split(',').map(Number).sort()).toEqual([0, 1, 2, 3]);
+    for (const o of orders) expect(o.split(',').map(Number).sort((a, b) => a - b)).toEqual(level.spawns.map((_, i) => i));
   });
 
   test('the first player to join gets the first spawn of the shuffled order', () => {
-    const counts = [0, 0, 0, 0];
-    for (let seed = 1; seed <= 40; seed++) {
+    const counts = level.spawns.map(() => 0);
+    for (let seed = 1; seed <= 80; seed++) {
       const w = createWorld(level, seed);
       const p = addPlayer(w, 'a', 'a');
       const i = level.spawns.findIndex((s) => s.cell.x === p.pose.cell.x && s.cell.z === p.pose.cell.z);

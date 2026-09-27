@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
+  Action, add, airHop, ALL_DIRS, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, perpendicular,
   blockTileAt, lethalForPlanning, RANDOM_VOTE, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
   type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
@@ -74,7 +74,7 @@ function planWorld(state: { levelId: string; crumbled: number; warnBand: number;
   return w;
 }
 
-type SchemaPlayer = PlayerLike & { fromUp: number; fromFwd: number; toUp: number; toFwd: number; protectedUntil: number; spectating: boolean };
+type SchemaPlayer = PlayerLike & { fromUp: number; fromFwd: number; toUp: number; toFwd: number; protectedUntil: number; spectating: boolean; fireCount: number };
 const poseOf2 = (x: number, y: number, z: number, up: number, fwd: number): Pose => ({ cell: { x, y, z }, up: up as Dir, fwd: fwd as Dir });
 
 /**
@@ -165,6 +165,15 @@ function occupiedByOther(state: { players: { forEach(cb: (p: PlayerLike, id: str
   let hit = false;
   state.players.forEach((o, id) => {
     if (id !== selfId && o.action !== Action.Dead && (`${o.fromX},${o.fromY},${o.fromZ}` === cell || `${o.toX},${o.toY},${o.toZ}` === cell)) hit = true;
+  });
+  return hit;
+}
+
+/** Someone high in a hop in `cell` over the next ticks (§14): a roll goes under it rather than being blocked. */
+function highHopperAt(state: { tick: number; players: { forEach(cb: (p: PlayerLike, id: string) => void): void } }, selfId: string, cell: string): boolean {
+  let hit = false;
+  state.players.forEach((o, id) => {
+    if (id !== selfId && `${o.fromX},${o.fromY},${o.fromZ}` === cell && airHop(o, state.tick + 1) && airHop(o, state.tick + 2)) hit = true;
   });
   return hit;
 }
@@ -400,21 +409,26 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     else if (hunter) {
       goals = new Set(besideOpponents(s, me, world, skip).keys());
       if (bully) trapGoals = new Set(trapPushCells(s, me, world, skip).keys());
+      // Never stop under someone's hop (§14): it comes down on you. Roll through, stop elsewhere.
+      for (const g of [goals, trapGoals]) for (const k of g ?? []) if (occupiedByOther(s, me, k)) g!.delete(k);
     }
     else if (world.level.exit && p.keys >= world.level.keysRequired) goals.add(cellKey(world.level.exit.cell));
     else s.items.forEach((it: { kind: string; x: number; y: number; z: number }) => { if (it.kind === 'key') goals.add(`${it.x},${it.y},${it.z}`); });
 
     const onPlan = path.length > 0 && goals.has(target) && expected !== null && samePose(pose, expected);
+    // Fire landings in a row (§18, phase 14b): plans may take 2, never a 3rd. Deciding early, count the landing ahead.
+    const landing = !idle && p.action !== Action.Turn;
+    const fire = !landing ? p.fireCount : blockTileAt(world, pose)?.type === 'fire' ? p.fireCount + 1 : 0;
     if (!onPlan) {
       let found: PathStep[] | null = null;
       if (goals.size && Date.now() < avoidUntil) {
         const res = reservations(withPlayers(world, s, me)); // others only: withPlayers leaves this bot out
-        found = findPath(world, pose, goals, res);
+        found = findPath(world, pose, goals, res, fire);
         if (found?.length) ctx.stats.detours++;
       }
-      if (!found?.length) found = goals.size ? findPath(world, pose, goals) : null;
+      if (!found?.length) found = goals.size ? findPath(world, pose, goals, undefined, fire) : null;
       if (found && trapGoals?.size) { // worth a short detour: a push onto a trap is a knockout
-        const trap = findPath(world, pose, trapGoals);
+        const trap = findPath(world, pose, trapGoals, undefined, fire);
         if (trap?.length && trap.length <= found.length + TRAP_DETOUR) found = trap;
       }
       if (!found?.length) {
@@ -433,7 +447,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     const F = dirVec(pose.fwd), a1 = add(pose.cell, F), a2 = add(a1, F);
     // seek: a player blocking the way (say on a 1-wide beam) is jumped over, if the landing is safe ground (§16),
     // after a human-like reaction delay from first seeing the blocker there.
-    if (cmd === 'fwd' && !bully && occupiedByOther(s, me, cellKey(a1))) {
+    if (cmd === 'fwd' && !bully && occupiedByOther(s, me, cellKey(a1)) && !highHopperAt(s, me, cellKey(a1))) {
       const key = cellKey(a1);
       if (blocker?.key !== key) blocker = { key, at: Date.now() + reactionMs() };
       const plan = previewAction(withPlayers(world, s, me), { id: me, pose }, 'jump');
@@ -556,9 +570,10 @@ function blockerBrain(ctx: Ctx) {
     if (!post || Date.now() >= postAt) { post = choosePost(world, s, pose, me); postAt = Date.now() + POST_REFRESH_MS; }
     if (!post) return;
     if (cellKey(pose.cell) !== post.cell || pose.up !== post.up) {
-      const path = findPath(world, pose, new Set([post.cell]));
+      const path = findPath(world, pose, new Set([post.cell]), undefined, p.fireCount);
       if (!path?.length) { post = null; return; }
-      if (path[0].cmd === 'fwd' && occupiedByOther(s, me, cellKey(pushSpot(world, pose).cell))) return; // wait, don't push
+      const ahead = cellKey(pushSpot(world, pose).cell);
+      if (path[0].cmd === 'fwd' && occupiedByOther(s, me, ahead) && !highHopperAt(s, me, ahead)) return; // wait, don't push (a high hop: roll under)
       return press(path[0].cmd, p, s.tick);
     }
     // At the post: face along the corridor toward the nearest opponent (where they'll come from).

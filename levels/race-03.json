@@ -24,8 +24,11 @@
     { "cell": [5, 1, 0], "up": "+Y", "fwd": "+Z" },
     { "cell": [10, 1, 5], "up": "+Y", "fwd": "-X" },
     { "cell": [5, 1, 10], "up": "+Y", "fwd": "-Z" },
-    { "cell": [0, 1, 5], "up": "+Y", "fwd": "+X" }
-  ],
+    { "cell": [0, 1, 5], "up": "+Y", "fwd": "+X" },
+    { "cell": [0, 1, 1], "up": "+Y", "fwd": "+X" },
+    { "cell": [9, 1, 0], "up": "+Y", "fwd": "+Z" },
+    { "cell": [10, 1, 9], "up": "+Y", "fwd": "-X" },
+    { "cell": [1, 1, 10], "up": "+Y", "fwd": "-Z" }  ],
   "keys": [
     { "cell": [2, 3, 2], "up": "+Y" },
     { "cell": [8, 3, 2], "up": "+Y" },
@@ -37,26 +40,28 @@
   ],
   "exit": { "cell": [5, 3, 5], "up": "+Y" },
   "keysRequired": 3,
+  "notes": {
+    "7.5 3,0,4 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 3,0,6 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 4,0,4 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 4,0,6 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 6,0,4 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 6,0,6 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 7,0,4 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings",
+    "7.5 7,0,6 +Y": "the spike rows cross the open floor on purpose; the pillar gaps are the safe crossings"
+  },
   "tiles": [
     { "block": [5, 2, 2], "type": "fire" },
     { "block": [2, 2, 5], "type": "fire" },
     { "block": [8, 2, 5], "type": "fire" },
     { "block": [5, 2, 8], "type": "fire" },
-    { "block": [0, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
-    { "block": [1, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
     { "block": [3, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
     { "block": [4, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
     { "block": [6, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
     { "block": [7, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
-    { "block": [9, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
-    { "block": [10, 0, 4], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 0 },
-    { "block": [0, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
-    { "block": [1, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
     { "block": [3, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
     { "block": [4, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
     { "block": [6, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
-    { "block": [7, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
-    { "block": [9, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 },
-    { "block": [10, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 }
+    { "block": [7, 0, 6], "face": "+Y", "type": "spikes", "period": 40, "up": 16, "phase": 20 }
   ]
 }

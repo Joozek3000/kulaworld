@@ -252,7 +252,11 @@ export class Predictor {
       for (const c of cmds) { const plan = previewAction(this.world, self, c, res); if (plan) return plan; }
       return null;
     };
-    const a = pick(others), b = pick(new Map());
+    const all = this.world.players;
+    const a = pick(others);
+    this.world.players = [p]; // without them: a high hopper (§14) isn't reserved, but a jump still sees it in L
+    const b = pick(new Map());
+    this.world.players = all;
     if (!a || !b) return a !== b;
     return a.action !== b.action || !samePose(a.to, b.to) || !!a.over !== !!b.over || !!a.bump !== !!b.bump;
   }

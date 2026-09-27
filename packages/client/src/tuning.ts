@@ -2,6 +2,7 @@
 export const SOUND_NAMES = [
   'bounce', 'takeoff', 'roll', 'squeak', 'hit', 'stomp', 'boing', 'bump', 'fall', 'pop', 'sizzle', 'clack',
   'key', 'exit', 'countdown', 'go', 'win', 'lose', 'crumbleWarn', 'crumble', 'eliminated', 'edge', 'slide', 'pwomp',
+  'whoosh',
 ] as const;
 export type SoundName = (typeof SOUND_NAMES)[number];
 

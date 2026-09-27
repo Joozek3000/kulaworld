@@ -9,6 +9,9 @@ export type Mode = 'race' | 'knockout';
 export type TileType = 'ice' | 'fire' | 'crumble' | 'spikes' | 'arrow' | 'boost';
 export const BLOCK_TILES: readonly TileType[] = ['ice', 'fire', 'crumble'];
 export const FACE_TILES: readonly TileType[] = ['spikes', 'arrow', 'boost'];
+/** Lethal tile types (LEVEL-DESIGN: "lethal" also means void) and the non-lethal modifiers. */
+export const LETHAL_TILES: readonly TileType[] = ['spikes', 'fire'];
+export const MODIFIER_TILES: readonly TileType[] = ['ice', 'arrow', 'boost', 'crumble'];
 export interface TileJson {
   block: V3;
   type: TileType;
@@ -19,10 +22,12 @@ export interface TileJson {
   period?: number;
   up?: number;
   phase?: number;
-  /** arrow: the only allowed fwd. */
+  /** arrow: the only allowed fwd. boost (required): it launches only a ball entering it moving this way. */
   dir?: DirName;
   /** boost: far = 3 cells forward, high = 2 forward + 1 up. */
   variant?: 'far' | 'high';
+  /** ice/boost: a forced move from here may end in death on purpose (LEVEL-DESIGN 3.3; once per level, race only). */
+  deathtrap?: boolean;
 }
 export interface Tile {
   block: Vec3;
@@ -35,6 +40,9 @@ export interface Tile {
   phase: number;
   dir: Dir | null;
   variant: 'far' | 'high';
+  deathtrap: boolean;
+  /** crumble: regrowSec was given (without it the block never regrows in single player, §18). */
+  regrows: boolean;
 }
 /** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
 export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
@@ -61,6 +69,10 @@ export interface LevelJson {
   keysRequired?: number;
   timeLimitSec: number;
   tiles?: TileJson[];
+  /** One non-lethal trap type exempt from the modifier cap (LEVEL-DESIGN 7.2), e.g. "ice" for an ice rink. */
+  theme?: TileType;
+  /** Why a level:check warning is intentional, keyed by the id it prints (e.g. "7.5 3,0,4|+Y"). Text only. */
+  notes?: Record<string, string>;
 }
 
 export interface Placement { cell: Vec3; up: Dir }
@@ -88,6 +100,8 @@ export interface Level {
   keysRequired: number;
   timeLimitSec: number;
   tiles: Tile[];
+  theme: TileType | null;
+  notes: Record<string, string>;
   /** Whole-block tiles by block cellKey, face tiles by tileKey (block cellKey|face). */
   blockTiles: Map<string, Tile>;
   faceTiles: Map<string, Tile>;

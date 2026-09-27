@@ -68,6 +68,8 @@ export interface PlayerState {
   fireCount: number;
   /** A forced move for this tick's decision (an ice slide or a boost launch, §18), set when an action finishes. */
   forced: Cmd | null;
+  /** Knocked onto ice (§18): sliding in the knock direction, and staggered once the slide stops. */
+  staggerOwed: boolean;
 }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
@@ -179,9 +181,12 @@ const clonePose = (p: Pose): Pose => ({ cell: { ...p.cell }, up: p.up, fwd: p.fw
  */
 export function trySpawn(world: World, p: PlayerState, random = false): boolean {
   const res = reservations(world);
+  // A high hopper's cell isn't reserved (§14), but nobody spawns under one.
+  const taken = new Set(world.players.filter((q) => q !== p && q.action !== Action.Dead).map((q) => cellKey(q.pose.cell)));
+  const open1 = (c: Vec3) => isFree(world, res, p.id, c) && !taken.has(cellKey(c));
   let open = world.spawnOrder.map((i) => world.level.spawns[i])
-    .filter((s) => isFree(world, res, p.id, s.cell) && isSolid(world, sub(s.cell, dirVec(s.up))));
-  if (!open.length && random) open = standingCells(world).filter((s) => isFree(world, res, p.id, s.cell));
+    .filter((s) => open1(s.cell) && isSolid(world, sub(s.cell, dirVec(s.up))));
+  if (!open.length && random) open = standingCells(world).filter((s) => open1(s.cell));
   if (!open.length) return false;
   let spawn = open[0];
   if (random) {
@@ -221,7 +226,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
-    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null,
+    jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null, staggerOwed: false,
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -274,6 +279,14 @@ export function isPushable(v: PlayerState, tick: number): boolean {
   }
 }
 
+/**
+ * A hop high in the air (§14 roll under): past its low window at both ends. Its ground cell is air-occupied: it
+ * doesn't block rolls, flips or climbs, isn't a push victim and isn't reserved. The start tick is neither low nor high.
+ */
+export function airHop(v: { action: number; startTick: number; endTick: number }, tick: number): boolean {
+  return v.action === Action.Hop && tick - v.startTick > HOP_PUSH_WINDOW && v.endTick - tick > HOP_PUSH_WINDOW;
+}
+
 /** A hop is low (touching the ground) in its first HOP_PUSH_WINDOW ticks after the start tick and its last ones. */
 function lowHop(v: PlayerState, tick: number): boolean {
   const since = tick - v.startTick;
@@ -301,9 +314,10 @@ export function outOfBounds(level: Level, c: Vec3): boolean {
 /** cellKey → id of the player holding it. Derived each tick, never stored in the world. */
 export type Reservations = Map<string, string>;
 
+/** A high hopper's cell is air-occupied (§14), so it isn't reserved: others roll under it. */
 export function reservations(world: World): Reservations {
   const res: Reservations = new Map();
-  for (const p of world.players) reserve(res, p);
+  for (const p of world.players) if (!airHop(p, world.tick)) reserve(res, p);
   return res;
 }
 

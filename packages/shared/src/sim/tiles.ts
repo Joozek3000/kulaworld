@@ -37,13 +37,16 @@ export function fwdAllowed(world: World, pose: Pose): boolean {
 export const onIce = (world: World, pose: Pose): boolean => blockTileAt(world, pose)?.type === 'ice';
 
 /**
- * The forced move after `finished` ends on `pose` (§18): a roll/flip/climb onto ice keeps rolling ('fwd'), a roll or
- * flip onto a boost pad launches ('boost'). Null otherwise.
+ * The forced move after `finished` ends on `pose` (§18): a roll/flip/climb or a knock onto ice keeps rolling ('fwd';
+ * a knocked ball slides in the knock direction, the caller turns it that way), a roll or flip onto a boost pad
+ * launches ('boost') if it entered moving along the pad's dir (pose.fwd). Null otherwise.
  */
 export function forcedAfter(world: World, pose: Pose, finished: Action): Cmd | null {
-  if (finished !== Action.Roll && finished !== Action.Flip && finished !== Action.Climb) return null;
+  if (finished !== Action.Roll && finished !== Action.Flip && finished !== Action.Climb && finished !== Action.Knocked) return null;
   if (onIce(world, pose)) return 'fwd';
-  return finished !== Action.Climb && faceTileAt(world, pose)?.type === 'boost' ? 'boost' : null;
+  if (finished === Action.Climb || finished === Action.Knocked) return null;
+  const t = faceTileAt(world, pose);
+  return t?.type === 'boost' && t.dir === pose.fwd ? 'boost' : null;
 }
 
 /** For planning (BFS): any spikes (retracting ones too, bots don't time them) and fire count as lethal. */

@@ -64,7 +64,7 @@
     { "block": [5, 0, 15], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [7, 0, 15], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [9, 0, 15], "face": "+Y", "type": "arrow", "dir": "+X" },
-    { "block": [5, 0, 18], "face": "+Y", "type": "boost", "variant": "far" },
-    { "block": [10, 0, 18], "face": "+Y", "type": "boost", "variant": "high" }
+    { "block": [5, 0, 18], "face": "+Y", "type": "boost", "dir": "+X", "variant": "far" },
+    { "block": [10, 0, 18], "face": "+Y", "type": "boost", "dir": "+X", "variant": "high" }
   ]
 }

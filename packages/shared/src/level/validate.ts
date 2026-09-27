@@ -1,7 +1,7 @@
 import { dirName, dirVec, perpendicular } from '../dir.ts';
 import { cellKey, sub } from '../vec.ts';
 import { levelSolid } from './load.ts';
-import { BLOCK_TILES, FACE_TILES, type Level, type Placement } from './types.ts';
+import { BLOCK_TILES, FACE_TILES, MODIFIER_TILES, type Level, type Placement } from './types.ts';
 
 /** Returns a list of human-readable errors; empty means valid. */
 export function validateLevel(level: Level): string[] {
@@ -43,6 +43,10 @@ export function validateLevel(level: Level): string[] {
     if (level.keys.length < level.keysRequired) errors.push(`keysRequired ${level.keysRequired} > ${level.keys.length} keys`);
   } else errors.push(`unknown mode ${level.mode}`);
   validateTiles(level, errors);
+  if (level.theme !== null && !MODIFIER_TILES.includes(level.theme)) errors.push(`theme must be a non-lethal trap type (${MODIFIER_TILES.join(', ')}), got ${level.theme}`);
+  if (typeof level.notes !== 'object' || Array.isArray(level.notes) || Object.values(level.notes).some((n) => typeof n !== 'string')) {
+    errors.push('notes must be an object of strings');
+  }
   return errors;
 }
 
@@ -67,6 +71,8 @@ function validateTiles(level: Level, errors: string[]): void {
       errors.push(`${what}: retracting spikes need integer ticks with 0 < up < period`);
     }
     if (t.type === 'boost' && t.variant !== 'far' && t.variant !== 'high') errors.push(`${what}: boost variant must be far or high`);
+    if (t.type === 'boost' && (t.dir === null || t.face === null || !perpendicular(t.dir, t.face))) errors.push(`${what}: boost needs a dir perpendicular to its face`);
+    if (t.deathtrap && t.type !== 'ice' && t.type !== 'boost') errors.push(`${what}: deathtrap is only for ice or boost tiles`);
     if (t.type === 'crumble' && !(t.regrowTicks > 0)) errors.push(`${what}: regrowSec must be > 0`);
   });
   // A whole-block type conflicts with face types on that block, except crumble under arrow/boost/spikes.

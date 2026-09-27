@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   Action, BOOST_TICKS, CRUMBLE_DELAY_TICKS, Dir, findPath, FIRE_MAX, loadLevel, mulberry32, ROLL_TICKS, setInput, step,
   TICK_RATE, validateLevel, vec,
-  type PlayerState, type SimEvent, type TileJson, type World,
+  type LevelJson, type PlayerState, type SimEvent, type TileJson, type World,
 } from '../src/index.ts';
 import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
 
@@ -10,7 +10,9 @@ import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn } 
 type V3 = [number, number, number];
 const east = (x: number): Spawn => [[x, 1, 0], '+Y', '+X'];
 const trapWorld = (blocks: V3[], spawns: Spawn[], tiles: TileJson[]) => makeWorld(blocks, spawns, { heat: false, tiles });
-const face = (x: number, type: TileJson['type'], extra: Partial<TileJson> = {}): TileJson => ({ block: [x, 0, 0], face: '+Y', type, ...extra });
+/** A face tile on top of block x. Boost pads point +X (east) unless `extra` says otherwise. */
+const face = (x: number, type: TileJson['type'], extra: Partial<TileJson> = {}): TileJson =>
+  ({ block: [x, 0, 0], face: '+Y', type, ...(type === 'boost' ? { dir: '+X' as const } : {}), ...extra });
 const block = (x: number, type: TileJson['type'], extra: Partial<TileJson> = {}): TileJson => ({ block: [x, 0, 0], type, ...extra });
 const of = <T extends SimEvent['type']>(events: SimEvent[], type: T) =>
   events.filter((e): e is Extract<SimEvent, { type: T }> => e.type === type);
@@ -41,6 +43,18 @@ describe('level format', () => {
     expect(errs([block(1, 'ice'), block(1, 'fire')])[0]).toMatch(/already has/);
     expect(errs([block(1, 'ice'), face(1, 'spikes')])[0]).toMatch(/conflicts/);
     expect(errs([block(1, 'crumble'), face(1, 'spikes'), face(2, 'boost'), block(2, 'crumble')])).toEqual([]);
+  });
+
+  test('phase 14b: boost needs a dir ⟂ its face; deathtrap only on ice/boost; theme non-lethal; notes are strings', () => {
+    const errs = (extra: Partial<LevelJson>) => validateLevel(loadLevel(levelJson(row(0, 6), [east(0), east(2), east(4), east(6)], extra))).filter((e) => !e.startsWith('exit'));
+    expect(errs({ tiles: [face(1, 'boost', { dir: undefined })] })[0]).toMatch(/boost needs a dir/);
+    expect(errs({ tiles: [face(1, 'boost', { dir: '+Y' })] })[0]).toMatch(/boost needs a dir/);
+    expect(errs({ tiles: [face(1, 'boost', { deathtrap: true }), block(2, 'ice', { deathtrap: true })] })).toEqual([]);
+    expect(errs({ tiles: [face(1, 'spikes', { deathtrap: true })] })[0]).toMatch(/deathtrap is only for ice or boost/);
+    expect(errs({ theme: 'ice' })).toEqual([]);
+    expect(errs({ theme: 'fire' })[0]).toMatch(/theme must be a non-lethal/);
+    expect(errs({ notes: { '7.5 1,0,0|+Y': 'on purpose' } })).toEqual([]);
+    expect(errs({ notes: { x: 3 } as never })[0]).toMatch(/notes must be/);
   });
 });
 
@@ -230,6 +244,58 @@ describe('boost', () => {
     for (let i = 0; i < 100; i++) died.push(...step(pit));
     expect(of(died, 'death').map((e) => e.cause)).toEqual(['fall']);
   });
+
+  test("phase 14b: a pad launches only a ball entering along its dir; from any other way it's a plain tile", () => {
+    const along = trapWorld(row(0, 6), [east(0)], [face(1, 'boost', { dir: '+X' })]);
+    tap(along, { fwdHeld: true });
+    run(along, ROLL_TICKS);
+    expect(player(along).action).toBe(Action.Jump);
+    const against = trapWorld(row(0, 6), [[[2, 1, 0], '+Y', '-X']], [face(1, 'boost', { dir: '+X' })]);
+    tap(against, { fwdHeld: true });
+    settle(against, player(against));
+    expect([player(against).action, player(against).pose.cell]).toEqual([Action.Idle, vec(1, 1, 0)]);
+    const side = trapWorld([...row(0, 6), [1, 0, 1]], [[[1, 1, 1], '+Y', '-Z']], [face(1, 'boost', { dir: '+X' })]);
+    tap(side, { fwdHeld: true });
+    settle(side, player(side));
+    expect([player(side).action, player(side).pose.cell]).toEqual([Action.Idle, vec(1, 1, 0)]);
+  });
+});
+
+describe('knocked onto ice (phase 14b)', () => {
+  // p1 pushes p0 (+X): p0 at x=1 is knocked onto x=2, the start of an ice run to x=5; x=6 is plain.
+  const rink = (extra: Spawn[] = []) =>
+    trapWorld(row(0, 8), [[[1, 1, 0], '+Y', '+Z'], [[0, 1, 0], '+Y', '+X'], ...extra], [2, 3, 4, 5].map((x) => block(x, 'ice')));
+
+  test('a knock that ends on ice slides on in the knock direction to the rim', () => {
+    const w = rink();
+    const p0 = player(w);
+    expect(of(tap(w, { fwdHeld: true }, 'p1'), 'push')).toHaveLength(1);
+    settle(w, p0);
+    for (let i = 0; i < 60 && p0.pose.cell.x < 6; i++) step(w);
+    expect(p0.pose.cell).toEqual(vec(6, 1, 0));
+    expect(p0.pose.fwd).toBe(Dir.PX); // it faces the knock direction for the slide
+  });
+
+  test('a knock-slide into another ball pushes it', () => {
+    const w = rink([[[6, 1, 0], '+Y', '+Z']]);
+    tap(w, { fwdHeld: true }, 'p1');
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 60; i++) events.push(...step(w));
+    expect(of(events, 'push')).toEqual([{ type: 'push', pusherId: 'p0', victimId: 'p2' }]);
+    expect(player(w, 'p2').pose.cell).toEqual(vec(7, 1, 0));
+    expect(player(w).pose.cell).toEqual(vec(6, 1, 0));
+  });
+
+  test('the stagger comes after the slide ends, not when the knock lands', () => {
+    const w = rink();
+    const p0 = player(w);
+    tap(w, { fwdHeld: true }, 'p1');
+    const seen: Action[] = [];
+    for (let i = 0; i < 60; i++) { step(w); if (seen[seen.length - 1] !== p0.action) seen.push(p0.action); }
+    expect(seen).toEqual([Action.Knocked, Action.Roll, Action.Stunned, Action.Idle]);
+    expect(p0.bounce).toBe(false);
+    expect(p0.pose.cell).toEqual(vec(6, 1, 0));
+  });
 });
 
 describe('planning (findPath)', () => {
@@ -244,6 +310,20 @@ describe('planning (findPath)', () => {
     const path = findPath(w, player(w).pose, new Set(['4,1,0']))!;
     expect(path.length).toBeGreaterThan(0);
     expect(path.some((s) => s.to.cell.x === 2 && s.to.cell.z === 0 && s.to.up === Dir.PY)).toBe(false);
+  });
+
+  test('fire (phase 14b): a plan may take 2 fire landings in a row but never a 3rd', () => {
+    const two = trapWorld(row(0, 3), [east(0)], [1, 2].map((x) => block(x, 'fire')));
+    const from = player(two).pose, goal = new Set(['3,1,0']);
+    expect(findPath(two, from, goal)!.map((s) => s.to.fire)).toEqual([1, 0]); // jump onto 2, roll off
+    expect(findPath(two, from, goal, undefined, 1)!.map((s) => s.to.fire)).toEqual([2, 0]); // standing on 1 fire already
+    const third = findPath(two, from, goal, undefined, 2)!; // jumping onto 2 would be a third: round by a side face
+    expect(third.length).toBeGreaterThan(2);
+    expect(third[0].to.fire).toBe(2); // the first landing isn't on fire...
+    expect(third.find((s) => s.cmd !== 'left' && s.cmd !== 'right')!.to.fire).toBe(0); // ...it resets the count
+    expect(findPath(two, from, goal, undefined, 0, 0)).toBe(null); // fireMax 0: fire is a wall
+    const six = trapWorld(row(0, 8), [east(0)], [1, 2, 3, 4, 5, 6].map((x) => block(x, 'fire')));
+    expect(findPath(six, player(six).pose, new Set(['8,1,0']))).toBe(null); // 6 in a row: at least 3 landings
   });
 
   test('over a gap with a boost pad', () => {

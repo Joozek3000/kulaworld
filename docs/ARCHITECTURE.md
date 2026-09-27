@@ -139,7 +139,7 @@ Each tick, `step(world, inputs)` in shared runs:
 3. **Start actions** for Idle players. Iterate players in join order, rotated by `tick % playerCount` for fairness.
 4. Run mode logic (§8): win check and timer.
 
-**Reservations**: a map `cellKey → playerId` containing each player's current cell plus the target cell(s) of their in-progress action. `free(v)` = not solid and (not reserved, or reserved by self). The sim must be deterministic, and replaying the same inputs must give the same state (test this).
+**Reservations**: a map `cellKey → playerId` containing each player's current cell plus the target cell(s) of their in-progress action. A ball high in a hop reserves nothing (§14 roll under). `free(v)` = not solid and (not reserved, or reserved by self). The sim must be deterministic, and replaying the same inputs must give the same state (test this).
 
 ## 8. Key Race mode
 
@@ -151,6 +151,7 @@ Each tick, `step(world, inputs)` in shared runs:
   - Lobby: players toggle ready (R). Start when everyone is ready and players ≥ `MIN_PLAYERS` (env, default 1 in dev, 2 in prod).
   - **Level vote** (phase 14): the lobby offers up to 3 candidates from the level pool (random, never the level just played, at least one race and one knockout when the pool allows) plus Random. Players vote with 1–4 or a click and can change their vote. At countdown the most votes wins, a tie is broken by the room's seeded RNG, and no votes (or Random winning) picks a random pool level other than the last. Votes are cleared on every new lobby; a leaving player's vote goes with them. Pure logic in `shared/src/vote.ts`.
   - Each round reloads the level (keys reset, players at spawns).
+  - **Lobby backdrop** (phase 14b): behind the vote panel the scene shows the leading candidate (most votes, the first candidate on a tie or with no votes), with a 150 ms fade to black between levels.
 
 ## 9. Level format (`levels/*.json`)
 
@@ -171,6 +172,8 @@ Each tick, `step(world, inputs)` in shared runs:
 
 - Optional `"sky": ["#top", "#bottom"]`: the client's gradient sky colours (render-only, phase 07b).
 - Optional `"pool": true` (phase 14): the level is in the lobby vote's pool. Default false (test levels, arena-cube, traps-lab).
+- Optional `"theme"` (phase 14b): one non-lethal trap type (ice, arrow, boost, crumble) exempt from the modifier cap (LEVEL-DESIGN 7.2), e.g. arena-03 `"theme": "ice"`.
+- Optional `"notes"` (phase 14b): `{ "<rule> <where>": "why" }`, the id `level:check` prints for a warning. A noted warning is intentional (LEVEL-DESIGN 7.5 asks for it on push lanes into lethal tiles).
 - `blocks` and `boxes` are merged. The loader expands boxes into a `Set<cellKey>`.
 - `validateLevel()` returns a list of errors. It checks that:
   - spawn, key and exit cells are empty and `solid(cell − up)`
@@ -262,6 +265,22 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - **Fail** when `A + F` is solid or reserved (a wall or another player behind V): P gets `Stunned` in place for `STUN_TICKS` with a *bounce* flag, rendered as a short lunge and recoil. V is unaffected, so pinning against a wall doesn't work.
 - **Not pushable:** if V is in a non-pushable state, P is simply blocked (MVP behaviour, no stun) and retries next tick if fwd is still held. So holding W against a bouncing player pushes them the moment they're low.
 
+**Roll under a high hop** (phase 14b, per Jakub: when a ball bounces in place, others can roll underneath it):
+- A ball that's **Hopping and high** (`airHop`: more than `HOP_PUSH_WINDOW` ticks after the hop's start tick and before its end) doesn't reserve or block its ground cell for rolls, flips or climbs. Its cell is "air-occupied": other balls roll into it and through it. The hop's start tick is neither low nor high (blocked, as an escape).
+- A roll into a **low** hopper is a normal push. A roll into a **high** hopper passes under it. So holding W at a bouncing ball either pushes it (low) or rolls under it (high), whichever the timing gives.
+- **When the hop lands** (its end tick) on a cell another ball is on the ground in or rolling through (its pose or its target is the cell; airborne balls don't count), the landing is resolved **after that tick's moves**, so a ball that rolls on from under the hopper that tick counts as passing:
+  - a ball **standing** there (its pose and target are the cell) and stompable is **stomped** by the fall-landing rule (§16: bump to the first free of hopper fwd, left, right, back; stagger; credit). No free direction: the MVP overlap.
+  - a ball standing there but not stompable (staggered, spawn-protected), or balls only **passing** (rolling in or out): the hopper **re-hops** at once (a new Hop from that tick, even with jump released). Rolling under someone keeps them in the air, and they come down on whoever stops.
+  - Otherwise it lands normally. The hopper then decides from the next tick (no chained hop on that tick).
+- A forward jump whose landing L holds a high hopper is still a stomp jump (L is unreserved but not a place to land), and it **clashes** if the hopper is still high at the landing (§16).
+- A high hopper **ends a cradle line**: it isn't a middle ball. A roller passes under it and strikes the line behind from there, and a line pushed toward it knocks its last ball in under it.
+- Two balls on the ground in one cell (one under a landing hop) block a roll into it.
+- Nobody spawns under a hopper.
+- Push rules off: rolling under and re-hopping still apply (it's movement, not PvP); a ball that stops under a hopper gets the MVP overlap instead of a stomp.
+- Prediction: rolls into a hopper's cell are deferred to the server like every move toward a player (§17).
+- Bots: seek and blocker roll under a high hopper on their path; the bully never picks a cell with someone in it as a place to stop.
+- Client: a ball under a hopper renders normally; the hopper's shadow sits on top of it, and a roll under plays a short whoosh.
+
 **Cradle push** (phase 12b, replaces the phase 12 "whole line moves" chain push, per Jakub: like the kinetic toy, only the **last** ball flies):
 - When P's fwd targets V1 and there's a contiguous line V1..Vn (n ≥ 2, n ≤ `CHAIN_MAX` = 6) of live players on P's face, each in the next cell, it's a **cradle strike**:
   - **P doesn't move.** It gets `Strike` (appended action, `STRIKE_TICKS` = 4): a lunge-and-recoil in place, with no stun and no push immunity change.
@@ -351,8 +370,11 @@ Mid-hop (high), Rolling, Flipping, Jumping, Falling, Knocked, **Stunned after be
 - `arena-cube`: the old arena-02, a solid 5×5×5 cube. Kept for tests, not in the pool.
 
 **Level pool** (phase 14, `"pool": true`; `npm run level:stats` lists their traps):
-- Race (7 keys, 3 required, heat 3/5, sudden death over the last 30 s): race-01 Four Islands (+ a crumble bridge and a boost shortcut), race-02 Ice Garden, race-03 Pillar Garden, race-04 Sky Ladder, race-05 Underside, race-06 Boost Relay.
-- Knockout (3 lives, crumble 45/10/2): arena-01, arena-02 Sky Cross (+ spikes round the pad, ice rails), arena-03 Ice Rink, arena-04 Crumble Tower, arena-05 Fire Ring, arena-06 Pillar Field.
+- Race (7 keys, 3 required, 8 spawns since phase 14b, heat 3/5, sudden death over the last 30 s): race-01 Four Islands (+ a crumble bridge and a boost shortcut), race-02 Ice Garden, race-03 Pillar Garden, race-04 Sky Ladder, race-05 Underside, race-06 Boost Relay.
+- Knockout (3 lives, crumble 45/10/2): arena-01, arena-02 Sky Cross (+ spikes in the pad's centre, crumble rails), arena-03 Ice Rink, arena-04 Crumble Tower, arena-05 Fire Ring, arena-06 Pillar Field.
+- Phase 14b reworked several of them to pass the LEVEL-DESIGN rules (details in `docs/reports/14b-report.md`).
+
+**Trap placement rules** (phase 14b): `npm run level:check` also runs every rule in `docs/LEVEL-DESIGN.md` (`checkTrapRules` in `shared/src/level/rules.ts`): [E] rules print as errors with the rule id and tile (`3.1 12,0,1 +X`), [W] rules as warnings unless noted in the level's `notes`. An error fails a pool level (the check exits 1, and a Vitest suite asserts every pool level has no errors and no unnoted warnings). Distances are rolls/flips/climbs; reachability is the bots' planning (lethal tiles as walls for 2.2/3.3/5.2); retracting spike lanes are simulated at ROLL_TICKS per tile, both ways, with waiting allowed on safe tiles.
 
 **Level lint** (phase 12): `npm run level:check` lists 1-wide straight runs (≥ 4 tiles on one face) with the length of the way round them. It warns when there's no way round (`lintCorridors` in `shared/src/level/lint.ts`).
 
@@ -377,7 +399,8 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
   - **V in L but high in a hop:** **clash**. The attacker **rebounds** to its takeoff cell C (`Rebound` action, `REBOUND_TICKS` = 6, a reverse arc; C stayed reserved). No stun. V's hop continues. Event `clash`. Holding jump is the defence against stomps.
   - **V already leaving L** (its action targets another cell): it escaped. The attacker lands normally.
   - **L empty:** normal landing.
-- **Hop never stomps**: it lands on its own cell.
+- **A hop never stomps by jumping**: it lands on its own cell (only someone who stopped under it gets stomped, above).
+- **Hop landing on a grounded player** (§14 roll under): the hopper stomps it by the fall-landing rule below.
 - **Fall landing on a grounded player:** the faller stomps it. The bump direction is the first free of [faller fwd, faller left, faller right, faller back]. If none is free, the MVP overlap rule applies (rare).
 - **Stomp vs push:**
   - A stomped victim is staggered (unpushable) for `STUN_TICKS`, so there are no stomp→push or push→stomp instant combos.
@@ -457,7 +480,8 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
 ]
 ```
 - `spikes` without `period` are static (always up).
-- `boost` variants: `far` (3 cells forward, landing like a jump) or `high` (2 forward + 1 along up).
+- `boost` variants: `far` (3 cells forward, landing like a jump) or `high` (2 forward + 1 along up). A boost needs a `dir` ⟂ its face (phase 14b).
+- `"deathtrap": true` on an ice or boost tile (phase 14b): a forced move from it may end in death on purpose (LEVEL-DESIGN 3.3: once per level, race only, never on the only route to a key).
 - `crumble.regrowSec` is optional (default: never in single player, 8 s in multiplayer).
 
 **13a rules**
@@ -465,8 +489,10 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
 - **Fire:** Kula rule. Each landing on a fire tile increments `fireCount`, and landing on a non-fire tile resets it. At 3 the ball pops (cause `fire`). Standing on fire doesn't count extra (tile heat §12 still applies).
 - **Crumble:** when a ball leaves a crumble block (it finishes an action elsewhere), the block is removed via the `world.removed` overlay after `CRUMBLE_DELAY_TICKS` = 4. It regrows after `regrowSec` if set and nobody occupies the cell. A ball standing on it when removed falls.
 - **Ice:** a roll or flip that finishes on ice immediately continues as a forced roll in the same direction (input ignored) until it finishes on a non-ice tile or is blocked. Blocked means it just stops: a climb happens if it's a wall, because climb is a roll. A jump pulse on ice gives a forward jump even without W (Kula rule). Forced rolls can push (normal push rules).
+  - **Knocked onto ice** (phase 14b): a knock that finishes on ice continues as a forced slide in the knock direction (the knocked ball turns to face it), with the normal slide rules (climb at walls, flip at edges, push into balls). The stagger (§14) starts when the slide stops, not when the knock lands.
+  - A slide across a 1-thick, 1- or 2-wide ice beam flips round its cross-section forever (input is ignored), so level:check rule 6.1 rejects any slide with no stopping tile.
 - **Arrow:** on an arrow tile, `fwd` moves (roll, flip, climb, jump) are only allowed if the ball's fwd equals the arrow dir. Turning is allowed, and so is hopping.
-- **Boost:** finishing a roll or flip onto a boost tile launches the ball: a forced jump of the variant's length, with normal landing, stomp and fall rules.
+- **Boost:** finishing a roll or flip onto a boost tile **moving along its `dir`** launches the ball: a forced jump of the variant's length, with normal landing, stomp and fall rules. Entered any other way (or by a climb or a knock) it's a plain tile (phase 14b). The chevrons point along `dir`.
 
 **13b rules** (next phase)
 - **Teleporters:** paired by `pair` id. Finishing on one moves you (a `Teleport` action, 6 ticks, render fade) to the partner tile with the same relative facing. If the partner is occupied, you stay put. Per-ball cooldown of 20 ticks.
@@ -475,9 +501,11 @@ Kula World's special blocks, as data in the level file, simulated in shared (det
   - A switch tile toggles its colour group when any ball finishes on it. It's rate-limited by a 20-tick cooldown per switch.
   - Initial state comes from the level.
 - **Invisible blocks:** solid, but rendered only within 2 cells of the local ball (or with sunglasses, phase 14).
+  - race-05 gets an invisible beam at z=5 from x=2 to x=9 as the counter-direction shortcut across its one-way ring (decided in phase 14b, built in 13b).
 - **Vanishing blocks:** solid on a `period`/`on`/`phase` schedule (the `removed` overlay toggles). A ball standing there when it vanishes falls.
 
 **Common**
 - Death causes are added to the `death` event (`fall`, `spikes`, `fire`, `laser`, `burn`) for HUD and toasts.
 - BFS (`findPath`/`resultPose`) must follow forced moves (ice slides, boosts, teleports) and treat lethal outcomes as invalid, like fatal falls. Retracting spikes count as lethal at planning time (bots don't time them in v1).
+  - Fire (phase 14b): the planning state tracks `fire` (landings on fire in a row, reset by any other landing), so a plan may cross up to 2 fire tiles in a row but never a 3rd. `findPath(..., fire, fireMax)` takes the player's current count; `fireMax` 0 makes fire a wall (level:check's safe routes).
 - The predictor runs the same rules. The trap state (crumbled blocks, laser groups) comes from server state each patch, like `removed`.

@@ -67,12 +67,16 @@ describe('cradle push', () => {
     expect(push(w)).toEqual([{ type: 'bounce', playerId: 'p0' }]);
   });
 
-  test('the last ball is not pushable (high hop, stagger) → bounce', () => {
+  test('the last ball is high in a hop: it ends the line, so the ball before it is pushed under it (§14 roll under)', () => {
     const hop = makeWorld(row(0, 6), [pusher(), ...line(2)]);
     setInput(hop, 'p2', input({ jumpHeld: true }));
     run(hop, 4); // high in its hop
     expect(player(hop, 'p2').action).toBe(Action.Hop);
-    expect(push(hop)).toEqual([{ type: 'bounce', playerId: 'p0' }]);
+    expect(push(hop)).toEqual([{ type: 'push', pusherId: 'p0', victimId: 'p1' }]);
+    expect([player(hop, 'p1').action, player(hop, 'p1').to.cell]).toEqual([Action.Knocked, vec(2, 1, 0)]);
+  });
+
+  test('the last ball is staggered → bounce', () => {
     const stagger = makeWorld(row(0, 6), [pusher(), ...line(2)]);
     stun(stagger, 'p2', false);
     expect(push(stagger)).toEqual([{ type: 'bounce', playerId: 'p0' }]);

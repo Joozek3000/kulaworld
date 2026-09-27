@@ -29,7 +29,9 @@ Workflow:
 | 12b | Cradle push | Only the last ball in a line flies; heat tuning; blocker bot |
 | 12c | Edge push | Push around block edges onto adjacent faces; tile heat; blocker waits |
 | 13a | Traps 1 | Spikes (static/retracting), fire, crumble, ice, arrows, boost pads; race-02 Ice Garden; traps-lab; clearer edge glow |
+| 14 | Levels + vote | 8 new trap levels, trap pass on old ones, lobby level vote with previews |
+| 14b | Roll-under + trap rules | Roll under a high hop (stomped if you stop); LEVEL-DESIGN.md rules enforced by level:check |
 | 13b | Traps 2 (planned) | Teleporters, lasers + switches, invisible/vanishing blocks |
-| 14 | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
-| 15 | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
+| 15a | Pickups & pills (planned) | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
+| 15b | Single player (planned) | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
 | 16 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |

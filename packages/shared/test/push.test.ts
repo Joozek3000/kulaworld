@@ -108,22 +108,15 @@ describe('push', () => {
     expect(player(w, 'p1').action).toBe(Action.Idle);
   });
 
-  test('victim mid-hop (high): pusher blocked with no stun; holding W pushes once the hop is in its last 2 ticks', () => {
+  test('victim mid-hop (high): no push, the pusher rolls under it (§14 roll under; details in rollUnder.test.ts)', () => {
     const w = makeWorld(row(0, 4), [pusher(), victim()]);
     const p0 = player(w), p1 = player(w, 'p1');
     setInput(w, 'p1', input({ jump: true }));
     step(w); // hop from tick 1 to 1 + JUMP_TICKS
     run(w, 2); // past the low window
     push(w);
-    let events: SimEvent[] = [];
-    while (!events.length) {
-      expect(p0.action).toBe(Action.Idle);
-      expect(p1.action).toBe(Action.Hop);
-      events = step(w);
-    }
-    expect(of(events, 'push')).toHaveLength(1);
-    expect(w.tick).toBe(1 + JUMP_TICKS - 2);
-    expect(p1.action).toBe(Action.Knocked);
+    expect(step(w)).toEqual([]);
+    expect([p0.action, p0.to.cell, p1.action]).toEqual([Action.Roll, vec(1, 1, 0), Action.Hop]);
   });
 
   test('victim hopping low (first 2 ticks): pushed, the hop is cancelled', () => {

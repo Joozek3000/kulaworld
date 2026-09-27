@@ -17,7 +17,7 @@ function execute(w: World, path: PathStep[]): Pose {
     step(w);
     setInput(w, 'p0', input({}));
     for (let i = 0; i < 100 && p.action !== Action.Idle; i++) step(w);
-    expect(p.pose).toEqual(s.to);
+    expect({ ...p.pose, fire: p.fireCount }).toEqual(s.to); // the plan tracks fire landings like the sim
   }
   return p.pose;
 }
@@ -149,4 +149,20 @@ test('findPath with other players as obstacles routes around a blocker on a beam
   expect(around).not.toBe(null);
   expect(around.some((s) => cellKey(s.to.cell) === '4,1,0')).toBe(false); // over or under it instead
   expect(cellKey(around[around.length - 1].to.cell)).toBe('6,1,0');
+});
+
+describe('fire in planning (phase 14b): up to 2 fire landings in a row, never a 3rd', () => {
+  test.each([
+    ['race-03.json', '5,3,2'], // a fire pillar top
+    ['arena-05.json', '7,1,2'], // the middle of a 5-long fire segment on the ring
+  ])('%s: %s is reachable across fire, and not with fire as a wall', (file, goal) => {
+    const w = worldOf(file);
+    const path = findPath(w, w.level.spawns[0], new Set([goal]))!;
+    expect(path).not.toBe(null);
+    expect(path.some((s) => s.to.fire > 0)).toBe(true);
+    expect(path.every((s) => s.to.fire <= 2)).toBe(true);
+    expect(findPath(w, w.level.spawns[0], new Set([goal]), undefined, 0, 0)).toBe(null);
+    const end = execute(inOrder(worldOf(file)), path); // the sim agrees, landing by landing (execute checks fire)
+    expect(cellKey(end.cell)).toBe(goal);
+  });
 });

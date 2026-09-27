@@ -53,10 +53,12 @@ export function previewAction(
       const over = !free(A1);
       for (const L of [add(A1, F), A1]) {
         if (isSolid(world, L)) continue;
-        if (free(L)) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
+        // A high hopper in L isn't reserved (§14 roll under) but still isn't a place to land: a stomp or nothing.
+        const onL = standingAt(world, L, up, self.id);
+        if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
         const B = add(L, F);
         // With push rules off there are no stomps: a player in L just makes it not free (the old fallback).
-        if (world.rules.push && standingAt(world, L, up, self.id) && free(B)) {
+        if (world.rules.push && onL && free(B)) {
           return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
         }
       }
@@ -72,9 +74,10 @@ export function previewAction(
       const through = high ? [add(C, U), add(add(C, F), U)] : [add(C, F), add(add(C, F), F)];
       if (through.some((c) => isSolid(world, c)) || isSolid(world, L)) return null;
       const over = !free(add(C, F));
-      if (free(L)) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over };
+      const onL = standingAt(world, L, up, self.id);
+      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over };
       const B = add(L, F);
-      if (world.rules.push && standingAt(world, L, up, self.id) && free(B)) {
+      if (world.rules.push && onL && free(B)) {
         return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over, bump: B };
       }
       return null;
@@ -127,6 +130,7 @@ export function startFall(world: World, p: PlayerState, tick: number): boolean {
   const below = sub(cell, dirVec(up));
   if (isSolid(world, below)) return false;
   p.forced = null; // a slide or launch never survives losing the ground
+  p.staggerOwed = false;
   startAction(p, { action: Action.Fall, to: { cell: below, up, fwd }, ticks: FALL_TICKS_PER_CELL }, tick);
   return true;
 }
