@@ -28,6 +28,8 @@ export const PlayerS = schema({
   ackTick: t.int32().default(-1),
   /** Fire landings in a row (§18): the client inflates the ball a little per count. */
   fireCount: t.uint8().default(0),
+  /** Pills (phase 15a): effect type → the tick it ends. */
+  effects: t.map('int32'),
   ready: t.boolean().default(false),
   /** Lobby level vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
   vote: t.int8().default(-1),
@@ -58,6 +60,8 @@ export const GameState = schema({
   winnerId: t.string(), // '' = none / draw
   players: t.map(PlayerS),
   items: t.map(ItemS),
+  /** Pickups on the map (phase 15a), by id; `kind` is the pill type. */
+  pickups: t.map(ItemS),
   /** Hot tiles (phase 12c): tileKey → heat in ticks, only tiles with heat > 0. The client glows them from warn. */
   hot: t.map('uint16'),
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). Gone once it regrows. */
@@ -110,7 +114,11 @@ export function syncSchema(world: World, state: GameState): void {
     set(s, 'protectedUntil', p.protectedUntil);
     set(s, 'knockouts', p.knockouts);
     set(s, 'fireCount', p.fireCount);
+    syncMap(new Map(p.effects.map((e) => [e.type, e.untilTick])), s.effects);
   }
+  const pickups = new Map(world.pickups.map((k) => [String(k.id), k]));
+  for (const [id, k] of pickups) if (!state.pickups.has(id)) state.pickups.set(id, new ItemS({ id, kind: k.type, ...k.cell, up: k.up }));
+  for (const id of [...state.pickups.keys()]) if (!pickups.has(id)) state.pickups.delete(id);
   for (const k of world.keys) {
     const id = `key-${k.id}`;
     if (k.collected) {

@@ -253,6 +253,36 @@ export const RECIPES: Record<string, Recipe> = {
     osc(c, f, t, 0.33, 'sawtooth', 100 * pitch);
     return 0.34;
   },
+  /** A good pill taken (15a): a pop and a bright rising chime. */
+  chime(c, out, t, { pitch }) {
+    noise(c, env(c, out, t, 0.2, 0.001, 0.05), t, 0.06, 'bandpass', 1200 * pitch, 2);
+    return Math.max(0.06, plucks(c, out, t + 0.03, [784, 1175, 1568], 0.05, 0.12, pitch));
+  },
+  /** Lethargy taken (15a): a descending "wah-wah", a muted saw sliding down through a closing low-pass. */
+  wah(c, out, t, { pitch }) {
+    for (const [at, f0, f1] of [[0, 330, 300], [0.28, 300, 200]] as const) {
+      const g = env(c, out, t + at, 0.14, 0.03, 0.3);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(1800, t + at);
+      lp.frequency.exponentialRampToValueAtTime(400, t + at + 0.3);
+      lp.connect(g);
+      osc(c, lp, t + at, 0.32, 'sawtooth', f0 * pitch, f1 * pitch, 0.3);
+    }
+    return 0.62;
+  },
+  /** Bouncing off a heavy ball (15a): a metallic clang, inharmonic square partials ringing out. */
+  clang(c, out, t, { pitch }) {
+    for (const f of [420, 1130, 1790]) osc(c, env(c, out, t, 0.07, 0.001, 0.45), t, 0.46, 'square', f * pitch);
+    noise(c, env(c, out, t, 0.15, 0.0005, 0.02), t, 0.025, 'highpass', 3000, 0.8);
+    return 0.47;
+  },
+  /** A heavy ball landing (15a): a deep dull thud. */
+  thud(c, out, t, { pitch, intensity: i }) {
+    osc(c, env(c, out, t, 0.5 + 0.3 * i, 0.002, 0.22), t, 0.24, 'sine', 70 * pitch, 35 * pitch, 0.15);
+    noise(c, env(c, out, t, 0.2, 0.001, 0.04), t, 0.05, 'lowpass', 400, 0.7);
+    return 0.25;
+  },
   /** Crumbly low noise: a rumble plus a scatter of short gritty grains. */
   crumble(c, out, t, { pitch }) {
     noise(c, env(c, out, t, 0.3, 0.01, 0.6), t, 0.62, 'lowpass', 500 * pitch, 0.8);

@@ -1,5 +1,6 @@
-import { RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type TileType } from '@kula/shared';
+import { EFFECT_TICKS, RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type PickupType, type TileType } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
+import { PILL_ICONS } from '../render/players.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const dot = (color: string) => `<span class="dot" style="background:${esc(color)}"></span>`;
@@ -16,6 +17,15 @@ const trapIcons = (level: Level) => [...new Set([
   ...(level.lasers.length ? ['laser' as const] : []), ...(level.invisible.size ? ['invisible' as const] : []), ...(level.vanish.size ? ['vanish' as const] : []),
 ])].map((t) => `<span class="trap" title="${TRAP_ICONS[t][1]}">${TRAP_ICONS[t][0]}</span>`).join('');
 const TOAST_MS = 2500;
+/** Pills (15a): the local player's effects, each an icon in a ring that runs down with the time left. */
+function pillRings(p: PlayerS | undefined, tick: number): string {
+  const out: string[] = [];
+  p?.effects?.forEach((until, type) => {
+    const left = Math.max(0, until - tick), frac = left / EFFECT_TICKS[type as PickupType];
+    out.push(`<span class="pill ${esc(type)}" style="--p:${frac.toFixed(3)}" title="${esc(type)}"><i>${PILL_ICONS[type] ?? '?'}</i><b>${Math.ceil(left / TICK_RATE)}</b></span>`);
+  });
+  return out.join('');
+}
 const CRUMBLE_COUNTDOWN_SEC = 5;
 const hearts = (lives: number, max: number) =>
   `<span class="hearts">${'♥'.repeat(lives)}<span class="dim">${'♥'.repeat(Math.max(0, max - lives))}</span></span>`;
@@ -38,7 +48,7 @@ export interface LobbyHooks {
 
 /** HTML overlay per phase: lobby vote + list, big countdown, timer + scoreboard + exit status, results banner, toasts. */
 export function createHud(lobby: LobbyHooks) {
-  const top = div('hud-top'), center = div('hud-center'), board = div('hud-board'), status = div('hud-status'), toasts = div('hud-toasts');
+  const top = div('hud-top'), center = div('hud-center'), board = div('hud-board'), status = div('hud-status'), toasts = div('hud-toasts'), fx = div('hud-fx');
   center.addEventListener('click', (e) => {
     const card = (e.target as HTMLElement).closest<HTMLElement>('[data-vote]');
     if (card) lobby.onVote(Number(card.dataset.vote));
@@ -94,6 +104,7 @@ export function createHud(lobby: LobbyHooks) {
       const hot = !!mine && !!level?.heat && s.phase === 'playing' && !mine.spectating
         && (s.hot.get(tileKey({ x: mine.fromX, y: mine.fromY, z: mine.fromZ }, mine.fromUp as Dir)) ?? 0) >= level.heat.warnTicks;
 
+      set(fx, s.phase === 'playing' ? pillRings(mine, s.tick) : '');
       switch (s.phase) {
         case 'lobby': {
           let ready = 0;

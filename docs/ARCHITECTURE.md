@@ -543,3 +543,28 @@ A **mover** is a ball in Roll, Flip, Climb, forced slide, Knocked or boost fligh
 - Moving collisions are resolved in the same intent/resolution pass as pushes, in fair order, after escapes.
 - Prediction: involves players, so it's deferred.
 
+## 21. Pickups & pills (phase 15a)
+
+Kula World's pills, as map pickups, in every mode. Score items (coins, gems, fruit, hourglass, clock) belong to single player (15b).
+
+**Level JSON**
+```json
+"pickups": [ { "cell": [4,1,4], "up": "+Y", "type": "bouncy", "respawnSec": 15 } ],
+"randomPickups": { "everySec": 20, "types": ["bouncy","heavy","sunglasses","lethargy"], "maxOnMap": 2 }
+```
+- Collected when a ball's action *finishes* in the cell (roll, flip, climb, landing, knock, slide, teleport arrival). That's the key rule, so being knocked onto a pill picks it up.
+- In multiplayer a spot respawns after `respawnSec` (default 15). `randomPickups` spawns on random safe tiles (LEVEL-DESIGN §11), deterministic from the world seed.
+- Effects are per player: `effects: { type, untilTick }[]`. The same type refreshes its duration. Death clears all effects.
+
+**Pills**
+
+| Pill | Duration | Effect |
+|---|---|---|
+| **Bouncy** (Kula) | 10 s | Every forward roll becomes a **2-tile bounce** (a jump of length 2, with stomp rules). Forward+jump becomes a **3-tile jump**. Hops unchanged. |
+| **Lethargy** (Kula, a *bad* pill) | 8 s | All your action durations ×1.6 (rounded up), and the camera sways slightly. Avoid it, or push others onto it. |
+| **Heavy** (new) | 8 s | You can't be pushed, stomped, cradled, edge-pushed or side-hit. Attempts bounce the attacker. Your pushes knock 2 tiles, unless blocked after 1. You still die to traps and falls. |
+| **Sunglasses** (Kula) | 15 s | Reveals invisible blocks (client-only, for you). |
+
+- The predictor must apply your own effects: they're synced, and they change durations and jump lengths.
+- Bots: seek takes good pills within 4 moves; everyone avoids lethargy; the bully values heavy and bouncy.
+

@@ -26,6 +26,12 @@
     #hud-top .timer { font-variant-numeric: tabular-nums; font-size: 1.5em; font-weight: 700; }
     #hud-top .timer.warn { color: var(--warn); }
     #hud-board { position: fixed; top: 12px; right: 12px; padding: 0.4em 0.8em; min-width: 12em; }
+    #hud-fx { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+    #hud-fx .pill { position: relative; display: grid; place-items: center; width: 2.6em; height: 2.6em; border-radius: 50%;
+      background: conic-gradient(var(--ring, #fff) calc(var(--p) * 1turn), #fff3 0); }
+    #hud-fx .pill i { display: grid; place-items: center; width: 2.1em; height: 2.1em; border-radius: 50%; background: var(--panel); font-style: normal; }
+    #hud-fx .pill b { position: absolute; bottom: -1.3em; font-size: 0.75em; font-weight: normal; }
+    #hud-fx .bouncy { --ring: #ff6fb5; } #hud-fx .lethargy { --ring: #e63946; } #hud-fx .heavy { --ring: #9aa3ad; } #hud-fx .sunglasses { --ring: #ffd166; }
     #hud-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 0.5em 1.1em; font-size: 1.1em; white-space: nowrap; }
     #hud-center { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; }
     #hud-center .panel { padding: 1em 1.6em; min-width: 18em; max-width: 90vw; text-align: center; }

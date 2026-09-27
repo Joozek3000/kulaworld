@@ -9,7 +9,7 @@ import { forcedAfter } from './sim/tiles.ts';
 import { step } from './sim/tick.ts';
 import {
   Action, addPlayer, createWorld, reserve, setInput,
-  type Cmd, type Input, type PlayerState, type Reservations, type World,
+  type Cmd, type Effect, type Input, type Pickup, type PlayerState, type Reservations, type World,
 } from './sim/world.ts';
 
 /** Inputs stamped further ahead than this are applied this many ticks ahead instead (a jump is never dropped). */
@@ -74,6 +74,8 @@ export interface ServerPlayer {
   protectedUntil: number;
   /** Fire landings in a row (§18). Omitted: keep the predicted count. */
   fireCount?: number;
+  /** Pills (§21): they change durations and jumps. Omitted: keep the predicted ones. */
+  effects?: Effect[];
 }
 
 /** The local player's predicted state at one tick: its motion plus the input state the sim keeps. */
@@ -86,7 +88,7 @@ function snap(p: PlayerState): Snap {
   return {
     action: p.action, pose: clonePose(p.pose), to: clonePose(p.action === Action.Idle ? p.pose : p.to),
     startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick,
-    bounce: p.bounce, protectedUntil: p.protectedUntil, fireCount: p.fireCount,
+    bounce: p.bounce, protectedUntil: p.protectedUntil, fireCount: p.fireCount, effects: p.effects,
     fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge,
   };
 }
@@ -108,6 +110,7 @@ function applyServer(p: PlayerState, s: ServerPlayer): void {
   p.bounce = s.bounce;
   p.protectedUntil = s.protectedUntil;
   if (s.fireCount !== undefined) p.fireCount = s.fireCount;
+  if (s.effects) p.effects = s.effects;
 }
 
 /** A boost launch with another player this close (cells, Manhattan) to its landing is left to the server (phase 14c). */
@@ -139,6 +142,12 @@ export class Predictor {
   deferring = false;
   /** The last misprediction (debugging): tick, the server's state and ours. */
   lastMiss: { tick: number; server: ServerPlayer; mine: ServerPlayer | null } | null = null;
+  /**
+   * Pickups (§21) as the server last sent them, and the ids we've already taken on our timeline (the server may not
+   * have got there yet): those stay off our map. A reset replays from the server's map.
+   */
+  private serverPickups: Pickup[] = [];
+  private taken = new Set<number>();
 
   constructor(level: Level, readonly localId: string) {
     this.world = createWorld(level, 0, { push: false });
@@ -146,6 +155,7 @@ export class Predictor {
     this.world.knockout = null;
     this.world.heat = null; // hot-tile deaths are the server's call
     this.world.timeLimitTick = Infinity;
+    this.world.spawnPickups = false; // respawns and random spawns come from the server
     addPlayer(this.world, localId, localId);
   }
 
@@ -165,6 +175,8 @@ export class Predictor {
     this.hist.clear();
     this.hist.set(tick, snap(p));
     this.deferredTicks.clear();
+    this.world.pickups = this.serverPickups;
+    this.taken.clear();
   }
 
   /** The other players as frozen obstacles at their latest server state. */
@@ -179,13 +191,19 @@ export class Predictor {
   }
 
   /**
-   * Crumbled blocks (knockout/sudden-death bands), crumble tiles (§18: block → removal tick, due or not) and collected
-   * keys, from the server. Crumble tiles due by our predicted tick are gone; later ones vanish (and regrow) in step().
+   * Crumbled blocks (knockout/sudden-death bands), crumble tiles (§18: block → removal tick, due or not), collected
+   * keys and the pickups on the map (§21), from the server. Crumble tiles due by our predicted tick are gone; later
+   * ones vanish (and regrow) in step().
    */
   setWorld(
     removed: Iterable<string>, collectedKeys: ReadonlySet<number>, crumbling: ReadonlyMap<string, number> = new Map(),
-    lasers?: ReadonlyMap<string, boolean>,
+    lasers?: ReadonlyMap<string, boolean>, pickups?: Pickup[],
   ): void {
+    if (pickups) {
+      this.serverPickups = pickups;
+      for (const id of this.taken) if (!pickups.some((k) => k.id === id)) this.taken.delete(id); // the server has it too
+      this.world.pickups = pickups.filter((k) => !this.taken.has(k.id));
+    }
     if (lasers) for (const [g, on] of lasers) this.world.lasers.set(g, on); // laser groups (13b)
     this.world.removed = new Set(removed);
     this.world.crumbling = new Map(crumbling);
@@ -234,6 +252,7 @@ export class Predictor {
       step(this.world);
       this.deferring = false;
     }
+    for (const k of this.serverPickups) if (!this.world.pickups.includes(k)) this.taken.add(k.id);
     if (p.action === Action.Dead) p.endTick = Infinity;
     this.hist.set(this.world.tick, snap(p));
   }
@@ -257,7 +276,7 @@ export class Predictor {
     if (forced === 'boost') {
       const all = this.world.players;
       this.world.players = [p];
-      const plan = previewAction(this.world, { id: p.id, pose }, 'boost', new Map());
+      const plan = previewAction(this.world, { id: p.id, pose, effects: p.effects }, 'boost', new Map());
       this.world.players = all;
       const near = (c: { x: number; y: number; z: number }) => !!plan
         && Math.abs(c.x - plan.to.cell.x) + Math.abs(c.y - plan.to.cell.y) + Math.abs(c.z - plan.to.cell.z) <= BOOST_NEAR;
@@ -273,7 +292,7 @@ export class Predictor {
     if (!cmds.length) return false;
     const others: Reservations = new Map();
     for (const o of this.world.players) if (o !== p) reserve(others, o);
-    const self = { id: p.id, pose };
+    const self = { id: p.id, pose, effects: p.effects };
     const pick = (res: Reservations): Plan | null => {
       for (const c of cmds) { const plan = previewAction(this.world, self, c, res); if (plan) return plan; }
       return null;

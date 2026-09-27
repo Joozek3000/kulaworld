@@ -1,9 +1,10 @@
 import { FORCED_MAX, ROLL_TICKS } from '../constants.ts';
 import { ALL_DIRS, dirName, dirVec, opposite, perpendicular, type Dir } from '../dir.ts';
 import { previewAction, teleportTarget } from '../sim/actions.ts';
-import { PLAN_FIRE_MAX, resultPose, type PlanPose } from '../sim/path.ts';
+import { PLAN_FIRE_MAX, resultPose, type PathStep, type PlanPose } from '../sim/path.ts';
+import { pickupCandidates, pickupSpotProblem, spotsNearSpawns, surfaceMove as move } from '../sim/pickups.ts';
 import { beamAt, blockTileAt, faceTileAt, forcedAfter, lethalForPlanning, spikesUp } from '../sim/tiles.ts';
-import { Action, createWorld, isSolid, outOfBounds, vanishOn, type Cmd, type Reservations, type World } from '../sim/world.ts';
+import { Action, createWorld, isSolid, outOfBounds, vanishOn, type Cmd, type Effect, type Reservations, type World } from '../sim/world.ts';
 import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { LETHAL_TILES, MODIFIER_TILES, type Level, type Pose, type Tile, type TileType, type Vanish } from './types.ts';
 
@@ -22,14 +23,6 @@ const at = (s: Spot) => `${cellKey(sub(s.cell, dirVec(s.up)))} ${dirName(s.up)}`
 const pose = (s: Spot, fwd: Dir = ALL_DIRS.find((d) => perpendicular(d, s.up))!): Pose => ({ cell: s.cell, up: s.up, fwd });
 const sides = (up: Dir) => ALL_DIRS.filter((d) => perpendicular(d, up));
 const standable = (w: World, s: Spot) => !isSolid(w, s.cell) && isSolid(w, sub(s.cell, dirVec(s.up)));
-
-/** Where rolling from `s` along `d` goes, ignoring players and arrows: a roll, a flip over the edge or a climb. */
-function move(w: World, s: Spot, d: Dir): Spot & { kind: 'roll' | 'flip' | 'climb' } {
-  const A = add(s.cell, dirVec(d));
-  if (isSolid(w, A)) return { cell: s.cell, up: opposite(d), kind: 'climb' };
-  const below = sub(A, dirVec(s.up));
-  return isSolid(w, below) ? { cell: A, up: s.up, kind: 'roll' } : { cell: below, up: d, kind: 'flip' };
-}
 
 function spots(w: World): Spot[] {
   const out: Spot[] = [];
@@ -122,6 +115,52 @@ function explore(w: World, starts: Pose[], fireMax: number, res: Reservations = 
     }
   }
   return { nodes, back };
+}
+
+/**
+ * Bots (phase 15a): the fewest moves from `from` to any cell in `goals`, searching (pose, laser group states) like
+ * `explore`, so a path may press a switch to open a beam on the way. As in the sim, a move that finishes on a switch
+ * toggles its group (unless that turns a beam on through the ball: never planned). Turns don't press. The world's
+ * laser states are restored after the search. Returns [] if already there, or null if unreachable.
+ */
+export function findPathLasers(
+  w: World, from: Pose, goals: ReadonlySet<string>, res: Reservations = new Map(), fire = 0, effects?: readonly Effect[],
+): PathStep[] | null {
+  if (goals.has(cellKey(from.cell))) return [];
+  const groups = groupsOf(w.level), saved = new Map(w.lasers);
+  const start: Node = { ...from, fire, mask: groups.reduce((m, g, i) => (w.lasers.get(g) ? m | (1 << i) : m), 0) };
+  const parent = new Map<string, { prev: string; step: PathStep } | null>([[planKey(start), null]]);
+  try {
+    for (let frontier = [start]; frontier.length;) {
+      const next: Node[] = [];
+      for (const p of frontier) {
+        for (const cmd of MOVES) {
+          setMask(w, p.mask);
+          const to = resultPose(w, p, cmd, res, p.fire, PLAN_FIRE_MAX, effects);
+          if (!to) continue;
+          let mask = p.mask;
+          const sw = cmd === 'left' || cmd === 'right' ? undefined : faceTileAt(w, to);
+          if (sw?.type === 'switch') {
+            setMask(w, (mask ^= 1 << groups.indexOf(sw.group)));
+            if (beamAt(w, to.cell)) continue;
+          }
+          const node: Node = { ...to, mask }, k = planKey(node);
+          if (parent.has(k)) continue;
+          parent.set(k, { prev: planKey(p), step: { cmd, to } });
+          if (goals.has(cellKey(to.cell))) {
+            const path: PathStep[] = [];
+            for (let e = parent.get(k); e; e = parent.get(e.prev)) path.push(e.step);
+            return path.reverse();
+          }
+          next.push(node);
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  } finally {
+    for (const [g, on] of saved) w.lasers.set(g, on);
+  }
 }
 
 /** Cells reachable from `start` with lethal tiles (fire too) as walls: the plain safe BFS of rule 2.2 (switches allowed). */
@@ -382,6 +421,7 @@ export function checkTrapRules(level: Level): RuleFinding[] {
     }
   }
   check13b(level, w, all, goals, reach, add1);
+  check15a(level, w, goals, reach, add1);
   return out;
 }
 
@@ -452,4 +492,33 @@ function check13b(level: Level, w: World, all: Spot[], goals: Goal[], reach: Set
   }
   // 10.8: one main mechanic.
   if (tps.length && level.lasers.length) add1('10.8', false, 'level', 'both teleporters and lasers (use one as the main mechanic)');
+}
+
+/** LEVEL-DESIGN §11 (phase 15a): pickup spots. */
+function check15a(level: Level, w: World, goals: Goal[], reach: Set<string>[], add1: Add): void {
+  const near = spotsNearSpawns(w), r = level.randomPickups;
+  level.pickups.forEach((s, i) => {
+    const why = pickupSpotProblem(w, s, near);
+    if (why) add1('11.1', true, `pickup ${i}`, `${s.type} ${why}`);
+  });
+  if (level.pickups.length > 4) add1('11.2', true, 'level', `${level.pickups.length} fixed pickup spots (max 4)`);
+  if (r && r.maxOnMap > 3) add1('11.2', true, 'level', `randomPickups.maxOnMap ${r.maxOnMap} (max 3)`);
+  const candidates = r ? pickupCandidates(level) : [];
+  if (r && !candidates.length) add1('11.1', true, 'level', 'randomPickups has no tile to spawn on');
+  // 11.3: with a lethargy spot as a wall (you can jump over it, not stop on it), every key and the exit stay reachable.
+  // ponytail: one safe BFS per lethargy spot per spawn; random lethargy on a race level makes that one per candidate.
+  const lethargy = [...level.pickups.filter((s) => s.type === 'lethargy'), ...(r?.types.includes('lethargy') && goals.length ? candidates : [])];
+  for (const s of lethargy) {
+    const res: Reservations = new Map([[cellKey(s.cell), 'x']]);
+    level.spawns.forEach((sp, i) => {
+      const cut = safeCells(w, sp, res);
+      for (const g of goals) if (reach[i].has(cellKey(g.p.cell)) && !cut.has(cellKey(g.p.cell))) add1('11.3', true, `${at(s)} lethargy`, `on the only route from spawn ${i} to the ${g.what}`);
+    });
+  }
+  // 11.4: a good pill next to an edge (a move from it flips over) or a trap is a decision, not a freebie.
+  level.pickups.forEach((s, i) => {
+    if (s.type === 'lethargy') return;
+    const risky = sides(s.up).some((d) => { const m = move(w, s, d); return m.kind === 'flip' || types(w, m).length > 0 || lethal(w, m); });
+    if (!risky) add1('11.4', false, `pickup ${i}`, `${s.type} isn't at a risk spot (next to an edge or a trap)`);
+  });
 }

@@ -133,6 +133,14 @@
   "keys": [
     {
       "cell": [
+        2,
+        1,
+        6
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
         3,
         1,
         6
@@ -141,7 +149,23 @@
     },
     {
       "cell": [
-        9,
+        4,
+        1,
+        6
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        8,
+        1,
+        6
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        10,
         1,
         6
       ],
@@ -157,35 +181,11 @@
     },
     {
       "cell": [
-        1,
-        -1,
-        7
-      ],
-      "up": "-Y"
-    },
-    {
-      "cell": [
         3,
         1,
         13
       ],
       "up": "+Y"
-    },
-    {
-      "cell": [
-        9,
-        -1,
-        16
-      ],
-      "up": "-Y"
-    },
-    {
-      "cell": [
-        7,
-        0,
-        10
-      ],
-      "up": "+X"
     }
   ],
   "exit": {
@@ -201,29 +201,29 @@
     {
       "group": "red",
       "from": [
-        2,
+        1,
         1,
         4
       ],
       "dir": "+X",
-      "length": 3,
+      "length": 5,
       "on": true
     },
     {
       "group": "red",
       "from": [
-        2,
+        1,
         1,
         7
       ],
       "dir": "+X",
-      "length": 3,
+      "length": 5,
       "on": true
     },
     {
       "group": "red",
       "from": [
-        2,
+        1,
         1,
         5
       ],
@@ -234,7 +234,7 @@
     {
       "group": "red",
       "from": [
-        4,
+        5,
         1,
         5
       ],
@@ -245,29 +245,29 @@
     {
       "group": "blue",
       "from": [
-        8,
+        7,
         1,
         4
       ],
       "dir": "+X",
-      "length": 3,
+      "length": 5,
       "on": true
     },
     {
       "group": "blue",
       "from": [
-        8,
+        7,
         1,
         7
       ],
       "dir": "+X",
-      "length": 3,
+      "length": 5,
       "on": true
     },
     {
       "group": "blue",
       "from": [
-        8,
+        7,
         1,
         5
       ],
@@ -278,7 +278,7 @@
     {
       "group": "blue",
       "from": [
-        10,
+        11,
         1,
         5
       ],
@@ -351,5 +351,25 @@
   ],
   "notes": {
     "10.8 level": "lasers are the main mechanic; the one teleporter pair is only the quick way home from the annex"
-  }
+  },
+  "pickups": [
+    {
+      "cell": [
+        3,
+        1,
+        8
+      ],
+      "up": "+Y",
+      "type": "heavy"
+    },
+    {
+      "cell": [
+        3,
+        1,
+        15
+      ],
+      "up": "+Y",
+      "type": "bouncy"
+    }
+  ]
 }

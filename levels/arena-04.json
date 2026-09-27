@@ -41,5 +41,6 @@
     { "block": [4, 3, 3], "type": "crumble", "regrowSec": 8 },
     { "block": [4, 3, 4], "type": "crumble", "regrowSec": 8 },
     { "block": [-2, 2, 3], "face": "+X", "type": "boost", "dir": "+Y", "variant": "far" }
-  ]
+  ],
+  "randomPickups": { "everySec": 20, "types": ["bouncy", "heavy", "lethargy"], "maxOnMap": 2 }
 }

@@ -46,5 +46,9 @@
     { "block": [6, 0, 8], "type": "crumble", "regrowSec": 8 },
     { "block": [7, 0, 8], "type": "crumble", "regrowSec": 8 },
     { "block": [8, 0, 4], "face": "+Y", "type": "boost", "dir": "+Z", "variant": "far" }
+  ],
+  "pickups": [
+    { "cell": [10, 1, 5], "up": "+Y", "type": "bouncy" },
+    { "cell": [11, 1, 2], "up": "+Y", "type": "lethargy" }
   ]
 }

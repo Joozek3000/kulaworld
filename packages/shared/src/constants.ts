@@ -44,3 +44,10 @@ export const TELEPORT_TICKS = 6;
 export const SWITCH_COOLDOWN_TICKS = 20;
 /** BFS gives up following a forced chain (ice slides, boosts) after this many steps: an ice loop. */
 export const FORCED_MAX = 64;
+// Pickups & pills (ARCHITECTURE §21, phase 15a), durations in ticks.
+export const BOUNCY_TICKS = 10 * 20;
+export const LETHARGY_TICKS = 8 * 20;
+export const HEAVY_TICKS = 8 * 20;
+export const SUNGLASSES_TICKS = 15 * 20;
+/** A fixed pickup spot comes back this long after it's taken (level `respawnSec` overrides). */
+export const PICKUP_RESPAWN_SEC = 15;

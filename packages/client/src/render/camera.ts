@@ -53,6 +53,8 @@ export type CameraMode = 'follow' | 'hold' | 'orbit';
 
 const kickDir = new THREE.Vector3();
 
+const swayQ = new THREE.Quaternion();
+
 export class CameraRig {
   private orbitAngle = 0;
   private snap = true;
@@ -61,6 +63,9 @@ export class CameraRig {
   private solid: SolidFn | null = null;
   /** A short jolt (a boost launch, phase 14c): cells the camera is pushed back along its view, easing out. */
   private kickAmt = 0;
+  /** Lethargy (15a): 0..1, a slow woozy roll of the view. */
+  sway = 0;
+  private swayT = 0;
 
   constructor(private camera: THREE.Camera) {}
 
@@ -100,5 +105,11 @@ export class CameraRig {
       this.camera.position.add(kickDir.set(0, 0, 1).applyQuaternion(this.camera.quaternion).multiplyScalar(this.kickAmt));
       this.kickAmt *= Math.exp(-dt * 9);
     } else this.kickAmt = 0;
+    if (this.sway > 0) {
+      this.swayT += dt;
+      const a = this.sway * 0.05;
+      this.camera.quaternion.multiply(swayQ.setFromAxisAngle(kickDir.set(0, 0, 1), a * Math.sin(this.swayT * 1.3)));
+      this.camera.position.add(kickDir.set(1, 0, 0).applyQuaternion(this.camera.quaternion).multiplyScalar(a * 2 * Math.sin(this.swayT * 0.9)));
+    }
   }
 }

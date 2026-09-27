@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, airHop, ALL_DIRS, beamHit, cellKey, createWorld, dirVec, findPath, isPushable, isSolid, lintCorridors, loadLevel, opposite, pathCells, perpendicular,
+  Action, add, airHop, ALL_DIRS, beamHit, cellKey, createWorld, dirVec, findPath, findPathLasers, isPushable, isSolid, lintCorridors, loadLevel, opposite, pathCells, perpendicular,
   blockTileAt, lethalForPlanning, RANDOM_VOTE, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
-  type Dir, type Input, type PathStep, type PlayerState, type Pose, type SimEvent, type Vec3, type World,
+  type Dir, type Effect, type Input, type PathStep, type PickupType, type PlayerState, type Pose, type Reservations, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
 
 const { values } = parseArgs({
@@ -43,6 +43,9 @@ interface Stats {
   pushes: number; bounces: number; knockouts: number; keyDrops: number; livesLost: number; eliminated: number;
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
   cradles: number; edgePushes: number; headOns: number; sideHits: number; sideTries: number; teleports: number; zapped: number; toggles: number;
+  pillDetours: number;
+  /** Pills taken (phase 15a), by type. */
+  pills: Record<string, number>;
 }
 
 /** Retries joinOrCreate for up to 30 s, so bots can start before the server is up. */
@@ -102,8 +105,35 @@ function switchTraps(state: Players, selfId: string, world: World, skip: (id: st
   }
   return out;
 }
-/** bully: extra moves it will take to reach a switch that zaps someone. */
-const SWITCH_DETOUR = 4;
+/** bully: extra moves it will take to reach a switch that zaps someone (15a: was 4; it never triggered in the 13b soak). */
+const SWITCH_DETOUR = 8;
+/** Pills (15a): seek takes a good one this close (moves) if it costs at most PILL_EXTRA moves on its way to the goal; */
+const SEEK_PILL_MOVES = 4, PILL_EXTRA = 2;
+/** the bully (and any hunter) this close, whatever it costs. */
+const HUNT_PILL_MOVES = 6;
+const GOOD_PILLS: readonly PickupType[] = ['bouncy', 'heavy'];
+
+type PickupLike = { kind: string; x: number; y: number; z: number };
+type WithPickups = { pickups?: MapOf<PickupLike> };
+/** Cells of the pickups of these types on the map. */
+function pillCells(state: WithPickups, types: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  state.pickups?.forEach((k) => { if (types.includes(k.kind)) out.add(`${k.x},${k.y},${k.z}`); });
+  return out;
+}
+/** Every bot (15a): lethargy pills as obstacles for planning. A plan never stops on one; jumping over is fine. */
+const lethargyRes = (state: WithPickups): Reservations => new Map([...pillCells(state, ['lethargy'])].map((k) => [k, 'pill']));
+/** This bot's pills, for planning with them (bouncy changes its moves). */
+function effectsOf(p: { effects?: MapOf<number> }): Effect[] {
+  const out: Effect[] = [];
+  p.effects?.forEach((untilTick, type) => out.push({ type: type as PickupType, untilTick }));
+  return out;
+}
+/** A forward roll from `pose` right now would end on a lethargy pill (wander steers away, 15a). */
+function lethargyAhead(state: WithPickups, world: World, pose: Pose): boolean {
+  const plan = previewAction(world, { id: '', pose }, 'fwd', new Map());
+  return !!plan && pillCells(state, ['lethargy']).has(cellKey(plan.to.cell));
+}
 /** After a head-on bounce with a ball, leave it alone this long (14d soak: two bots re-charging each other). */
 const HEAD_ON_COOLDOWN_MS = 2_000;
 
@@ -161,7 +191,7 @@ function wanderBrain(ctx: Ctx) {
     const s = ctx.room.state, p: SchemaPlayer | undefined = s.players?.get(ctx.room.sessionId);
     const moving = p && (p.action === Action.Roll || p.action === Action.Flip);
     const pose = p && (p.action === Action.Idle || moving) ? (moving ? poseOf(p.toX, p.toY, p.toZ, p.toUp, p.toFwd) : poseOf(p.fromX, p.fromY, p.fromZ, p.fromUp, p.fromFwd)) : null;
-    const risk = playing && !!pose && (headOnRisk(s, ctx.room.sessionId, pose, planWorld(s)) || beamAhead(planWorld(s), pose));
+    const risk = playing && !!pose && (headOnRisk(s, ctx.room.sessionId, pose, planWorld(s)) || beamAhead(planWorld(s), pose) || lethargyAhead(s, planWorld(s), pose));
     if (risk !== braking) { braking = risk; ctx.send(risk ? { turn: Math.random() < 0.5 ? -1 : 1 } : { fwdHeld: true }); }
     if (braking) { wasPlaying = playing; return; }
     if (playing && (!wasPlaying || Date.now() >= nextPulseAt)) {
@@ -178,7 +208,7 @@ function wanderBrain(ctx: Ctx) {
 
 /** Actions a path step may start as. */
 const EXPECTED: Record<string, readonly number[]> = {
-  fwd: [Action.Roll, Action.Flip, Action.Climb],
+  fwd: [Action.Roll, Action.Flip, Action.Climb, Action.Jump], // a bouncy ball's roll is a jump (15a)
   jump: [Action.Jump],
   left: [Action.Turn],
   right: [Action.Turn],
@@ -269,8 +299,9 @@ function besideOpponents(state: { players: { forEach(cb: (p: PlayerLike & { toUp
  * bully (phase 13a): cells beside an opponent from which a push knocks it onto spikes or fire, cellKey → opponent id.
  * The push goes from c through the opponent O to O + d, on the opponent's face.
  */
-function trapPushCells(state: { players: { forEach(cb: (p: PlayerLike & { toUp: number }, id: string) => void): void } }, selfId: string, world: World, skip: (id: string) => boolean): Map<string, string> {
+function trapPushCells(state: { players: { forEach(cb: (p: PlayerLike & { toUp: number }, id: string) => void): void } } & WithPickups, selfId: string, world: World, skip: (id: string) => boolean): Map<string, string> {
   const cells = new Map<string, string>();
+  const lethargy = pillCells(state, ['lethargy']); // 15a: a push onto a lethargy pill slows the victim down
   state.players.forEach((o, id) => {
     if (id === selfId || o.action === Action.Dead || skip(id)) return;
     const up = o.toUp as Dir, O = { x: o.toX, y: o.toY, z: o.toZ }, U = dirVec(up);
@@ -278,7 +309,7 @@ function trapPushCells(state: { players: { forEach(cb: (p: PlayerLike & { toUp: 
       if (!perpendicular(d, up)) continue;
       const c = sub(O, dirVec(d)), dest = add(O, dirVec(d));
       if (isSolid(world, c) || !isSolid(world, sub(c, U)) || isSolid(world, dest)) continue;
-      if (lethalForPlanning(world, { cell: dest, up, fwd: d })) cells.set(cellKey(c), id);
+      if (lethalForPlanning(world, { cell: dest, up, fwd: d }) || lethargy.has(cellKey(dest))) cells.set(cellKey(c), id);
     }
   });
   return cells;
@@ -546,6 +577,13 @@ function seekBrain(ctx: Ctx, bully: boolean) {
     else s.items.forEach((it: { kind: string; x: number; y: number; z: number }) => { if (it.kind === 'key') goals.add(`${it.x},${it.y},${it.z}`); });
 
     const onPlan = path.length > 0 && goals.has(target) && expected !== null && samePose(pose, expected);
+    // Pills (15a): plan with this bot's own (bouncy changes its moves), around lethargy, and through switches (13b
+    // follow-up: seek opens a cage for itself).
+    const fx = effectsOf(p), avoid = lethargyRes(s);
+    const plan = (to: ReadonlySet<string>, from = pose, f = fire): PathStep[] | null => {
+      const go = (res: Reservations) => (world.level.lasers.length ? findPathLasers(world, from, to, res, f, fx) : findPath(world, from, to, res, f, undefined, fx));
+      return go(avoid) ?? (avoid.size ? go(new Map()) : null); // no way round a lethargy pill: through it
+    };
     // Fire landings in a row (§18, phase 14b): plans may take 2, never a 3rd. Deciding early, count the landing ahead.
     const landing = !idle && p.action !== Action.Turn;
     const fire = !landing ? p.fireCount : blockTileAt(world, pose)?.type === 'fire' ? p.fireCount + 1 : 0;
@@ -553,16 +591,26 @@ function seekBrain(ctx: Ctx, bully: boolean) {
       let found: PathStep[] | null = null;
       if (goals.size && Date.now() < avoidUntil) {
         const res = reservations(withPlayers(world, s, me)); // others only: withPlayers leaves this bot out
-        found = findPath(world, pose, goals, res, fire);
+        for (const [k, v] of avoid) res.set(k, v);
+        found = findPath(world, pose, goals, res, fire, undefined, fx);
         if (found?.length) ctx.stats.detours++;
       }
-      if (!found?.length) found = goals.size ? findPath(world, pose, goals, undefined, fire) : null;
+      if (!found?.length) found = goals.size ? plan(goals) : null;
+      // A good pill nearby (15a): seek takes it if it barely slows the race; hunters take it anyway.
+      const pills = unsafe ? new Set<string>() : pillCells(s, GOOD_PILLS);
+      if (found && pills.size) {
+        const pill = plan(pills);
+        if (pill?.length && pill.length <= (bully ? HUNT_PILL_MOVES : SEEK_PILL_MOVES)) {
+          const end = pill[pill.length - 1].to, rest = hunter ? 0 : plan(goals, end, end.fire)?.length ?? Infinity;
+          if (hunter || pill.length + rest <= found.length + PILL_EXTRA) { found = pill; ctx.stats.pillDetours++; }
+        }
+      }
       if (found && trapGoals?.size) { // worth a short detour: a push onto a trap is a knockout
-        const trap = findPath(world, pose, trapGoals, undefined, fire);
+        const trap = findPath(world, pose, trapGoals, avoid, fire, undefined, fx);
         if (trap?.length && trap.length <= found.length + TRAP_DETOUR) found = trap;
       }
       if (found && switchGoals?.size) {
-        const zap = findPath(world, pose, switchGoals, undefined, fire);
+        const zap = findPath(world, pose, switchGoals, avoid, fire, undefined, fx);
         if (zap?.length && zap.length <= found.length + SWITCH_DETOUR) found = zap;
       }
       if (!found?.length) {
@@ -726,7 +774,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
     eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0, edgePushes: 0,
-    headOns: 0, sideHits: 0, sideTries: 0, teleports: 0, zapped: 0, toggles: 0,
+    headOns: 0, sideHits: 0, sideTries: 0, teleports: 0, zapped: 0, toggles: 0, pillDetours: 0, pills: {},
   };
   let seq = 0;
   const ctx: Ctx = {
@@ -750,6 +798,7 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
     if (e.type === 'teleport' && e.playerId === me && e.result === 'go') stats.teleports++;
     if (e.type === 'death' && e.playerId === me && e.cause === 'laser') stats.zapped++;
     if (e.type === 'laser' && e.playerId === me) stats.toggles++;
+    if (e.type === 'pickup' && e.playerId === me) stats.pills[e.pickup] = (stats.pills[e.pickup] ?? 0) + 1;
     if (e.type === 'cradle' && e.pusherId === me) stats.cradles++;
     if (e.type === 'knockout' && e.pusherId === me) stats.knockouts++;
     if (e.type === 'stomp' && e.attackerId === me) stats.stomps++;
@@ -834,7 +883,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}, teleports ${v.teleports}, zapped ${v.zapped}, toggles ${v.toggles}`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}, teleports ${v.teleports}, zapped ${v.zapped}, toggles ${v.toggles}, pills ${Object.entries(v.pills).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'} (detours ${v.pillDetours})`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

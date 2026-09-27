@@ -4,7 +4,7 @@ import { cellKey, sub } from '../vec.ts';
 import { FIRE_MAX, FORCED_MAX } from '../constants.ts';
 import { previewAction } from './actions.ts';
 import { beamHit, blockTileAt, faceTileAt, forcedAfter, pathCells } from './tiles.ts';
-import { Action, isSolid, outOfBounds, type Cmd, type Reservations, type World } from './world.ts';
+import { Action, isSolid, outOfBounds, type Cmd, type Effect, type Reservations, type World } from './world.ts';
 
 /** `fire`: fire landings in a row on arrival (§18), tracked so a plan never takes a third. */
 export interface PathStep { cmd: Cmd; to: PlanPose }
@@ -24,18 +24,20 @@ const poseKey = (p: PlanPose) => `${cellKey(p.cell)}|${p.up}|${p.fwd}|${p.fire}`
  * follows the fall to where it lands, and forced moves (ice slides, boost launches, teleports, §18) are followed to
  * where they stop. Returns null if the move is blocked or ends in death: a fatal fall, spikes (retracting ones too:
  * bots don't time them), a fire landing past `fireMax` in a row, or passing through a laser beam that is on right now
- * (13b; an off beam is passable). `fire` is the count before the move (turns keep it).
+ * (13b; an off beam is passable). `fire` is the count before the move (turns keep it). `effects`: the mover's pills
+ * (§21: bouncy turns rolls into bounces and jumps into 3-cell jumps).
  */
 export function resultPose(
-  world: World, pose: Pose, cmd: Cmd, res: Reservations = NO_PLAYERS, fire = 0, fireMax = PLAN_FIRE_MAX,
+  world: World, pose: Pose, cmd: Cmd, res: Reservations = NO_PLAYERS, fire = 0, fireMax = PLAN_FIRE_MAX, effects?: readonly Effect[],
 ): PlanPose | null {
   let from: PlanPose = { ...pose, fire }, next: Cmd | null = cmd;
   for (let i = 0; next; i++) {
-    const plan = previewAction(world, { id: '', pose: from }, next, res);
+    const plan = previewAction(world, { id: '', pose: from, effects }, next, res);
     if (!plan) return i ? from : null; // a forced slide that's blocked just stops
     if (res !== NO_PLAYERS && plan.bump) return null; // routing around players: never through a stomp
     const to = plan.action === Action.Jump ? landing(world, plan.to) : plan.to;
     if (!to || faceTileAt(world, to)?.type === 'spikes' || i > FORCED_MAX) return null;
+    if (res.has(cellKey(to.cell))) return null; // a jump that falls on into a taken cell (15a)
     const warp = plan.action === Action.Teleport;
     if (beamHit(world, warp ? [to.cell] : [...pathCells(from, plan.to.cell), ...pathCells(plan.to, to.cell)])) return null;
     const landed = plan.action !== Action.Turn && plan.action !== Action.Hop && !warp;
@@ -63,10 +65,11 @@ function landing(world: World, to: Pose): Pose | null {
  * Breadth-first search over (cell, up, fwd, fire count) for the fewest moves until the player stands on any cell in
  * `goals` (cellKeys). Ignores other players, or with `res` (phase 12: bots routing around a blocker) routes around
  * the cells they occupy. `fire`: the player's fire landings in a row now; up to `fireMax` in a row are allowed (0:
- * fire is a wall). Returns [] if already there, or null if unreachable.
+ * fire is a wall). `effects`: the mover's pills (§21). Returns [] if already there, or null if unreachable.
  */
 export function findPath(
   world: World, from: Pose, goals: ReadonlySet<string>, res: Reservations = NO_PLAYERS, fire = 0, fireMax = PLAN_FIRE_MAX,
+  effects?: readonly Effect[],
 ): PathStep[] | null {
   if (goals.has(cellKey(from.cell))) return [];
   const start: PlanPose = { ...from, fire };
@@ -77,7 +80,7 @@ export function findPath(
     for (const pose of frontier) {
       const key = poseKey(pose);
       for (const cmd of MOVES) {
-        const to = resultPose(world, pose, cmd, res, pose.fire, fireMax);
+        const to = resultPose(world, pose, cmd, res, pose.fire, fireMax, effects);
         if (!to) continue;
         const toKey = poseKey(to);
         if (parent.has(toKey)) continue;

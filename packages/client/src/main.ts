@@ -5,6 +5,7 @@ import { connect, serverUrl, type Net } from './net.ts';
 import { CameraRig, type CameraMode } from './render/camera.ts';
 import { ItemsView } from './render/items.ts';
 import { findLevel, levelBounds, LevelView } from './render/level.ts';
+import { PillsView } from './render/pills.ts';
 import { PlayersView } from './render/players.ts';
 import { TrapsView } from './render/traps.ts';
 import { groupColor, staticLevel, Traps2View } from './render/traps2.ts';
@@ -36,6 +37,7 @@ view.setSky();
 const debug = createDebug();
 const players = new PlayersView(view.scene);
 const items = new ItemsView(view.scene);
+const pills = new PillsView(view.scene);
 const rig = new CameraRig(view.camera);
 const fx = new Fx(view.scene);
 const audio = new AudioEngine();
@@ -47,13 +49,17 @@ players.onFeel = (e) => {
   const at = e.local ? null : e.at; // the local ball isn't spatialised
   switch (e.kind) {
     case 'takeoff': audio.play('takeoff', { at }); break;
-    case 'land': audio.play('bounce', { at, intensity: e.intensity }); break;
+    case 'land': // pills (15a): a heavy ball thuds, a bouncy one boings
+      if (e.pills?.has('heavy')) audio.play('thud', { at, intensity: e.intensity });
+      else audio.play('bounce', { at, intensity: e.intensity });
+      if (e.pills?.has('bouncy')) audio.play('boing', { at, gain: 0.6 });
+      break;
     case 'roll': audio.play('roll', { at }); break;
     case 'flip': audio.play('squeak', { at }); break;
     case 'climb': audio.play('squeak', { at, gain: 0.8 }); break; // rubber into the corner (phase 11)
     case 'fall': audio.play('fall', { at }); break;
     case 'hit': audio.play('hit', { at, intensity: e.intensity, gain: (e.victimLocal ? 1.5 : 1) * (e.headOn ? 1.3 : 1) }); break; // head-on: a bit louder (§20)
-    case 'boing': audio.play('boing', { at }); break;
+    case 'boing': audio.play(heavyNear(e.at) ? 'clang' : 'boing', { at }); break; // bounced off a heavy ball: clang (15a)
     case 'stomp': audio.play('stomp', { at, intensity: e.intensity, gain: e.victimLocal ? 1.5 : 1 }); break;
     case 'clash': audio.play('boing', { at, gain: 1.2 }); break;
     case 'pop': audio.play('pop', { at }); break;
@@ -66,6 +72,16 @@ players.onFeel = (e) => {
     case 'edge': audio.play('edge', { gain: 0.7 }); break; // an enemy just around your edge (phase 13a)
   }
 };
+
+/** A heavy ball (15a) within reach of `at`: whoever bounced there bounced off iron. */
+function heavyNear(at: THREE.Vector3): boolean {
+  let near = false;
+  net?.state.players?.forEach((p) => {
+    if (p.effects?.has('heavy') && Math.hypot(p.fromX - at.x, p.fromY - at.y, p.fromZ - at.z) < 1.8) near = true;
+  });
+  return near;
+}
+const PILL_NAMES: Record<string, string> = { bouncy: 'Bouncy', lethargy: 'Lethargy', heavy: 'Heavy', sunglasses: 'Sunglasses' };
 
 try {
   net = await connect();
@@ -153,6 +169,15 @@ net.onEvent((e) => {
       audio.play('click', { at: e.playerId === net.sessionId ? null : players.ballAt(e.playerId) });
       break;
     }
+    case 'pickup': { // pills (15a): a chime, or the lethargy "wah"; the pill pops in PillsView
+      const mine = e.playerId === net.sessionId;
+      audio.play(e.pickup === 'lethargy' ? 'wah' : 'chime', { at: mine ? null : players.ballAt(e.playerId), mine });
+      hud.toast(`${nameOf(e.playerId)} got ${PILL_NAMES[e.pickup]}${e.pickup === 'lethargy' ? '…' : '!'}`, colorOf(e.playerId));
+      break;
+    }
+    case 'effectEnd':
+      if (e.playerId === net.sessionId) hud.toast(`${PILL_NAMES[e.effect]} wore off`, colorOf(e.playerId));
+      break;
     case 'crumbleWarn': audio.play('crumbleWarn', {}, 'ui'); break;
     case 'crumble': audio.play('crumble', {}, 'ui'); break;
     case 'burn': {
@@ -244,6 +269,7 @@ view.renderer.setAnimationLoop((now: number) => {
   const mine = s.players.get(me);
   const unlocked = !!level?.exit && !!mine && mine.keys >= level.keysRequired;
   items.update(s, active, unlocked, now / 1000);
+  pills.update(s, active, now / 1000);
   if (unlocked && !wasUnlocked && s.phase === 'playing') audio.play('exit', {}, 'ui');
   wasUnlocked = unlocked;
 
@@ -256,6 +282,9 @@ view.renderer.setAnimationLoop((now: number) => {
   // Phase 13b: laser groups as synced (the level's defaults outside a round), invisible blocks near the local ball.
   const laserOn = (g: string) => (active && s.lasers?.has(g) ? s.lasers.get(g) === 1 : !!level?.lasers.find((l) => l.group === g)?.on);
   const localAt = players.poseOf(me)?.position;
+  // Pills (15a): sunglasses show every invisible block; lethargy sways the camera.
+  if (traps2View) traps2View.revealInvisible = active && !!mine?.effects?.has('sunglasses');
+  rig.sway = active && mine?.effects?.has('lethargy') ? 1 : 0;
   traps2View?.update(renderTick, laserOn, localAt ? new THREE.Vector3(...localAt) : null, now / 1000);
   // Active beams buzz nearby (positional), a little faster the closer you are.
   const beamAt = traps2View && localAt && s.phase === 'playing' ? traps2View.nearestBeam(new THREE.Vector3(...localAt), laserOn) : null;

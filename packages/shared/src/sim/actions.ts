@@ -2,8 +2,9 @@ import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, 
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
+import { ownTicks } from './pickups.ts';
 import { faceTileAt, fwdAllowed } from './tiles.ts';
-import { Action, isFree, isPushable, isSolid, outOfBounds, reservations, type BoostBlock, type Cmd, type PlayerState, type Reservations, type World } from './world.ts';
+import { Action, airHop, hasEffect, isFree, isPushable, isSolid, outOfBounds, reservations, type BoostBlock, type Cmd, type Effect, type PlayerState, type Reservations, type World } from './world.ts';
 
 /** `over`: a forward jump over a player on A1. `bump`: a stomp jump's bump cell B (§16). */
 export interface Plan { action: Action; to: Pose; ticks: number; over?: boolean; bump?: Vec3 }
@@ -16,20 +17,50 @@ export const standingAt = (world: World, cell: Vec3, up: Dir, selfId: string): P
 /** left = cross(U, F), right = cross(F, U). With U=+Y, F=+Z: right is -X. */
 export const turnFwd = (up: Dir, fwd: Dir, turn: -1 | 1): Dir => (turn < 0 ? cross(up, fwd) : cross(fwd, up));
 
+/** Who is moving: a pose, and the pills that change its moves (§21; none for level checks). */
+export type Mover = Pick<PlayerState, 'id' | 'pose'> & { effects?: readonly Effect[] };
+
 /**
  * What `cmd` would do for a player at `self.pose`, or null if it is blocked.
  * Pure: reads the world, never mutates it. Bots use it for BFS.
+ * Pills (§21): with bouncy, a forward roll is a 2-cell jump (a plain roll only where that jump can't start: a wall
+ * ahead is still climbed) and a forward jump is 3 cells; with lethargy every duration is ×1.6.
  */
-export function previewAction(
-  world: World,
-  self: Pick<PlayerState, 'id' | 'pose'>,
-  cmd: Cmd,
-  res: Reservations = reservations(world),
-): Plan | null {
+export function previewAction(world: World, self: Mover, cmd: Cmd, res: Reservations = reservations(world)): Plan | null {
+  const plan = preview(world, self, cmd, res);
+  return plan && hasEffect(self, 'lethargy') ? { ...plan, ticks: ownTicks(self, plan.ticks) } : plan;
+}
+
+function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan | null {
   const { cell: C, up, fwd } = self.pose;
   const U = dirVec(up), F = dirVec(fwd);
   const free = (v: Vec3) => isFree(world, res, self.id, v);
   if ((cmd === 'fwd' || cmd === 'jump') && !fwdAllowed(world, self.pose)) return null; // an arrow tile (§18)
+  const bouncy = hasEffect(self, 'bouncy');
+
+  /**
+   * §16: a forward jump of up to `n` cells. A player in the cells flown over doesn't block (the ball passes over);
+   * a block does. Landing L is the furthest open cell, else a shorter one. A player standing in L makes it a stomp
+   * jump if the bump cell L + F is free; otherwise L isn't free.
+   */
+  const jump = (n: number): Plan | null => {
+    const A1 = add(C, F);
+    if (isSolid(world, A1)) return null;
+    const over = !free(A1);
+    const cells = [A1];
+    while (cells.length < n && !isSolid(world, add(cells[cells.length - 1], F))) cells.push(add(cells[cells.length - 1], F));
+    for (const L of cells.reverse()) {
+      // A high hopper in L isn't reserved (§14 roll under) but still isn't a place to land: a stomp or nothing.
+      const onL = standingAt(world, L, up, self.id);
+      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
+      const B = add(L, F);
+      // With push rules off there are no stomps: a player in L just makes it not free (the old fallback).
+      if (world.rules.push && onL && free(B)) {
+        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
+      }
+    }
+    return null;
+  };
 
   switch (cmd) {
     case 'left':
@@ -39,31 +70,16 @@ export function previewAction(
       const A = add(C, F);
       // A wall ahead becomes the floor (§5, phase 11): the ball stays in C and turns up onto it.
       if (isSolid(world, A)) return { action: Action.Climb, to: { cell: C, up: opposite(fwd), fwd: up }, ticks: CLIMB_TICKS };
+      const bounce = bouncy ? jump(2) : null;
+      if (bounce) return bounce;
       if (!free(A)) return null; // a player
       const below = sub(A, U);
       if (isSolid(world, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: ROLL_TICKS };
       if (!free(below)) return null;
       return { action: Action.Flip, to: { cell: below, up: fwd, fwd: opposite(up) }, ticks: FLIP_TICKS };
     }
-    case 'jump': {
-      // §16: a player on A1 doesn't block (the ball passes over); a block does. Landing L is A2, else A1 (short
-      // jump). A player standing in L makes it a stomp jump if the bump cell L + F is free; otherwise L isn't free.
-      const A1 = add(C, F);
-      if (isSolid(world, A1)) return null;
-      const over = !free(A1);
-      for (const L of [add(A1, F), A1]) {
-        if (isSolid(world, L)) continue;
-        // A high hopper in L isn't reserved (§14 roll under) but still isn't a place to land: a stomp or nothing.
-        const onL = standingAt(world, L, up, self.id);
-        if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
-        const B = add(L, F);
-        // With push rules off there are no stomps: a player in L just makes it not free (the old fallback).
-        if (world.rules.push && onL && free(B)) {
-          return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
-        }
-      }
-      return null;
-    }
+    case 'jump':
+      return jump(bouncy ? 3 : 2);
     case 'boost': {
       // §18: a forced jump off a boost pad, always along the pad's dir (phase 14c; the ball turns to face it). far: 3
       // cells ahead; high: 2 ahead and 1 up. The cells flown through must be open (no fallback to a shorter launch).
@@ -85,10 +101,11 @@ export function previewAction(
       return null;
     }
     case 'teleport': {
-      // §18 (phase 13b): to the partner tile, facing the same way relative to the face. Its cell taken (reserved,
-      // or anyone in it, a high hopper too) or its block gone: blocked (the caller holds the ball, like a boost).
+      // §18 (phase 13b): to the partner tile, facing the same way relative to the face. Its cell taken (reserved, or
+      // anyone on the ground in it) or its block gone: blocked (the caller holds the ball, like a boost). A high
+      // hopper there doesn't count (15a): the ball arrives under it, and is stomped if it's still there at the landing.
       const to = teleportTarget(world, self.pose);
-      if (!to || !free(to.cell) || world.players.some((v) => v.id !== self.id && v.action !== Action.Dead && eq(v.pose.cell, to.cell))) return null;
+      if (!to || !free(to.cell) || world.players.some((v) => v.id !== self.id && v.action !== Action.Dead && eq(v.pose.cell, to.cell) && !airHop(v, world.tick))) return null;
       return { action: Action.Teleport, to, ticks: TELEPORT_TICKS };
     }
     case 'hop':

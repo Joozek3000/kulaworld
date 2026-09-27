@@ -1,7 +1,7 @@
 import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
 import { ALL_DIRS, dirVec, perpendicular, type Dir } from '../dir.ts';
 import { mulberry32, rngNext } from '../rng.ts';
-import type { Level, Mode, Pose, Vanish } from '../level/types.ts';
+import type { Level, Mode, PickupType, Placement, Pose, Vanish } from '../level/types.ts';
 import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
@@ -74,7 +74,14 @@ export interface PlayerState {
   boostHold: number;
   /** The pad or teleporter (tileKey) a held launch gave up on: it doesn't fire again until the ball leaves it. */
   boostSpent: string | null;
+  /** Pills (phase 15a): active effects, one per type. Cleared on death. */
+  effects: Effect[];
 }
+
+/** An active pill effect (§21): gone from `untilTick` on. */
+export interface Effect { type: PickupType; untilTick: number }
+/** A pickup on the map (§21). `spot`: its fixed spot's index, or -1 for a random spawn. Ids are never reused. */
+export interface Pickup extends Placement { id: number; spot: number; type: PickupType }
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
 /** 'lastAlive': one knockout player left; 'allOut': the last ones were eliminated together (a draw). */
@@ -123,6 +130,15 @@ export interface World {
   result: RaceResult | null;
   /** Spawn indices in the order players get them, shuffled per seed so join order doesn't fix the spawn. */
   spawnOrder: number[];
+  /** Pickups (phase 15a): the ones on the map, the tick each fixed spot comes back (-1: on the map), the next id,
+   * the random spawner's RNG state and its candidate tiles (computed on first use), and whether spots respawn and
+   * random ones spawn at all (the predictor leaves that to the server). */
+  pickups: Pickup[];
+  pickupBack: number[];
+  nextPickupId: number;
+  pickupRng: number;
+  pickupSpots: Placement[] | null;
+  spawnPickups: boolean;
 }
 
 export type SimEvent =
@@ -144,7 +160,9 @@ export type SimEvent =
   | { type: 'cradle'; pusherId: string; victimId: string; length: number }
   | { type: 'boost'; playerId: string; result: 'launch' | 'held' | 'released'; reason?: BoostBlock; byId?: string }
   | { type: 'teleport'; playerId: string; result: 'go' | 'held' | 'released' }
-  | { type: 'laser'; playerId: string; group: string; on: boolean };
+  | { type: 'laser'; playerId: string; group: string; on: boolean }
+  | { type: 'pickup'; playerId: string; pickupId: number; pickup: PickupType }
+  | { type: 'effectEnd'; playerId: string; effect: PickupType };
 
 /** Why a launch is held (phase 14c): a flown-through or landing cell is solid, the landing is taken, or its ball can't be stomped (or bumped). */
 export type BoostBlock = 'solid' | 'reserved' | 'unstompable' | 'bump';
@@ -174,6 +192,12 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     keys: level.keys.map((k, id) => ({ id, cell: k.cell, collected: false })),
     result: null,
     spawnOrder: shuffledIndices(level.spawns.length, seed),
+    pickups: level.pickups.map((s, i) => ({ id: i, spot: i, cell: s.cell, up: s.up, type: s.type })),
+    pickupBack: level.pickups.map(() => -1),
+    nextPickupId: level.pickups.length,
+    pickupRng: (seed ^ 0x9e3779b9) >>> 0,
+    pickupSpots: null,
+    spawnPickups: true,
   };
 }
 
@@ -243,7 +267,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
     jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null, staggerOwed: false,
-    boostHold: -1, boostSpent: null,
+    boostHold: -1, boostSpent: null, effects: [],
   };
   world.players.push(p);
   trySpawn(world, p);
@@ -276,6 +300,10 @@ export function occupiedCells(p: PlayerState): Vec3[] {
       const cells = p.jumpOver ? [cell, p.to.cell] : [cell, add(cell, dirVec(fwd)), p.to.cell];
       return p.stompBump ? [...cells, p.stompBump] : cells;
     }
+    case Action.Knocked: { // a heavy ball's push knocks 2 cells (§21): the one in between is held too
+      const d = sub(p.to.cell, cell);
+      return Math.abs(d.x) + Math.abs(d.y) + Math.abs(d.z) === 2 ? [cell, add(cell, { x: d.x / 2, y: d.y / 2, z: d.z / 2 }), p.to.cell] : [cell, p.to.cell];
+    }
     default: return [cell, p.to.cell];
   }
 }
@@ -287,6 +315,17 @@ export function occupiedCells(p: PlayerState): Vec3[] {
  * The same-face check is the pusher's (v.pose.up === pusher up).
  */
 export function isPushable(v: PlayerState, tick: number): boolean {
+  return !hasEffect(v, 'heavy') && pushableState(v, tick);
+}
+
+/** A pill effect is active (§21). Expired effects are removed at the start of the tick they end. */
+export const hasEffect = (p: { effects?: readonly Effect[] }, type: PickupType): boolean => !!p.effects?.some((e) => e.type === type);
+
+/**
+ * isPushable ignoring the heavy pill: a heavy ball in a state like this bounces its attacker instead of just blocking
+ * it (§21).
+ */
+export function pushableState(v: PlayerState, tick: number): boolean {
   if (tick < v.protectedUntil) return false; // knockout spawn protection
   switch (v.action) {
     case Action.Idle: case Action.Turn: case Action.Strike: case Action.Charge: return true; // a charging ball can be shoved off its pad

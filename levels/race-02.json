@@ -82,5 +82,9 @@
     { "block": [2, 0, 6], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [4, 0, 6], "face": "+Y", "type": "arrow", "dir": "+X" },
     { "block": [11, 0, -1], "face": "+Y", "type": "boost", "dir": "+X", "variant": "far" }
+  ],
+  "pickups": [
+    { "cell": [21, 1, 8], "up": "+Y", "type": "bouncy" },
+    { "cell": [9, 1, 19], "up": "+Y", "type": "lethargy" }
   ]
 }

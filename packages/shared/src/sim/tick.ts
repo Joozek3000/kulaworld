@@ -8,9 +8,10 @@ import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { boostBlock, previewAction, standingAt, startAction, startFall, turnFwd, type Plan } from './actions.ts';
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
+import { collectPickup, ownTicks, stepPickups } from './pickups.ts';
 import { beamAt, beamHit, blockTileAt, faceTileAt, forcedAfter, fwdAllowed, onIce, pathCells, spiked } from './tiles.ts';
 import {
-  Action, airHop, isFree, isPushable, occupiedCells, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
+  Action, airHop, hasEffect, isFree, isPushable, occupiedCells, pushableState, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
   type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
@@ -19,6 +20,7 @@ export function step(world: World): SimEvent[] {
   const tick = ++world.tick;
   const events: SimEvent[] = [];
   const order = fairOrder(world.players, tick);
+  stepPickups(world, events); // pills (§21): effects end, pickups respawn and spawn
 
   // Apply inputs (§7 step 1). Airborne players turn instantly: only the facing they land with changes.
   for (const p of order) {
@@ -200,7 +202,11 @@ function resolveMoves(world: World, intents: Intent[], arrived: Set<PlayerState>
     if (victimOf.get(v) !== p || done.has(p)) continue;
     for (const q of [p, v]) { done.add(q); spendPulse(intents, q); }
     if (arrived.has(p) || arrived.has(v)) headOn(world, p, v, res, events);
-    else for (const q of [p, v]) { stun(q, world.tick, true); events.push({ type: 'bounce', playerId: q.id }); }
+    else {
+      // Heavy (§21): an attacker bounces off a heavy ball; the heavy one just stands (two heavy balls both bounce).
+      const heavy = [p, v].filter((q) => hasEffect(q, 'heavy'));
+      for (const q of [p, v]) if (heavy.length !== 1 || heavy[0] !== q) { stun(q, world.tick, true); events.push({ type: 'bounce', playerId: q.id }); }
+    }
   }
 
   for (const [p, v] of victimOf) {
@@ -220,7 +226,9 @@ function resolveMoves(world: World, intents: Intent[], arrived: Set<PlayerState>
  */
 function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): Plan | { victim: PlayerState; edge?: true } | null {
   for (const cmd of cmds) {
-    if (cmd === 'fwd' && world.rules.push && fwdAllowed(world, p.pose)) {
+    const plan = previewAction(world, p, cmd, res);
+    // A bouncy ball's forward move is a jump (§21): it goes over or onto whoever is ahead, never a roll push.
+    if (cmd === 'fwd' && plan?.action !== Action.Jump && world.rules.push && fwdAllowed(world, p.pose)) {
       const A = add(p.pose.cell, dirVec(p.pose.fwd));
       // A high hopper isn't a victim: the roll goes under it (§14). Two balls in A (one under a landing hop) block.
       const inA = world.players.filter((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.up && eq(v.pose.cell, A) && !airHop(v, world.tick));
@@ -229,7 +237,6 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
       const onT = T && world.players.find((v) => v !== p && v.action !== Action.Dead && v.pose.up === p.pose.fwd && eq(v.pose.cell, T) && !airHop(v, world.tick));
       if (onT) return { victim: onT, edge: true };
     }
-    const plan = previewAction(world, p, cmd, res);
     if (plan) return plan;
   }
   return null;
@@ -272,7 +279,9 @@ function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, e
 
 /** A mover's direction at its from-cell (§20): a roll's or knock's step, else its facing (a flip's, or an Idle ball's). */
 const motionFrom = (v: PlayerState): Dir =>
-  v.action === Action.Roll || v.action === Action.Knocked ? dirFromVec(sub(v.to.cell, v.pose.cell)) : v.pose.fwd;
+  v.action === Action.Roll || v.action === Action.Knocked ? stepDir(sub(v.to.cell, v.pose.cell)) : v.pose.fwd;
+/** The direction of a straight move of any length (a heavy push knocks 2 cells, §21). */
+const stepDir = (v: Vec3): Dir => dirFromVec({ x: Math.sign(v.x), y: Math.sign(v.y), z: Math.sign(v.z) });
 /** A mover's direction arriving at its target (§20 dV): a flip's is its facing on the new face. */
 const motionTo = (v: PlayerState): Dir => (v.action === Action.Flip ? v.to.fwd : motionFrom(v));
 
@@ -303,7 +312,7 @@ function movingHit(world: World, p: PlayerState, res: Reservations, events: SimE
     if (v.action === Action.Knocked || v.staggerOwed) return false; // staggered: can't be hit again until it recovers
     const dest = add(v.to.cell, dirVec(dM));
     unreserve(res, v);
-    if (!isFree(world, res, v.id, dest)) {
+    if (hasEffect(v, 'heavy') || !isFree(world, res, v.id, dest)) { // a heavy ball can't be side-hit (§21)
       reserve(res, v);
       stun(p, tick, true);
       events.push({ type: 'bounce', playerId: p.id });
@@ -327,15 +336,19 @@ function movingHit(world: World, p: PlayerState, res: Reservations, events: SimE
  * pusher is rolling in) keeps its knock and bounce-stuns where it lands.
  */
 function headOn(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): void {
+  // Heavy (§21): against a heavy ball only the other one bounces back. The heavy one carries on (a heavy P just
+  // doesn't start its move this tick); two heavy balls both bounce.
+  const hp = hasEffect(p, 'heavy'), hv = hasEffect(v, 'heavy');
   // The reservation map keeps one owner per cell, so ask the players who else holds V's from-cell.
   const taken = world.players.some((q) => q !== v && !airHop(q, world.tick) && occupiedCells(q).some((c) => eq(c, v.pose.cell)));
-  if (!taken) recoil(world, v, motionFrom(v), p.id, res, events);
+  if (hv && !hp) reserve(res, v);
+  else if (!taken) recoil(world, v, motionFrom(v), p.id, res, events);
   else {
     v.bounce = true;
     reserve(res, v);
     events.push({ type: 'bounce', playerId: v.id });
   }
-  recoil(world, p, p.pose.fwd, v.id, res, events);
+  if (!hp || hv) recoil(world, p, p.pose.fwd, v.id, res, events);
   events.push({ type: 'push', pusherId: p.id, victimId: v.id, moving: 'headon' });
 }
 
@@ -390,15 +403,19 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
   const line = chainLine(world, p, v);
   const last = line[line.length - 1], dest = add(last.pose.cell, F);
   const cradle = line.length > 1;
-  if (cradle ? !line.slice(0, -1).every((q) => transmits(q, tick)) : !isPushable(v, tick)) return null;
+  // A victim that isn't pushable blocks P, except a heavy one (§21): P bounces off it, as off a wall behind it.
+  if (cradle ? !line.slice(0, -1).every((q) => transmits(q, tick)) : !pushableState(v, tick)) return null;
   if (!isPushable(last, tick) || !isFree(world, res, last.id, dest)) {
     stun(p, tick, true);
     events.push({ type: 'bounce', playerId: p.id });
     return null;
   }
-  knock(last, dest, p.id, tick);
-  if (cradle) startAction(p, { action: Action.Strike, to: p.pose, ticks: STRIKE_TICKS }, tick);
-  else startAction(p, { action: Action.Roll, to: { ...p.pose, cell: v.pose.cell }, ticks: ROLL_TICKS }, tick);
+  // A heavy pusher (§21) knocks the ball 2 cells, or 1 when the next one is blocked or has no ground (it drops there).
+  const far = add(dest, F);
+  const two = hasEffect(p, 'heavy') && isSolid(world, sub(dest, dirVec(p.pose.up))) && isFree(world, res, last.id, far);
+  knock(last, two ? far : dest, p.id, tick, two ? 2 * KNOCK_TICKS : KNOCK_TICKS);
+  if (cradle) startAction(p, { action: Action.Strike, to: p.pose, ticks: ownTicks(p, STRIKE_TICKS) }, tick);
+  else startAction(p, { action: Action.Roll, to: { ...p.pose, cell: v.pose.cell }, ticks: ownTicks(p, ROLL_TICKS) }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick; // pushing ends your own spawn protection
   reserve(res, last);
   reserve(res, p);
@@ -421,14 +438,14 @@ function flipTarget(world: World, p: PlayerState, res: Reservations): Vec3 | nul
  */
 function edgePush(world: World, p: PlayerState, v: PlayerState, res: Reservations, events: SimEvent[]): PlayerState | null {
   const tick = world.tick, D = opposite(p.pose.up), dest = add(v.pose.cell, dirVec(D));
-  if (!isPushable(v, tick)) return null;
-  if (!isFree(world, res, v.id, dest)) {
+  if (!pushableState(v, tick)) return null;
+  if (!isPushable(v, tick) || !isFree(world, res, v.id, dest)) { // a heavy V (§21) bounces the flipper too
     stun(p, tick, true);
     events.push({ type: 'bounce', playerId: p.id });
     return null;
   }
   knock(v, dest, p.id, tick);
-  startAction(p, { action: Action.Flip, to: { cell: v.pose.cell, up: p.pose.fwd, fwd: D }, ticks: FLIP_TICKS }, tick);
+  startAction(p, { action: Action.Flip, to: { cell: v.pose.cell, up: p.pose.fwd, fwd: D }, ticks: ownTicks(p, FLIP_TICKS) }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick;
   reserve(res, v);
   reserve(res, p);
@@ -447,6 +464,7 @@ function die(world: World, p: PlayerState, events: SimEvent[], cause: DeathCause
   p.forced = null;
   p.staggerOwed = false;
   p.boostHold = -1;
+  p.effects = []; // death clears every pill (§21)
   events.push({ type: 'death', playerId: p.id, cell: p.pose.cell, cause });
   const creditId = onDeath(world, p, events);
   if (world.mode === 'knockout') loseLife(world, p, creditId, events);
@@ -510,11 +528,14 @@ function stepCrumbleTiles(world: World): void {
 const bandRemoved = (world: World, key: string): boolean =>
   !!world.knockout && world.knockout.bands.slice(0, world.knockout.next).some((b) => b.includes(key));
 
-/** V is knocked one cell to `dest` by `byId` (push or stomp): it cancels a Turn (keeping its start facing) or a Hop. */
-function knock(v: PlayerState, dest: Vec3, byId: string, tick: number): void {
+/**
+ * V is knocked to `dest` by `byId` (push or stomp; one cell, or two by a heavy ball's push, §21): it cancels a Turn
+ * (keeping its start facing) or a Hop.
+ */
+function knock(v: PlayerState, dest: Vec3, byId: string, tick: number, ticks = KNOCK_TICKS): void {
   const fwd = v.action === Action.Turn ? v.pose.fwd : v.to.fwd;
   v.pose = { ...v.pose, fwd };
-  startAction(v, { action: Action.Knocked, to: { cell: dest, up: v.pose.up, fwd }, ticks: KNOCK_TICKS }, tick);
+  startAction(v, { action: Action.Knocked, to: { cell: dest, up: v.pose.up, fwd }, ticks }, tick);
   v.bounce = false;
   v.boostHold = -1; // shoved off its pad mid-Charge
   v.lastKnockedBy = byId;
@@ -614,12 +635,13 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
   if (finished === Action.Knocked && p.forced) {
     // Knocked onto ice or a pad (§18): it slides on in the knock direction, or launches; the stagger waits until the
     // slide stops or the launch lands.
-    p.pose = { ...p.pose, fwd: dirFromVec(moved) };
+    p.pose = { ...p.pose, fwd: stepDir(moved) };
     p.to = p.pose;
     p.staggerOwed = true;
   } else if (finished === Action.Knocked || (p.staggerOwed && !p.forced)) {
     stun(p, tick, finished === Action.Knocked && bounced); // stagger: not pushable (§14); a head-on's knock-back ends in a bounce-stun (§20)
   }
+  collectPickup(world, p, events); // pills (§21): any finish in the cell, a knock too
   onLand(world, p, events);
 }
 

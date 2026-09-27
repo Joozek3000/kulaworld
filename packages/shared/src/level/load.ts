@@ -1,4 +1,4 @@
-import { CRUMBLE_REGROW_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
+import { CRUMBLE_REGROW_SEC, PICKUP_RESPAWN_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
 import { dirVec, parseDir } from '../dir.ts';
 import { add, cellKey, scale, vec, type Vec3 } from '../vec.ts';
 import { BLOCK_TILES, type BlockFlags, type Level, type LevelJson, type Tile, type Vanish } from './types.ts';
@@ -82,6 +82,12 @@ export function loadLevel(json: LevelJson): Level {
     keysRequired: json.keysRequired ?? 0,
     timeLimitSec: json.timeLimitSec,
     tiles,
+    pickups: (json.pickups ?? []).map((p) => ({
+      cell: v3(p.cell), up: parseDir(p.up), type: p.type, respawnTicks: Math.round((p.respawnSec ?? PICKUP_RESPAWN_SEC) * TICK_RATE),
+    })),
+    randomPickups: json.randomPickups
+      ? { everyTicks: Math.round(json.randomPickups.everySec * TICK_RATE), types: json.randomPickups.types, maxOnMap: json.randomPickups.maxOnMap }
+      : null,
     theme: json.theme ?? null,
     notes: json.notes ?? {},
     blockTiles,

@@ -130,5 +130,9 @@
     { "block": [9, 0, 14], "face": "+Y", "type": "boost", "dir": "-Z" },
     { "block": [9, 0, 7], "face": "+Y", "type": "boost", "dir": "-Z" },
     { "block": [9, 0, 11], "face": "+Y", "type": "boost", "dir": "+Z" }
+  ],
+  "pickups": [
+    { "cell": [18, 1, 0], "up": "+Y", "type": "bouncy" },
+    { "cell": [0, 1, 0], "up": "+Y", "type": "heavy" }
   ]
 }

@@ -566,5 +566,14 @@
       "type": "teleport",
       "pair": "B"
     }
-  ]
+  ],
+  "randomPickups": {
+    "everySec": 20,
+    "types": [
+      "bouncy",
+      "heavy",
+      "lethargy"
+    ],
+    "maxOnMap": 2
+  }
 }

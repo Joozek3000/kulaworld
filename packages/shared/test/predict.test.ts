@@ -7,7 +7,7 @@ import { levelJson, makeWorld, readLevelJson, row, type Spawn } from './util.ts'
 
 const toServer = (p: PlayerState): ServerPlayer => ({
   action: p.action, pose: p.pose, to: p.action === Action.Idle ? p.pose : p.to, startTick: p.startTick, endTick: p.endTick,
-  turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick, bounce: p.bounce, protectedUntil: p.protectedUntil,
+  turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick, bounce: p.bounce, protectedUntil: p.protectedUntil, effects: p.effects,
 });
 
 /**
@@ -48,7 +48,7 @@ class Harness {
     }
     step(s);
     // Crumbled blocks and collected keys: the latest server view, as the client syncs them (race-01 crumbles from 75 s).
-    this.pred.setWorld(s.removed, new Set(s.keys.filter((k) => k.collected).map((k) => k.id)), s.crumbling);
+    this.pred.setWorld(s.removed, new Set(s.keys.filter((k) => k.collected).map((k) => k.id)), s.crumbling, undefined, s.pickups);
     this.pred.advanceTo(s.tick + this.lead);
     this.results.push(this.pred.reconcile(s.tick, toServer(this.local), this.ack));
   }
@@ -312,4 +312,19 @@ test('teleporters (phase 13b): a warp is predicted solo with no mispredictions',
   expect(w.players[0].pose.cell.z).toBe(5); // warped to the island
   expect(h.pred.mispredictions).toBe(0);
   expect(h.results).not.toContain('mispredict');
+});
+
+test.each(['lethargy', 'bouncy', 'heavy'] as const)('pills (phase 15a): taking %s and rolling on is predicted solo with no mispredictions', (type) => {
+  const w = createWorld(loadLevel(levelJson(row(0, 40), [[[0, 1, 0], '+Y', '+X']], { heat: false, pickups: [{ cell: [1, 1, 0], up: '+Y', type }] })), 1);
+  addPlayer(w, 'me', 'me');
+  const h = new Harness(w);
+  h.send({ fwdHeld: true });
+  h.run(60);
+  h.send({ fwdHeld: true, jump: true });
+  h.run(20);
+  h.send({ turn: 1 });
+  h.run(10);
+  expect(w.players[0].effects.map((e) => e.type)).toEqual([type]);
+  expect(w.players[0].pose.cell.x).toBeGreaterThan(5);
+  expect(h.pred.mispredictions).toBe(0);
 });

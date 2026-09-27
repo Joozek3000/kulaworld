@@ -9,14 +9,19 @@ export interface PlayerS {
   startTick: number; endTick: number; turnFromFwd: number; turnStartTick: number; bounce: boolean; keys: number; ready: boolean; spectating: boolean;
   lives: number; eliminated: boolean; eliminatedTick: number; eliminatedBy: string; protectedUntil: number; knockouts: number;
   ackSeq: number; ackTick: number; fireCount: number;
+  /** Pills (15a): effect type → the tick it ends. */
+  effects?: MapLike<number>;
   /** Lobby vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
   vote: number;
 }
-export interface ItemS { id: string; kind: 'key' | 'exit'; x: number; y: number; z: number; up: number }
+/** `kind`: 'key' | 'exit' in `items`; the pill type in `pickups` (15a). */
+export interface ItemS { id: string; kind: string; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
 export interface GameState {
   phase: 'lobby' | 'countdown' | 'playing' | 'results'; tick: number; phaseEndTick: number;
   levelId: string; winnerId: string; players: MapLike<PlayerS>; items: MapLike<ItemS>;
+  /** Pickups on the map (15a), by id. */
+  pickups: MapLike<ItemS>;
   mode: 'race' | 'knockout'; crumbled: number; warnBand: number; nextCrumbleTick: number;
   /** Hot tiles (phase 12c): tileKey → heat in ticks. */
   hot: MapLike<number>;

@@ -90,6 +90,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
   /** Phase 13b: deaths by cause this round, teleports and laser toggles. */
   private deathCauses: Record<string, number> = {};
   private trapStats = { teleport: 0, toggles: 0 };
+  /** Phase 15a: pills taken this round ("name:type" → n), and knockouts whose knock came from a heavy or bouncy ball. */
+  private pickupStats: Record<string, number> = {};
+  private pillKos = { heavy: 0, bouncy: 0 };
+  /** The attacker's pills at each ball's last knock, for pillKos. */
+  private readonly knockPills = new Map<string, string[]>();
   private readonly lastKnock = new Map<string, string>();
   private round = 0;
   private frame = 0;
@@ -243,10 +248,14 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.koCauses = {};
         this.deathCauses = {};
         this.trapStats = { teleport: 0, toggles: 0 };
+        this.pickupStats = {};
+        this.pillKos = { heavy: 0, bouncy: 0 };
+        this.knockPills.clear();
         this.lastKnock.clear();
         this.queues.clear();
         for (const p of s.players.values()) { p.ackSeq = -1; p.ackTick = -1; }
         s.items.clear();
+        s.pickups.clear();
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;
         s.phaseEndTick = 0;
@@ -266,7 +275,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         const stats = w.mode === 'knockout'
           ? `lives ${w.players.map((p) => `${p.name}:${p.lives}/ko${p.knockouts}`).join(' ')}, bands crumbled ${w.knockout!.next}`
           : `keys ${w.players.map((p) => `${p.name}:${p.keys}`).join(' ')}`;
-        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released), hits ${this.hitStats.headon}/${this.hitStats.side} (head-on/side), knockouts ${Object.entries(this.koCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, deaths ${Object.entries(this.deathCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, teleports ${this.trapStats.teleport}, laser toggles ${this.trapStats.toggles}`);
+        console.log(`phase results: ${winner} (${result.reason}) at tick ${w.tick}, level ${w.level.id}, ${stats}, stalemate ${(this.stalemate.ticks / TICK_RATE).toFixed(1)}s, boosts ${this.boostStats.launch}/${this.boostStats.held}/${this.boostStats.released} (launch/held/released), hits ${this.hitStats.headon}/${this.hitStats.side} (head-on/side), knockouts ${Object.entries(this.koCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, deaths ${Object.entries(this.deathCauses).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, teleports ${this.trapStats.teleport}, laser toggles ${this.trapStats.toggles}, pickups ${Object.entries(this.pickupStats).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'}, pill knockouts heavy ${this.pillKos.heavy} bouncy ${this.pillKos.bouncy}`);
         break;
       }
     }
@@ -275,7 +284,12 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private emit(e: SimEvent) {
     this.broadcast('event', e);
     const who = 'playerId' in e ? this.nameOf(e.playerId) : '';
+    const pills = (id: string) => this.world?.players.find((p) => p.id === id)?.effects.map((x) => x.type) ?? [];
+    if (e.type === 'push' || e.type === 'cradle') this.knockPills.set(e.victimId, pills(e.pusherId));
+    if (e.type === 'stomp') this.knockPills.set(e.victimId, pills(e.attackerId));
     switch (e.type) {
+      case 'pickup': { const k = `${who}:${e.pickup}`; this.pickupStats[k] = (this.pickupStats[k] ?? 0) + 1; console.log(`event pickup: ${who} took ${e.pickup}`); break; }
+      case 'effectEnd': break;
       case 'key': console.log(`event key: ${who} has ${e.keys}`); break;
       case 'death': this.deathCauses[e.cause] = (this.deathCauses[e.cause] ?? 0) + 1; console.log(`event death: ${who} at ${e.cell.x},${e.cell.y},${e.cell.z} (${e.cause})`); break;
       case 'teleport': if (e.result === 'go') this.trapStats.teleport++; else console.log(`teleport: ${e.result} ${who}`); break;
@@ -288,7 +302,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
         console.log(`event push: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)}${e.edge ? ' (edge)' : ''}${e.moving ? ` (${e.moving})` : ''}`);
         break;
       case 'cradle': this.lastKnock.set(e.victimId, 'cradle'); console.log(`event cradle: ${this.nameOf(e.pusherId)} → ${this.nameOf(e.victimId)} (line of ${e.length})`); break;
-      case 'knockout': { const cause = this.lastKnock.get(e.victimId) ?? 'other'; this.koCauses[cause] = (this.koCauses[cause] ?? 0) + 1; }
+      case 'knockout': {
+        const cause = this.lastKnock.get(e.victimId) ?? 'other';
+        this.koCauses[cause] = (this.koCauses[cause] ?? 0) + 1;
+        for (const t of ['heavy', 'bouncy'] as const) if (this.knockPills.get(e.victimId)?.includes(t)) this.pillKos[t]++;
+      }
         console.log(`event knockout: ${this.nameOf(e.pusherId)} knocked ${this.nameOf(e.victimId)} off`); break;
       case 'stomp': this.lastKnock.set(e.victimId, 'stomp'); console.log(`event stomp: ${this.nameOf(e.attackerId)} → ${this.nameOf(e.victimId)}`); break;
       case 'clash': console.log(`event clash: ${this.nameOf(e.attackerId)} ↔ ${this.nameOf(e.victimId)}`); break;

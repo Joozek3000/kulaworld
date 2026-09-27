@@ -61,3 +61,10 @@ Pushing, cradling, edge-pushing and stomping people into traps is the multiplaye
 - [E] Vanishing blocks: `period ≥ 40`, `on ≥ 50 %`; not within 2 moves of a spawn; never the only route to a key unless the on-window lets a ball at walking speed cross (simulated like rule 4.2).
 - [W] Each level uses at most one of {teleporters, lasers} as its main mechanic, so it stays readable.
 - `"lab": true` levels (traps-lab) are exempt from all [E] rules and never pooled.
+
+## 11. Pickups (phase 15a)
+- [E] No pickup spot (fixed or random candidate) on a spawn, key, exit or trap tile, or within 2 moves of a spawn.
+- [E] At most 4 fixed pickup spots per level, and `randomPickups.maxOnMap` ≤ 3.
+- [E] A lethargy pill is never on the only route to a key (you must be able to avoid it).
+- [W] Good pills sit at risk spots (next to edges, traps or contested lanes), so grabbing one is a decision.
+

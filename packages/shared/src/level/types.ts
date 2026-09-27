@@ -58,6 +58,13 @@ export interface BlockFlags { invisible?: boolean; vanish?: Vanish }
 /** A laser (phase 13b): `length` air cells from `from` along `dir`, in a switchable group. */
 export interface LaserJson { group: string; from: V3; dir: DirName; length: number; on: boolean }
 export interface Laser { group: string; from: Vec3; dir: Dir; length: number; on: boolean; cells: Vec3[] }
+/** Pills (ARCHITECTURE §21, phase 15a). Lethargy is the bad one. */
+export type PickupType = 'bouncy' | 'lethargy' | 'heavy' | 'sunglasses';
+export const PICKUP_TYPES: readonly PickupType[] = ['bouncy', 'lethargy', 'heavy', 'sunglasses'];
+export interface PickupJson { cell: V3; up: DirName; type: PickupType; respawnSec?: number }
+export interface RandomPickupsJson { everySec: number; types: PickupType[]; maxOnMap: number }
+export interface PickupSpot extends Placement { type: PickupType; respawnTicks: number }
+export interface RandomPickups { everyTicks: number; types: PickupType[]; maxOnMap: number }
 /** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
 export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
 
@@ -87,6 +94,9 @@ export interface LevelJson {
   keysRequired?: number;
   timeLimitSec: number;
   tiles?: TileJson[];
+  /** Pickups (phase 15a): fixed spots, and seeded random spawns on safe tiles. */
+  pickups?: PickupJson[];
+  randomPickups?: RandomPickupsJson;
   /** One non-lethal trap type exempt from the modifier cap (LEVEL-DESIGN 7.2), e.g. "ice" for an ice rink. */
   theme?: TileType;
   /** Why a level:check warning is intentional, keyed by the id it prints (e.g. "7.5 3,0,4|+Y"). Text only. */
@@ -119,6 +129,8 @@ export interface Level {
   keysRequired: number;
   timeLimitSec: number;
   tiles: Tile[];
+  pickups: PickupSpot[];
+  randomPickups: RandomPickups | null;
   theme: TileType | null;
   notes: Record<string, string>;
   /** Whole-block tiles by block cellKey, face tiles by tileKey (block cellKey|face). */

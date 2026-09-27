@@ -1,7 +1,7 @@
 import { dirName, dirVec, perpendicular } from '../dir.ts';
 import { cellKey, sub } from '../vec.ts';
 import { levelSolid } from './load.ts';
-import { BLOCK_TILES, FACE_TILES, MODIFIER_TILES, type Level, type Placement } from './types.ts';
+import { BLOCK_TILES, FACE_TILES, MODIFIER_TILES, PICKUP_TYPES, type Level, type Placement } from './types.ts';
 
 /** Returns a list of human-readable errors; empty means valid. */
 export function validateLevel(level: Level): string[] {
@@ -44,6 +44,16 @@ export function validateLevel(level: Level): string[] {
   } else errors.push(`unknown mode ${level.mode}`);
   validateTiles(level, errors);
   validate13b(level, errors);
+  // Pickups (phase 15a): known types, placed like items, a positive respawn; a sane random spawner.
+  level.pickups.forEach((p, i) => {
+    checkPlacement(`pickup ${i} (${p.type})`, p);
+    if (!PICKUP_TYPES.includes(p.type)) errors.push(`pickup ${i}: unknown type ${p.type}`);
+    if (!(p.respawnTicks > 0)) errors.push(`pickup ${i}: respawnSec must be > 0`);
+  });
+  const r = level.randomPickups;
+  if (r && !(r.everyTicks > 0 && Number.isInteger(r.maxOnMap) && r.maxOnMap > 0 && r.types.length && r.types.every((t) => PICKUP_TYPES.includes(t)))) {
+    errors.push(`randomPickups needs everySec > 0, maxOnMap > 0 and known types, got ${JSON.stringify(r)}`);
+  }
   if (level.lab && level.pool) errors.push('a lab level is never in the pool');
   if (level.theme !== null && !MODIFIER_TILES.includes(level.theme)) errors.push(`theme must be a non-lethal trap type (${MODIFIER_TILES.join(', ')}), got ${level.theme}`);
   if (typeof level.notes !== 'object' || Array.isArray(level.notes) || Object.values(level.notes).some((n) => typeof n !== 'string')) {

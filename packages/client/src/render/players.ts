@@ -16,7 +16,11 @@ import { art, BALL_MODELS } from './art.ts';
  */
 export type FeelKind = 'takeoff' | 'land' | 'roll' | 'flip' | 'climb' | 'fall' | 'hit' | 'boing' | 'pop' | 'stomp' | 'clash' | 'strike' | 'clack'
   | 'slide' | 'launch' | 'edge' | 'whoosh' | 'charge' | 'vwoop';
-export interface Feel { kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean; headOn?: boolean }
+export interface Feel {
+  kind: FeelKind; at: THREE.Vector3; local: boolean; intensity: number; victimLocal?: boolean; headOn?: boolean;
+  /** The ball's pills (15a): they change how it sounds. */
+  pills?: ReadonlyMap<string, number>;
+}
 type FeelFn = (kind: FeelKind, intensity?: number) => void;
 
 /**
@@ -91,6 +95,9 @@ const SQUASH = {
   charge: -0.3, // held on a boost pad, squashed down, ready to fly (phase 14c)
   headOn: -0.45, // both balls of a head-on (§20), hard along the contact axis
 };
+/** Pills (15a): the tint of a lethargic ball, the iron of a heavy one, and the label icons. */
+const GREY = new THREE.Color(0x8c8c8c), IRON = new THREE.Color(0x30343b);
+export const PILL_ICONS: Record<string, string> = { bouncy: '🟣', lethargy: '💤', heavy: '⚓', sunglasses: '🕶' };
 /** A stomped victim stays flat this fraction of its knock before sliding out (a push holds KNOCK_HOLD). */
 const STOMP_HOLD = 0.4;
 
@@ -181,10 +188,17 @@ class PlayerView {
   private protectedUntil = 0;
   /** Fire landings in a row (§18): the ball inflates a little per count (visual only; 3 pops it). */
   private fireCount = 0;
+  /** Pills (15a): active effect type → the tick it ends, and the look they were last drawn with. */
+  readonly pills = new Map<string, number>();
+  private pillLook = '';
+  private readonly baseTop = new THREE.Color();
+  private readonly name: string;
 
   constructor(p: PlayerS, local: boolean, scene: THREE.Scene) {
     this.color = p.color;
+    this.name = p.name;
     this.top = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+    this.baseTop.set(p.color);
     this.local = local;
     this.markerMat = new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
     this.marker = new THREE.Mesh(markerGeo, this.markerMat);
@@ -224,9 +238,32 @@ class PlayerView {
 
   get newest(): Seg { return this.segs[this.head]; }
 
+  /**
+   * Pills on the ball (15a): heavy is dark metallic iron, lethargy a washed-out tint; other players' labels get small
+   * icons. Materials only change when the set of pills does.
+   */
+  private showPills(): void {
+    const look = [...this.pills.keys()].sort().join(',');
+    if (look === this.pillLook) return;
+    this.pillLook = look;
+    const heavy = this.pills.has('heavy'), dull = this.pills.has('lethargy');
+    this.top.color.copy(this.baseTop);
+    this.bottom.color.set(0xfff0d7);
+    if (dull) { this.top.color.lerp(GREY, 0.6); this.bottom.color.lerp(GREY, 0.5); }
+    if (heavy) { this.top.color.lerp(IRON, 0.7); this.bottom.color.lerp(IRON, 0.8); }
+    for (const m of [this.top, this.bottom]) { m.metalness = heavy ? 0.85 : 0; m.roughness = heavy ? 0.3 : m === this.top ? 0.5 : 0.57; }
+    if (this.label) this.label.element.textContent = `${this.name} ${[...this.pills.keys()].map((t) => PILL_ICONS[t] ?? '').join('')}`.trim();
+  }
+
+  /** Bouncy: every squash and stretch is bigger. */
+  private get squashScale(): number { return tuning.squash * (this.pills.has('bouncy') ? 1.8 : 1); }
+
   track(p: PlayerS): void {
     this.protectedUntil = p.protectedUntil;
     this.fireCount = p.fireCount ?? 0;
+    this.pills.clear();
+    p.effects?.forEach((until, type) => this.pills.set(type, until));
+    this.showPills();
     const s = this.newest;
     if (this.count && s.action === p.action && s.startTick === p.startTick && s.endTick === p.endTick) {
       // Same action. Only a mid-air turn changes it in flight (to.fwd + turn record): update in place.
@@ -414,7 +451,7 @@ class PlayerView {
 
   /** Feel on a change of on-screen action: sounds, plus the squash kicks that happen at a moment (not over time). */
   private transition(prev: number, s: Seg, solid: SolidFn | null, feel: FeelFn): void {
-    const sq = tuning.squash;
+    const sq = this.squashScale;
     const airborne = prev === Action.Hop || prev === Action.Jump || prev === Action.Fall || prev === Action.Rebound;
     if (airborne && s.action !== Action.Fall && s.action !== Action.Dead && s.action !== Action.Rebound) {
       const i = prev === Action.Hop || prev === Action.Rebound ? 0.35 : prev === Action.Jump ? 0.55 : Math.min(1, 0.5 + 0.1 * this.fallCells);
@@ -477,7 +514,7 @@ class PlayerView {
 
   /** Spring target + axis for the current action, the contact/boing moments, then the transform and shadow width. */
   private squash(s: Seg, renderTick: number, len: number, hold: number, dt: number, feel: FeelFn): void {
-    const sq = tuning.squash;
+    const sq = this.squashScale;
     const t = renderTick - s.startTick;
     const p = len > 0 ? Math.min(1, Math.max(0, t / len)) : 1;
     let target = 0;
@@ -778,7 +815,7 @@ export class PlayersView {
         if (kind === 'hit') this.contact(id, v, localId, nowMs);
         else if (kind === 'clash') this.clash(v);
         else if (kind === 'strike') this.strike(v, nowMs);
-        else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity });
+        else this.onFeel?.({ kind, at: v.ball.position, local: v.local, intensity, pills: v.pills });
       };
       const changed = v.update(tick, active && !p.spectating, this.solid, hold, dt, feel, nowMs);
       this.trapFeel(v, changed);
