@@ -9,9 +9,9 @@ const ENVIRONMENT_MODELS = [...BLOCK_MODELS, 'block-crumble-fragments', 'trap-sp
 export const MODEL_NAMES = [...CERAMIC_MODELS, ...ENVIRONMENT_MODELS] as const;
 export type ModelName = typeof MODEL_NAMES[number];
 export const ENVIRONMENTS = [
-  { id: 'peach-dawn', tile: 'tile-celadon', fog: 0xdac6bd, key: 0xffe0be, fill: 0xb7d6ee, rim: 0xffd6bd, ground: 0x757185, exposure: 1.05 },
-  { id: 'teal-moon', tile: 'tile-basalt', fog: 0x475f77, key: 0xb9dfed, fill: 0xabc8cd, rim: 0x77d9c8, ground: 0x566779, exposure: 1.15 },
-  { id: 'amber-afterglow', tile: 'tile-terracotta', fog: 0xc9978e, key: 0xffd0a0, fill: 0xb4beea, rim: 0xffab78, ground: 0x766078, exposure: 1.05 },
+  { id: 'peach-dawn', tile: 'tile-celadon', fog: 0xdac6bd, key: 0xffe0be, fill: 0xb7d6ee, rim: 0xffd6bd, ground: 0x757185, exposure: 1.0 },
+  { id: 'teal-moon', tile: 'tile-basalt', fog: 0x475f77, key: 0xb9dfed, fill: 0xabc8cd, rim: 0x77d9c8, ground: 0x566779, exposure: 1.1 },
+  { id: 'amber-afterglow', tile: 'tile-terracotta', fog: 0xc9978e, key: 0xffd0a0, fill: 0xb4beea, rim: 0xffab78, ground: 0x766078, exposure: 1.0 },
 ] as const;
 
 /** Presentation only: numbered maps cycle through the three looks; no level/sim metadata changes. */

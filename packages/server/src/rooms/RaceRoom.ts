@@ -239,7 +239,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.level = this.pool.find((l) => l.id === id)!;
         this.lastLevelId = s.levelId = id;
         const level = config.antiStalemate ? this.level : { ...this.level, heat: null, crumble: this.level.mode === 'race' ? null : this.level.crumble };
-        const world = createWorld(level, ++this.round, { push: config.push, chain: config.antiStalemate });
+        const world = createWorld(level, ++this.round, { push: config.push, chain: config.antiStalemate, timing: config.timing });
+        s.timing = config.timing;
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
         this.world = world;
         this.stalemate = new StalemateMeter();
@@ -259,7 +260,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;
         s.phaseEndTick = 0;
-        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id} (${this.level.mode}), push ${world.rules.push ? 'on' : 'off'}`);
+        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id} (${this.level.mode}), push ${world.rules.push ? 'on' : 'off'}, timing ${config.timing}`);
         break;
       }
       case 'playing':

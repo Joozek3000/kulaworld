@@ -11,6 +11,33 @@ export function findLevel(id: string): Level | null {
 /** Every level in levels/ (the campaign's too, phase 15b). */
 export const allLevels = (): Level[] => Object.values(files).map(loadLevel);
 
+/**
+ * Islands (phase 17, presentation only): the level's blocks grouped into face-connected components, largest first
+ * (ties in level order), as block cellKeys.
+ */
+export function islands(solid: ReadonlySet<string>): string[][] {
+  const seen = new Set<string>(), out: string[][] = [];
+  for (const start of solid) {
+    if (seen.has(start)) continue;
+    const island = [start];
+    seen.add(start);
+    for (let i = 0; i < island.length; i++) {
+      const [x, y, z] = island[i].split(',').map(Number);
+      for (const [dx, dy, dz] of NEIGHBOURS) {
+        const k = `${x + dx},${y + dy},${z + dz}`;
+        if (solid.has(k) && !seen.has(k)) { seen.add(k); island.push(k); }
+      }
+    }
+    out.push(island);
+  }
+  return out.sort((a, b) => b.length - a.length);
+}
+const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+/** The largest island keeps the plain glaze; the others get a light hue wash, golden-angle apart. */
+export function islandTint(index: number, out: THREE.Color): THREE.Color {
+  return index === 0 ? out.set(0xffffff) : out.setHSL((index * 0.618034 + 0.08) % 1, 0.55, 0.86);
+}
+
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const fallbackMat = new THREE.MeshStandardMaterial({ roughness: 0.28 });
 const WARN = new THREE.Color(0xff3b3b);
@@ -37,6 +64,8 @@ export class LevelView {
   private readonly regrowFrom = new Map<string, number>();
   private readonly index: Map<string, number>;
   private readonly crumbleKeys: string[];
+  /** Per cell: its island's glaze tint (phase 17), or a level override. Trap blocks keep their own look. */
+  private readonly tints: THREE.Color[];
 
   constructor(private readonly level: Level) {
     const keys = [...level.solid];
@@ -44,6 +73,12 @@ export class LevelView {
     const index = (this.index = new Map(keys.map((k, i) => [k, i])));
     this.crumbleKeys = [...level.blockTiles].filter(([, t]) => t.type === 'crumble').map(([k]) => k);
     this.bands = level.crumble ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
+    const island = new Map<string, number>();
+    islands(level.solid).forEach((cells, n) => { for (const k of cells) island.set(k, n); });
+    this.tints = keys.map((k) => {
+      const t = level.tints.get(k);
+      return t ? new THREE.Color(t) : islandTint(island.get(k)!, new THREE.Color());
+    });
 
     const batches = new Map<ModelName, number[]>();
     this.cells.forEach(([x, y, z], i) => {
@@ -71,12 +106,12 @@ export class LevelView {
   }
 
   private baseColor(i: number): THREE.Color {
-    if (this.instances[i].textured) return tint.set(0xffffff);
     const [x, y, z] = this.cells[i];
     const trap = this.level.blockTiles.get(this.cells[i].join(','))?.type;
+    if (this.instances[i].textured) return trap ? tint.set(0xffffff) : tint.copy(this.tints[i]);
     if (trap === 'ice') return tint.set(0xbfe4f5); // pale blue glaze (TrapsView adds the gloss shell)
     if (trap === 'fire') return tint.set(0xf0a88c); // warm terracotta under the red crosses
-    return tint.set((x + y + z) & 1 ? 0x2145aa : 0xf1e5cc);
+    return tint.set((x + y + z) & 1 ? 0x2145aa : 0xf1e5cc).multiply(this.tints[i]);
   }
 
   private place(i: number, shake: number, scale = 1): void {

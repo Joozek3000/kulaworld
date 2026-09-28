@@ -193,7 +193,7 @@ test('ceramic gates align on all six faces; key pops keep other keys opaque', ()
     expect(gate.children.map((o) => o.visible)).toEqual([false, true]);
     items.update(state, true, true, 1.2);
     pop.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBeLessThan(1); });
-    remaining.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBe(1); });
+    remaining.traverse((o) => { if (o instanceof THREE.Mesh && !o.userData.xray) expect(o.material.opacity).toBe(1); });
     items.update(state, true, true, 1.4);
     expect(scene.children).not.toContain(pop);
   }

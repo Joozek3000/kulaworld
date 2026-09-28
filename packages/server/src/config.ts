@@ -1,3 +1,5 @@
+import { isTimingName, type TimingName } from '@kula/shared';
+
 // All server settings, read once from the repo-root .env (if present) and the process env.
 try { process.loadEnvFile(new URL('../../../.env', import.meta.url)); } catch { /* no .env */ }
 
@@ -18,5 +20,7 @@ export const config = {
    * rules, for before/after soaks. Default on.
    */
   antiStalemate: env.ANTI_STALEMATE !== 'off',
+  /** Movement timing preset (phase 17): TIMING=classic|snappy, default classic. */
+  timing: (isTimingName(env.TIMING) ? env.TIMING : 'classic') as TimingName,
   latencyMs: prod ? 0 : Number(env.LATENCY_MS ?? 0),
 };

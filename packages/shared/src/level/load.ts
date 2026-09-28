@@ -7,10 +7,11 @@ const v3 = (a: [number, number, number]): Vec3 => vec(a[0], a[1], a[2]);
 
 /** Expands boxes, parses dirs and computes the AABB. Throws on malformed dirs; use validateLevel for rule checks. */
 export function loadLevel(json: LevelJson): Level {
-  const solid = new Set<string>(), invisible = new Set<string>(), vanish = new Map<string, Vanish>();
+  const solid = new Set<string>(), invisible = new Set<string>(), vanish = new Map<string, Vanish>(), tints = new Map<string, string>();
   const cells: Vec3[] = [];
   const flag = (c: Vec3, f: BlockFlags) => {
     if (f.invisible) invisible.add(cellKey(c));
+    if (f.tint) tints.set(cellKey(c), f.tint);
     if (f.vanish) vanish.set(cellKey(c), { period: f.vanish.period, on: f.vanish.on, phase: f.vanish.phase ?? 0 });
   };
   for (const b of json.blocks ?? []) {
@@ -99,6 +100,7 @@ export function loadLevel(json: LevelJson): Level {
     items: (json.items ?? []).map((i) => ({ cell: v3(i.cell), up: parseDir(i.up), type: i.type, fruit: i.fruit ? FRUITS.indexOf(i.fruit) : -1 })),
     blockTiles,
     faceTiles,
+    tints,
     invisible,
     vanish,
     lasers,

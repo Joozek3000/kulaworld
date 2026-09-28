@@ -9,6 +9,7 @@ import type { GameState, PlayerS } from '../net.ts';
 import { tuning } from '../tuning.ts';
 import { applySquash, Spring } from './squash.ts';
 import { art, BALL_MODELS } from './art.ts';
+import { addXray } from './xray.ts';
 
 /**
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
@@ -219,6 +220,7 @@ class PlayerView {
       this.body.add(model);
     } else this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
+    addXray(this.body, p.color); // seen through blocks (phase 17)
     this.ball.visible = false;
     this.shadow.visible = false;
     this.ring.visible = false;
@@ -767,6 +769,17 @@ export class PlayersView {
   }
 
   /** Where a ball is drawn (for effects such as the burn puff), or null when it isn't on screen. */
+  /** Every ball on screen (phase 17 off-screen arrows): id, position, colour, local. No allocations. */
+  eachBall(cb: (id: string, at: THREE.Vector3, color: string, local: boolean) => void): void {
+    for (const [id, v] of this.views) if (v.shown) cb(id, v.ball.position, v.color, v.local);
+  }
+
+  /** The ball's drawn position (not a copy; don't keep it), or null when it isn't shown. */
+  positionOf(id: string): THREE.Vector3 | null {
+    const v = this.views.get(id);
+    return v?.shown ? v.ball.position : null;
+  }
+
   ballAt(id: string): THREE.Vector3 | null {
     const v = this.views.get(id);
     return v?.shown ? v.ball.position.clone() : null;

@@ -1,11 +1,16 @@
 import * as THREE from 'three';
-import { Action, campaignLevels, newCampaign, type Campaign, type InputMsg, type Level, type SimEvent } from '@kula/shared';
+import { Action, campaignLevels, isTimingName, newCampaign, TICK_RATE, type Campaign, type TimingName, type InputMsg, type Level, type SimEvent } from '@kula/shared';
 import { setupInput } from './input.ts';
+import { ACTION_LABELS, ACTIONS, keyLabel, loadBindings, PAD_GLYPHS, rebind, resetBindings, saveBindings, type BindAction } from './bindings.ts';
 import { connect, playerName, serverUrl, type GameSource, type Net } from './net.ts';
 import { campaignFrom, loadSave, resetSave, SinglePlayer, type Outcome } from './campaign.ts';
 import { SingleTilesView } from './render/single.ts';
 import { createMenu, FRUIT_ICONS } from './ui/menu.ts';
-import { CameraRig, type CameraMode } from './render/camera.ts';
+import { GAME_NAME } from './config.ts';
+
+document.title = GAME_NAME;
+import { CameraRig, LOOK_PITCH_MAX, LOOK_YAW_MAX, type CameraMode } from './render/camera.ts';
+import { createOffscreen } from './ui/offscreen.ts';
 import { ItemsView } from './render/items.ts';
 import { allLevels, findLevel, levelBounds, LevelView } from './render/level.ts';
 import { PillsView } from './render/pills.ts';
@@ -19,6 +24,7 @@ import { createDebug } from './ui/debug.ts';
 import { createHud, type SingleHud } from './ui/hud.ts';
 import { createTuningPanel } from './ui/tuning.ts';
 import { AudioEngine } from './audio/engine.ts';
+import { Music, type MusicSlot } from './audio/music.ts';
 import { latency } from './ui/latency.ts';
 import { LocalPrediction } from './predict/local.ts';
 import { loadArt } from './render/art.ts';
@@ -48,6 +54,8 @@ const pills = new PillsView(view.scene);
 const rig = new CameraRig(view.camera);
 const fx = new Fx(view.scene);
 const audio = new AudioEngine();
+const music = new Music(); // phase 17: slot music on its own bus
+audio.onStart = (ctx, bus) => music.attach(ctx, bus);
 const tuningPanel = createTuningPanel(audio); // F4 in dev, and Settings → Sounds & feel (15b)
 players.onLocalMotion = debug.motion;
 players.onVanish = (at, color) => fx.vanish(at, color, performance.now() / 1000);
@@ -113,8 +121,20 @@ async function joinOnline(name: string): Promise<void> {
   });
 }
 
+/** Free look (phase 17): while Q is held the mouse orbits the camera about your ball; release springs it back. */
+let lookHeld = false;
+addEventListener('mousemove', (e) => {
+  if (!lookHeld) return;
+  rig.lookYaw = Math.max(-LOOK_YAW_MAX, Math.min(LOOK_YAW_MAX, rig.lookYaw - e.movementX * 0.006));
+  rig.lookPitch = Math.max(-LOOK_PITCH_MAX, Math.min(LOOK_PITCH_MAX, rig.lookPitch + e.movementY * 0.005));
+});
+addEventListener('blur', () => { lookHeld = false; rig.lookYaw = rig.lookPitch = 0; });
+const offscreen = createOffscreen();
+const offscreenBall = offscreen.ball;
+
 let screenshot = false;
 let frozen = false;
+const bindings = loadBindings();
 const input = setupInput({
   sendInput: (i) => net?.sendInput(i), sendReady: () => net?.sendReady(), sendVote: (o) => net?.sendVote(o),
 }, {
@@ -126,11 +146,22 @@ const input = setupInput({
   onVolume: (d) => { audio.setVolume(audio.volume + d); hud.toast(`Volume ${Math.round(audio.volume * 100)}%`, '#fff'); },
   onTuning: () => { if (import.meta.env.DEV) tuningPanel.toggle(); },
   onPause: () => togglePause(),
+  onLook: (held) => { lookHeld = held; if (!held) { rig.lookYaw = 0; rig.lookPitch = 0; } },
+  // Right stick (phase 17): its deflection is the look angle; centred springs back (unless Q + mouse is looking).
+  onLookStick: (x, y) => { if (!lookHeld) { rig.lookYaw = -x * LOOK_YAW_MAX; rig.lookPitch = y * LOOK_PITCH_MAX; } },
+  menuActive: () => menu.screen !== null,
+  onMenuNav: (dir) => menu.focusStep(dir),
+  onMenuConfirm: () => menu.confirm(),
+  onVoteStep: (step) => {
+    const me = online?.state.players.get(online.sessionId);
+    if (online?.state.phase === 'lobby' && me) online.sendVote(((me.vote < 0 ? (step > 0 ? -1 : 0) : me.vote) + step + 4) % 4);
+  },
+  onDevice: (d) => hud.padHint(d === 'pad'),
   onKey: (key, at) => {
     const p = online?.state.players.get(online.sessionId);
     if (online) latency.press(key, at, !!p && p.action === Action.Idle && players.localAction(online.sessionId) === Action.Idle, !!predict?.predicting);
   },
-});
+}, bindings);
 
 /** F3: the last few measured presses, ms after keydown (sent / stamp ahead / predicted start / visible). */
 const latencyLines = () => ['press→ (ms)   key  mode    sent  stamp  start  visible',
@@ -149,6 +180,13 @@ const DEATH_TOAST: Partial<Record<string, (who: string) => string>> = {
 const pendingFall = new Map<string, ReturnType<typeof setTimeout>>();
 function onEvent(e: SimEvent): void {
   const me = net?.sessionId;
+  // Rumble (phase 17) on the pad when a push, stomp, bounce or death involves you.
+  switch (e.type) {
+    case 'push': if (e.victimId === me || e.pusherId === me) input.rumble(e.victimId === me ? 0.8 : 0.4, 120); break;
+    case 'stomp': if (e.victimId === me || e.attackerId === me) input.rumble(e.victimId === me ? 1 : 0.5, 180); break;
+    case 'bounce': if (e.playerId === me) input.rumble(0.3, 80); break;
+    case 'death': if (e.playerId === me) input.rumble(1, 350); break;
+  }
   switch (e.type) {
     case 'knockout': clearTimeout(pendingFall.get(e.victimId)); pendingFall.delete(e.victimId); break;
     case 'death': {
@@ -166,7 +204,7 @@ function onEvent(e: SimEvent): void {
       hud.toast(`${nameOf(e.playerId)} got a key (${e.keys}/${level?.keysRequired ?? '?'})`, colorOf(e.playerId));
       audio.play('key', { mine: e.playerId === me }, 'ui');
       break;
-    case 'win': audio.play(e.winnerId === me ? 'win' : 'lose', {}, 'ui'); break;
+    case 'win': audio.play(e.winnerId === me ? 'win' : 'lose', {}, 'ui'); music.duck(); break;
     case 'stomp': hud.toast(`${nameOf(e.attackerId)} stomped ${nameOf(e.victimId)}!`, colorOf(e.attackerId)); break;
     case 'knockout': hud.toast(`${nameOf(e.pusherId)} knocked ${nameOf(e.victimId)} off!`, colorOf(e.pusherId)); break;
     case 'keyDrop': hud.toast(`${nameOf(e.playerId)} dropped a key`, colorOf(e.playerId)); break;
@@ -233,8 +271,23 @@ const menu = createMenu((act, arg) => {
       joinOnline(name).then(() => menu.hide(), () => menu.show({ kind: 'multi', name, error: `Can't reach the server (${serverUrl})` }));
       return;
     }
-    case 'settings': return menu.show({ kind: 'settings', volume: audio.volume });
+    case 'settings': return showSettings();
     case 'volume': audio.setVolume(Number(arg)); return;
+    case 'music': audio.setMusicVolume(Number(arg)); return;
+    case 'controls': return showControls(null);
+    case 'bindKey': case 'bindPad': {
+      const action = arg as BindAction;
+      showControls(`${act === 'bindKey' ? 'key' : 'pad'}:${action}`);
+      input.captureNext((c) => {
+        if ('code' in c ? c.code : true) rebind(bindings, action, c);
+        saveBindings(bindings);
+        showControls(null);
+      });
+      return;
+    }
+    case 'bindReset': resetBindings(bindings); saveBindings(bindings); return showControls(null);
+    case 'credits': return menu.show({ kind: 'credits', rows: music.credits });
+    case 'timing': spTiming = spTiming === 'classic' ? 'snappy' : 'classic'; try { localStorage.setItem('kula.timing', spTiming); } catch { /* storage unavailable */ } return showSettings();
     case 'tuning': tuningPanel.toggle(); return;
     case 'reset': return menu.show({ kind: 'reset' });
     case 'resetYes': save = resetSave(); return menu.show({ kind: 'main' });
@@ -246,9 +299,22 @@ const menu = createMenu((act, arg) => {
   }
 });
 
+/** Dev only (phase 17): single player's movement timing preset, for playtesting. */
+let spTiming: TimingName = 'classic';
+try { const t = localStorage.getItem('kula.timing'); if (import.meta.env.DEV && isTimingName(t)) spTiming = t; } catch { /* storage unavailable */ }
+function showSettings(): void {
+  menu.show({ kind: 'settings', volume: audio.volume, music: audio.musicVolume, timing: import.meta.env.DEV ? spTiming : null });
+}
+function showControls(waiting: string | null): void {
+  menu.show({
+    kind: 'controls', waiting,
+    rows: ACTIONS.map((a) => ({ action: a, label: ACTION_LABELS[a], keys: bindings.keys[a].map(keyLabel).join(' / '), pad: bindings.pad[a].map((b) => PAD_GLYPHS[b] ?? `#${b}`).join(' / ') })),
+  });
+}
+
 function startSingle(c: Campaign): void {
   menu.hide();
-  sp = new SinglePlayer(c, LEVELS, save, outcome);
+  sp = new SinglePlayer(c, LEVELS, save, outcome, spTiming);
   sp.game.onEvent(onEvent);
   net = sp.game;
 }
@@ -260,7 +326,7 @@ function outcome(o: Outcome): void {
     case 'death':
       hud.toast(`−${o.penalty} · restarting`, '#ff6b5b');
       menu.hide();
-      sp!.next();
+      sp!.next(false); // a restart skips the fly-over
       break;
     case 'gameOver':
       game.paused = true;
@@ -294,7 +360,7 @@ function quitToMenu(): void {
 hud.clear();
 menu.show({ kind: 'main' });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, players, audio, input, get predict() { return predict; }, debug, latency } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, get predict() { return predict; }, debug, latency } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
@@ -353,6 +419,39 @@ function showLevel(want: string, now: number): void {
   }
 }
 
+/**
+ * The level fly-over (phase 17): progress 0..1 through the countdown, or -1 when there's none. Single player: a new
+ * level's long READY (not a restart after a death). Multiplayer: the round countdown, from the first countdown tick
+ * seen. Any key skips it (in single player the READY itself ends too).
+ */
+let flyFrom = NaN, flySkipped = false;
+function flyProgress(s: GameSource['state'], renderTick: number): number {
+  if (s.phase !== 'countdown') { flyFrom = NaN; flySkipped = false; return -1; }
+  if (flySkipped) return -1;
+  if (sp) return sp.game.readyTicks > TICK_RATE ? Math.min(1, Math.max(0, 1 + renderTick / sp.game.readyTicks)) : -1;
+  if (Number.isNaN(flyFrom)) flyFrom = s.tick;
+  return flyFrom < 0 ? Math.min(1, Math.max(0, 1 - renderTick / flyFrom)) : -1;
+}
+addEventListener('keydown', (e) => {
+  if (e.repeat || net?.state.phase !== 'countdown' || flySkipped) return;
+  flySkipped = true;
+  sp?.game.skipReady();
+});
+
+/** The music slot(s) for what's on screen (phase 17), best first. */
+const SLOTS: Record<string, MusicSlot[]> = { menu: ['menu'], results: ['results'], race: ['race'], knockout: ['knockout'] };
+const SINGLE_SLOTS = [1, 2, 3, 4].map((w) => [`single-${w}`, 'single'] as MusicSlot[]);
+function musicSlots(): MusicSlot[] {
+  if (!net) return SLOTS.menu;
+  if (sp) {
+    const shown = menu.screen;
+    if (shown === 'card' || shown === 'gameOver' || shown === 'done') return SLOTS.results;
+    return SINGLE_SLOTS[Math.min(3, Math.floor((sp.campaign.level - 1) / 5))]; // a "world" is 5 levels
+  }
+  const s = net.state;
+  return s.phase === 'results' ? SLOTS.results : s.phase === 'lobby' ? SLOTS.menu : s.mode === 'knockout' ? SLOTS.knockout : SLOTS.race;
+}
+
 /** The main menu (15b): an empty level orbiting slowly behind the panel. */
 const NO_GAME = { phase: 'lobby', tick: 0, phaseEndTick: 0, levelId: '', winnerId: '', players: new Map(), items: new Map(), pickups: new Map(),
   mode: 'single', crumbled: 0, warnBand: -1, nextCrumbleTick: -1, hot: new Map(), crumbling: new Map(), lasers: new Map(), candidates: [], voteCounts: [] } as const;
@@ -365,6 +464,9 @@ function menuBackdrop(now: number, dtMs: number): void {
   singleView?.update(EMPTY_SET, EMPTY_SET, now / 1000);
   levelView?.updateTraps({ get: () => undefined }, 0, now / 1000);
   rig.update(dtMs / 1000, 'orbit', null, bounds.center, bounds.radius);
+  view.fitFog(bounds.center, bounds.radius);
+  offscreen.begin(view.camera, null);
+  offscreen.end();
   audio.endRolls(EMPTY_SET as Set<string>);
   view.render();
 }
@@ -375,6 +477,8 @@ view.renderer.setAnimationLoop((now: number) => {
   const dtMs = Math.min(now - last, 100);
   last = now;
   if (frozen) return;
+  input.poll(); // the gamepad (phase 17)
+  music.play(musicSlots());
   if (!net) { menuBackdrop(now, dtMs); return; }
   const s = net.state;
   if (!s.players || !s.items) return; // The first server snapshot can arrive after join resolves.
@@ -402,6 +506,7 @@ view.renderer.setAnimationLoop((now: number) => {
   } else lastLocalPose = '';
   const mine = s.players.get(me);
   const unlocked = !!level?.exit && !!mine && mine.keys >= level.keysRequired;
+  items.highlight = flyProgress(s, renderTick) >= 0 ? 1 : 0; // the fly-over shows off keys, exit and items
   items.update(s, active, unlocked, now / 1000);
   pills.update(s, active, now / 1000);
   if (unlocked && !wasUnlocked && s.phase === 'playing') audio.play('exit', {}, 'ui');
@@ -429,7 +534,14 @@ view.renderer.setAnimationLoop((now: number) => {
   const out = !!mine?.eliminated && active;
   const pose = players.poseOf(out ? mine!.eliminatedBy : me);
   const mode: CameraMode = !active || !mine || mine.spectating || (out && !pose) ? 'orbit' : pose ? 'follow' : 'hold';
-  rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
+  const fly = flyProgress(s, renderTick);
+  if (fly >= 0) rig.flyover(fly, pose, bounds.center, bounds.radius);
+  else rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
+  view.fitFog(bounds.center, bounds.radius);
+  // Off-screen enemy arrows (multiplayer only; phase 17).
+  offscreen.begin(view.camera, !sp && active && !!mine && !mine.spectating ? players.positionOf(me) : null);
+  if (!sp && active) players.eachBall(offscreenBall);
+  offscreen.end();
 
   audio.setListener(view.camera);
   // Hot tiles sizzle, faster and louder as they heat (phase 12).

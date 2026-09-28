@@ -1,4 +1,4 @@
-import { BOOST_TICKS, CLIMB_TICKS, FALL_TICKS_PER_CELL, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TELEPORT_TICKS, TURN_TICKS } from '../constants.ts';
+import { FALL_TICKS_PER_CELL, TELEPORT_TICKS, TURN_TICKS } from '../constants.ts';
 import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
@@ -34,6 +34,7 @@ export function previewAction(world: World, self: Mover, cmd: Cmd, res: Reservat
 function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan | null {
   const { cell: C, up, fwd } = self.pose;
   const U = dirVec(up), F = dirVec(fwd);
+  const T = world.timing; // the movement preset (phase 17)
   const free = (v: Vec3) => isFree(world, res, self.id, v);
   if ((cmd === 'fwd' || cmd === 'jump') && !fwdAllowed(world, self.pose)) return null; // an arrow tile (§18)
   const bouncy = hasEffect(self, 'bouncy');
@@ -52,11 +53,11 @@ function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan |
     for (const L of cells.reverse()) {
       // A high hopper in L isn't reserved (§14 roll under) but still isn't a place to land: a stomp or nothing.
       const onL = standingAt(world, L, up, self.id);
-      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over };
+      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: T.jump, over };
       const B = add(L, F);
       // With push rules off there are no stomps: a player in L just makes it not free (the old fallback).
       if (world.rules.push && onL && free(B)) {
-        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: JUMP_TICKS, over, bump: B };
+        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: T.jump, over, bump: B };
       }
     }
     return null;
@@ -65,19 +66,19 @@ function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan |
   switch (cmd) {
     case 'left':
     case 'right':
-      return { action: Action.Turn, to: { cell: C, up, fwd: turnFwd(up, fwd, cmd === 'left' ? -1 : 1) }, ticks: TURN_TICKS };
+      return { action: Action.Turn, to: { cell: C, up, fwd: turnFwd(up, fwd, cmd === 'left' ? -1 : 1) }, ticks: T.turn };
     case 'fwd': {
       const A = add(C, F);
       // A wall ahead becomes the floor (§5, phase 11): the ball stays in C and turns up onto it.
-      if (isSolid(world, A)) return { action: Action.Climb, to: { cell: C, up: opposite(fwd), fwd: up }, ticks: CLIMB_TICKS };
+      if (isSolid(world, A)) return { action: Action.Climb, to: { cell: C, up: opposite(fwd), fwd: up }, ticks: T.climb };
       // On ice a bouncy ball still rolls, so ice slides stay slides (15b: bouncy doesn't change forced moves).
       const bounce = bouncy && !onIce(world, self.pose) ? jump(2) : null;
       if (bounce) return bounce;
       if (!free(A)) return null; // a player
       const below = sub(A, U);
-      if (isSolid(world, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: ROLL_TICKS };
+      if (isSolid(world, below)) return { action: Action.Roll, to: { cell: A, up, fwd }, ticks: T.roll };
       if (!free(below)) return null;
-      return { action: Action.Flip, to: { cell: below, up: fwd, fwd: opposite(up) }, ticks: FLIP_TICKS };
+      return { action: Action.Flip, to: { cell: below, up: fwd, fwd: opposite(up) }, ticks: T.flip };
     }
     case 'jump':
       return jump(bouncy ? 3 : 2);
@@ -94,10 +95,10 @@ function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan |
       if (through.some((c) => isSolid(world, c)) || isSolid(world, L)) return null;
       const over = !free(add(C, F));
       const onL = standingAt(world, L, up, self.id);
-      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over };
+      if (free(L) && !onL) return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: T.boost, over };
       const B = add(L, F);
       if (world.rules.push && onL && free(B)) {
-        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: BOOST_TICKS, over, bump: B };
+        return { action: Action.Jump, to: { cell: L, up, fwd }, ticks: T.boost, over, bump: B };
       }
       return null;
     }
@@ -111,7 +112,7 @@ function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan |
     }
     case 'hop':
       if (isSolid(world, add(C, U))) return null; // low ceiling
-      return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: JUMP_TICKS };
+      return { action: Action.Hop, to: { cell: C, up, fwd }, ticks: T.jump };
   }
 }
 

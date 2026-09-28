@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, Dir, isPushable, JUMP_TICKS, KNOCK_TICKS, KNOCKOUT_CREDIT_TICKS, loadLevel, mulberry32,
-  ROLL_TICKS, setInput, step, STUN_TICKS, TURN_TICKS, vec,
-  type PlayerState, type SimEvent, type World,
+  Action, addPlayer, createWorld, Dir, isPushable, KNOCK_TICKS, KNOCKOUT_CREDIT_TICKS, loadLevel, mulberry32, setInput, step, STUN_TICKS, vec, type PlayerState, type SimEvent, type World,
 } from '../src/index.ts';
-import { input, makeWorld, player, readLevelJson, row, run, serialize, type Spawn } from './util.ts';
+import { input, makeWorld, player, readLevelJson, row, run, serialize, type Spawn, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from './util.ts';
 
 // p0 at x=0 facing +X, victim p1 right in front of it at x=1.
 const pusher = (): Spawn => [[0, 1, 0], '+Y', '+X'];

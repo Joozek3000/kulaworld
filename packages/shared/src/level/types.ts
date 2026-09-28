@@ -55,7 +55,8 @@ export interface Tile {
 /** Vanishing block schedule (phase 13b), in ticks: solid for `on` of every `period`, offset by `phase`. */
 export interface Vanish { period: number; on: number; phase: number }
 /** Block flags (phase 13b), on a box or a block entry. */
-export interface BlockFlags { invisible?: boolean; vanish?: Vanish }
+/** `tint` (phase 17, render only): the block's glaze tint, "#rrggbb", overriding its island's. */
+export interface BlockFlags { invisible?: boolean; vanish?: Vanish; tint?: string }
 /** A laser (phase 13b): `length` air cells from `from` along `dir`, in a switchable group. */
 export interface LaserJson { group: string; from: V3; dir: DirName; length: number; on: boolean }
 export interface Laser { group: string; from: Vec3; dir: Dir; length: number; on: boolean; cells: Vec3[] }
@@ -165,4 +166,6 @@ export interface Level {
   lasers: Laser[];
   beams: Map<string, string[]>;
   partners: Map<string, Tile>;
+  /** Phase 17 (render only): glaze tint overrides by block cellKey ("#rrggbb"). */
+  tints: Map<string, string>;
 }

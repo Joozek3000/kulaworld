@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, CLIMB_TICKS, createWorld, Dir, loadLevel, mulberry32, setInput, step, turnFwd, vec,
-  type Pose, type World,
+  Action, addPlayer, createWorld, Dir, loadLevel, mulberry32, setInput, step, turnFwd, vec, type Pose, type World,
 } from '../src/index.ts';
-import { input, makeWorld, player, readLevelJson, row, serialize, type Spawn } from './util.ts';
+import { input, makeWorld, player, readLevelJson, row, serialize, type Spawn, CLIMB_TICKS } from './util.ts';
 
 // ARCHITECTURE §5 (phase 11): rolling into a wall climbs it. p0 at x=2 facing +X, the wall at x=3.
 const start = (): Spawn => [[2, 1, 0], '+Y', '+X'];

@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, JUMP_TICKS, loadLevel, mulberry32, setInput, step, vec,
-  type SimEvent, type World,
+  Action, addPlayer, createWorld, loadLevel, mulberry32, setInput, step, vec, type SimEvent, type World,
 } from '../src/index.ts';
-import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
+import { input, levelJson, makeWorld, player, row, run, serialize, type Spawn, JUMP_TICKS } from './util.ts';
 
 // Roll under a high hop (ARCHITECTURE §14). p1 hops in place at x=1 from tick 1 and lands at LAND = 1 + JUMP_TICKS;
 // it's high on ticks 4..8. p0 at x=0 faces it.

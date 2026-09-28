@@ -1,6 +1,6 @@
 import {
-  BOOST_HOLD_TICKS, CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, JUMP_TICKS, KNOCK_TICKS, REBOUND_TICKS,
-  RESPAWN_TICKS, ROLL_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS, SWITCH_COOLDOWN_TICKS,
+  BOOST_HOLD_TICKS, CHAIN_MAX, CRUMBLE_DELAY_TICKS, FIRE_MAX, INPUT_BUFFER_TICKS, JUMP_GRACE_TICKS, KNOCK_TICKS, REBOUND_TICKS,
+  RESPAWN_TICKS, SPAWN_PROTECT_TICKS, STRIKE_TICKS, STUN_TICKS, SWITCH_COOLDOWN_TICKS,
 } from '../constants.ts';
 import { cross, dirFromVec, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
@@ -129,7 +129,7 @@ function landHop(world: World, p: PlayerState, events: SimEvent[]): void {
   const near = world.players.filter((v) => under(p, v));
   const standing = near.find((v) => eq(v.pose.cell, p.pose.cell) && eq(v.to.cell, p.pose.cell));
   if (standing ? world.rules.push && !isPushable(standing, world.tick) : near.length) {
-    startAction(p, { action: Action.Hop, to: p.pose, ticks: JUMP_TICKS }, world.tick);
+    startAction(p, { action: Action.Hop, to: p.pose, ticks: world.timing.jump }, world.tick);
     return;
   }
   finishAction(world, p, events);
@@ -418,7 +418,7 @@ function push(world: World, p: PlayerState, v: PlayerState, res: Reservations, e
   const two = hasEffect(p, 'heavy') && isSolid(world, sub(dest, dirVec(p.pose.up))) && isFree(world, res, last.id, far);
   knock(last, two ? far : dest, p.id, tick, two ? 2 * KNOCK_TICKS : KNOCK_TICKS);
   if (cradle) startAction(p, { action: Action.Strike, to: p.pose, ticks: ownTicks(p, STRIKE_TICKS) }, tick);
-  else startAction(p, { action: Action.Roll, to: { ...p.pose, cell: v.pose.cell }, ticks: ownTicks(p, ROLL_TICKS) }, tick);
+  else startAction(p, { action: Action.Roll, to: { ...p.pose, cell: v.pose.cell }, ticks: ownTicks(p, world.timing.roll) }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick; // pushing ends your own spawn protection
   reserve(res, last);
   reserve(res, p);
@@ -448,7 +448,7 @@ function edgePush(world: World, p: PlayerState, v: PlayerState, res: Reservation
     return null;
   }
   knock(v, dest, p.id, tick);
-  startAction(p, { action: Action.Flip, to: { cell: v.pose.cell, up: p.pose.fwd, fwd: D }, ticks: ownTicks(p, FLIP_TICKS) }, tick);
+  startAction(p, { action: Action.Flip, to: { cell: v.pose.cell, up: p.pose.fwd, fwd: D }, ticks: ownTicks(p, world.timing.flip) }, tick);
   if (p.protectedUntil > tick) p.protectedUntil = tick;
   reserve(res, v);
   reserve(res, p);
@@ -584,7 +584,7 @@ function landStomp(world: World, p: PlayerState, events: SimEvent[]): boolean {
 function fallStomp(world: World, p: PlayerState, events: SimEvent[]): void {
   const v = standingAt(world, p.pose.cell, p.pose.up, p.id);
   if (v && hasEffect(v, 'heavy') && pushableState(v, world.tick)) { // heavy (15b): the faller rebounds and re-hops, as a hop does
-    startAction(p, { action: Action.Hop, to: p.pose, ticks: JUMP_TICKS }, world.tick);
+    startAction(p, { action: Action.Hop, to: p.pose, ticks: world.timing.jump }, world.tick);
     events.push({ type: 'bounce', playerId: p.id });
     return;
   }

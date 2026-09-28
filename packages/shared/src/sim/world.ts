@@ -1,4 +1,4 @@
-import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
+import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE, TIMINGS, type Timing, type TimingName } from '../constants.ts';
 import { ALL_DIRS, dirVec, perpendicular, type Dir } from '../dir.ts';
 import { mulberry32, rngNext } from '../rng.ts';
 import type { ItemType, Level, Mode, PickupType, Placement, Pose, Vanish } from '../level/types.ts';
@@ -105,7 +105,7 @@ export interface SingleState {
 }
 
 /** `chain: false` turns the cradle push off: a player behind the victim bounces the pusher (phase 11 rules; soak comparisons). */
-export interface Rules { push: boolean; chain?: boolean }
+export interface Rules { push: boolean; chain?: boolean; /** Movement timing preset (phase 17), default classic. */ timing?: TimingName }
 
 /** Knockout crumble progress (ARCHITECTURE §15). Bands are block cellKeys, furthest from the centre first. */
 export interface KnockoutState {
@@ -122,6 +122,8 @@ export interface World {
   level: Level;
   mode: Mode;
   rules: Rules;
+  /** The movement durations of `rules.timing` (phase 17). */
+  timing: Timing;
   seed: number;
   /** mulberry32 state for in-round randomness (knockout respawn spawns). */
   rng: number;
@@ -201,7 +203,8 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
   return {
     level,
     mode: level.mode,
-    rules: knockout ? { ...rules, push: true } : single ? { push: false } : rules,
+    rules: knockout ? { ...rules, push: true } : single ? { ...rules, push: false } : rules,
+    timing: TIMINGS[rules.timing ?? 'classic'],
     seed,
     rng: seed >>> 0,
     removed: new Set(),

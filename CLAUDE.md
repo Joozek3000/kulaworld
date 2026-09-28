@@ -33,3 +33,4 @@ Multiplayer browser game inspired by Kula World. Balls roll on floating block st
 - The dev machine is Windows. npm scripts must work in PowerShell, so no bash-only syntax. Use `concurrently`/`cross-env` or node scripts.
 - A phase isn't done until `npm run typecheck` and `npm test` pass and the phase's acceptance checklist is complete.
 - Keep dependencies minimal. Ask (via the report) before adding anything beyond the stack above plus small dev tools.
+- The repo has a GitHub remote (`origin`, private). After each commit, `git push`.

@@ -36,5 +36,10 @@ Workflow:
 | 13b | Traps 2 | Teleporters, lasers + switches, invisible/vanishing blocks |
 | 15a | Pickups & pills | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15b | Single player | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
-| 17 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |
 | 16 | GitHub prep | README, CI (typecheck/test/level:check), gc, main branch; push to a private repo |
+| 17 | Polish & readability | Flipside rename, fog fix, gentler early game, level fly-over, free look + x-ray outlines, off-screen arrows, island tints, gamepad + remapping, music system, timing presets |
+| 18 | Matches (planned) | Multi-round matches with points, crown on leader, podium; rival bot |
+| 19 | Online hosting (planned) | Deploy the server so friends can join over the internet; client pointed at it |
+| 20 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button; validation live |
+| 21 | Campaign worlds 2–3 (planned) | ~20 more single-player levels built with the editor, world themes |
+| — | itch build (LAST) | `docs/prompts/itch-build.md`: web build zip, iframe-safe, feedback hooks, page kit |

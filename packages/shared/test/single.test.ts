@@ -179,7 +179,10 @@ describe('campaign', () => {
     const r = levelDied(c);
     expect([r.gameOver, r.campaign.level, r.campaign.score]).toEqual([true, 5, 12000]);
     expect(levelDied({ ...c, score: 850 }).gameOver).toBe(false); // exactly 0 is fine
-    expect(levelDied(newCampaign()).campaign).toEqual(newCampaign()); // before any checkpoint: level 1, score 0
+    // Before the first checkpoint (levels 1–4) the score is clamped at 0: no game over.
+    expect(levelDied(newCampaign())).toEqual({ campaign: newCampaign(), penalty: 550, gameOver: false });
+    expect(levelDied({ ...newCampaign(), level: 4, score: 300 })).toMatchObject({ campaign: { level: 4, score: 0 }, gameOver: false });
+    expect(levelDied({ ...newCampaign(), level: 5, score: 300, checkpoint: { level: 5, score: 300 } }).gameOver).toBe(true);
   });
 
   test('a checkpoint every 5 levels: reaching it saves the level and its starting score', () => {

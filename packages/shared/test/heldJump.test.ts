@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { Action, JUMP_TICKS, ROLL_TICKS, setInput, step, TURN_TICKS, vec, type Input, type World } from '../src/index.ts';
-import { input, makeWorld, player, row, type Spawn } from './util.ts';
+import {
+  Action, setInput, step, vec, type Input, type World,
+} from '../src/index.ts';
+import { input, makeWorld, player, row, type Spawn, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from './util.ts';
 
 const onRow = (): Spawn => [[0, 1, 0], '+Y', '+X'];
 const world = () => makeWorld(row(0, 9), [onRow()]);
@@ -27,13 +29,13 @@ describe('held jump', () => {
     expect(seen.every((a) => a === Action.Hop)).toBe(true);
     const w2 = world();
     send(w2, { jump: true, jumpHeld: true });
-    expect(starts(w2, 3 * JUMP_TICKS)).toEqual([[1, Action.Hop, 0], [11, Action.Hop, 0], [21, Action.Hop, 0]]);
+    expect(starts(w2, 3 * JUMP_TICKS)).toEqual([[1, Action.Hop, 0], [1 + JUMP_TICKS, Action.Hop, 0], [1 + 2 * JUMP_TICKS, Action.Hop, 0]]);
   });
 
   test('jumpHeld + fwdHeld: consecutive forward jumps', () => {
     const w = world();
     send(w, { jump: true, jumpHeld: true, fwdHeld: true });
-    expect(starts(w, 2 * JUMP_TICKS)).toEqual([[1, Action.Jump, 2], [11, Action.Jump, 4]]);
+    expect(starts(w, 2 * JUMP_TICKS)).toEqual([[1, Action.Jump, 2], [1 + JUMP_TICKS, Action.Jump, 4]]);
   });
 
   test('a tap (jumpHeld false by the next input) gives exactly one hop', () => {

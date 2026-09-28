@@ -1,4 +1,4 @@
-# Kulaworld (working title)
+# Flipside (working title; repo name kulaworld)
 
 A browser game inspired by Kula World: balls roll over floating block structures, each with its own gravity that flips as it rolls over an edge.
 It has online multiplayer (race and knockout) and a single-player campaign.
@@ -28,6 +28,7 @@ npm run dev             # server on :2567 + client on :5173
   npm run bots -- --count 3 --behaviour seek,bully,blocker,wander --skill 0.5
   ```
 - To connect the client to another server: `http://localhost:5173/?server=ws://host:port`
+- Movement timing preset for playtesting: `TIMING=snappy` in `.env` (default `classic`). The server sends it to clients and bots.
 
 ## Controls
 | Key | Action |
@@ -37,16 +38,21 @@ npm run dev             # server on :2567 + client on :5173
 | Space | jump (with W: forward jump; hold: keep bouncing) |
 | R | ready (lobby) |
 | 1–4 | vote for a level (lobby; 4 = random) |
+| Q (hold) + mouse | free look around your ball |
 | Esc | pause (single player) |
 | M | mute |
 | [ ] | volume |
 | F3 | debug overlay |
 | F4 | feel/sound tuning panel (dev builds; also under Settings in the menu) |
+| any key | skip the level fly-over |
+
+- **Gamepads** (standard mapping) work too: D-pad or left stick rolls and turns, Ⓐ jumps, the right stick looks around, Ⓑ readies up, Ⓧ/Ⓨ step through the lobby vote, Start pauses. Menus can be navigated with the pad.
+- Every gameplay action can be rebound, for keyboard and pad, under **Settings → Controls**. Bindings are saved in the browser.
 
 ## Modes
 - **Race** (multiplayer): collect the required keys, then reach the exit. Pushing, stomping and traps are all fair game.
 - **Knockout** (multiplayer): lives and a crumbling floor. The last ball rolling wins.
-- **Single player**: a 10-level campaign (`levels/sp-*.json`) with Kula scoring, a level timer, a death penalty, checkpoints every 5 levels, and progress saved in localStorage.
+- **Single player**: a 10-level campaign (`levels/sp-*.json`) with classic Kula World-style scoring, a level timer, a death penalty, checkpoints every 5 levels, and progress saved in localStorage.
 - **Bonus level**: collect all 5 fruit kinds to unlock it, then light every paint tile before time runs out.
 
 ## Scripts
@@ -78,6 +84,9 @@ docs/             ARCHITECTURE (source of truth), LEVEL-DESIGN, DECISIONS, ART-S
 - Each phase ends with a report in `docs/reports/NN-report.md`.
 - `CLAUDE.md` holds the working rules (hard rules: all game rules in `packages/shared/src/sim`, integer-only sim state, server-authoritative).
 - `docs/DECISIONS.md` logs every deviation from the architecture.
+
+## Music
+Drop tracks into `packages/client/public/music/` and list them in `credits.json` there (and in `CREDITS.md`). See `CREDITS.md` for the slots.
 
 ## Large files
 - Raw art sources (`.blend`, `.exr`, 4K PNGs) live in `assets/`. The runtime copies the client actually loads (GLB, JPG, sounds) live in `packages/client/public/`.

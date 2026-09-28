@@ -1,8 +1,10 @@
-import { Action, addPlayer, createWorld, paintTotal, setInput, step, TICK_RATE, type Input, type Level, type Pose, type SimEvent, type World } from '@kula/shared';
+import { Action, addPlayer, createWorld, paintTotal, setInput, step, TICK_RATE, type Input, type TimingName, type Level, type Pose, type SimEvent, type World } from '@kula/shared';
 import type { GameSource, GameState, ItemS, PlayerS } from './net.ts';
 
 /** A short "get ready" before each attempt: a countdown phase, like a server round, so the renderer resets cleanly. */
 const READY_TICKS = TICK_RATE;
+/** A new level's READY phase is longer: the camera flies over the level first (phase 17). */
+const FLYOVER_TICKS = 3 * TICK_RATE;
 const TICK_MS = 1000 / TICK_RATE;
 export const LOCAL_ID = 'you';
 
@@ -28,30 +30,33 @@ export class LocalGame implements GameSource {
   readonly patchRate = TICK_RATE;
   estServerTick = 0;
   paused = false;
+  /** This attempt's READY length in ticks (FLYOVER_TICKS when the level opens with a fly-over). */
+  readyTicks = READY_TICKS;
   world!: World;
   readonly state: LocalState;
   private acc = 0;
   private listeners: ((e: SimEvent) => void)[] = [];
   private me!: PlayerS;
 
-  constructor(level: Level, private readonly name = 'You') {
+  constructor(level: Level, private readonly name = 'You', private readonly timing: TimingName = 'classic') {
     this.state = {
       phase: 'countdown', tick: 0, phaseEndTick: 0, levelId: level.id, winnerId: '', players: new Map(), items: new Map(), pickups: new Map(),
       mode: level.mode, crumbled: 0, warnBand: -1, nextCrumbleTick: -1, hot: new Map(), crumbling: new Map(), lasers: new Map(), candidates: [], voteCounts: [],
       single: { gained: 0, timer: 0, frozen: false, lit: new Set(), paintTotal: 0, clocks: new Set(), keysTotal: 0, fruits: 0 },
     };
-    this.start(level);
+    this.start(level, true);
   }
 
-  /** A fresh attempt at `level` (a restart too): new world, the countdown, then play. */
-  start(level: Level, seed = 1): void {
-    this.world = createWorld(level, seed);
+  /** A fresh attempt at `level`: new world, the countdown (with the fly-over for a new level, not a restart), then play. */
+  start(level: Level, flyover: boolean): void {
+    this.world = createWorld(level, 1, { push: false, timing: this.timing });
+    this.readyTicks = flyover ? FLYOVER_TICKS : READY_TICKS;
     addPlayer(this.world, LOCAL_ID, this.name);
     const s = this.state;
     s.levelId = level.id;
     s.mode = level.mode;
     s.phase = 'countdown';
-    s.tick = -READY_TICKS;
+    s.tick = -this.readyTicks;
     s.phaseEndTick = 0;
     s.winnerId = '';
     s.players.clear();
@@ -66,6 +71,11 @@ export class LocalGame implements GameSource {
   }
 
   get result() { return this.world.result; }
+
+  /** Any key during READY skips the rest of it (and the fly-over): play starts on the next tick. */
+  skipReady(): void {
+    if (this.state.phase === 'countdown') this.state.tick = Math.max(this.state.tick, -1);
+  }
 
   update(_now: number, dtMs: number): void {
     if (this.paused) return;

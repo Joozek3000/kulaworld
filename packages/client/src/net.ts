@@ -19,7 +19,9 @@ export interface ItemS { id: string; kind: string; x: number; y: number; z: numb
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
 export interface GameState {
   phase: 'lobby' | 'countdown' | 'playing' | 'results'; tick: number; phaseEndTick: number;
-  levelId: string; winnerId: string; players: MapLike<PlayerS>; items: MapLike<ItemS>;
+  levelId: string; winnerId: string;
+  /** Movement timing preset (phase 17); absent from older servers. */
+  timing?: string; players: MapLike<PlayerS>; items: MapLike<ItemS>;
   /** Pickups on the map (15a), by id. */
   pickups: MapLike<ItemS>;
   mode: 'race' | 'knockout' | 'single'; crumbled: number; warnBand: number; nextCrumbleTick: number;

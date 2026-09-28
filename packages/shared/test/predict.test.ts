@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, InputQueue, InputSchedule, loadLevel, mulberry32, Predictor, setInput, step,
+  Action, addPlayer, createWorld, InputQueue, InputSchedule, loadLevel, mulberry32, Predictor, setInput, step, type TimingName,
   type Input, type PlayerState, type ServerPlayer, type TileJson, type World,
 } from '../src/index.ts';
 import { levelJson, makeWorld, readLevelJson, row, type Spawn } from './util.ts';
@@ -23,7 +23,7 @@ class Harness {
   private seq = 0;
 
   constructor(readonly server: World, readonly me = 'me', readonly lead = 3) {
-    this.pred = new Predictor(server.level, me);
+    this.pred = new Predictor(server.level, me, server.rules.timing);
     this.pred.reset(server.tick, toServer(this.local));
     this.pred.advanceTo(server.tick + lead);
   }
@@ -56,8 +56,8 @@ class Harness {
   run(ticks: number): void { for (let i = 0; i < ticks; i++) this.tick(); }
 }
 
-function soloWorld(file: string, seed = 7): World {
-  const w = createWorld(loadLevel(readLevelJson(file)), seed);
+function soloWorld(file: string, seed = 7, timing: TimingName = 'classic'): World {
+  const w = createWorld(loadLevel(readLevelJson(file)), seed, { push: true, timing });
   addPlayer(w, 'me', 'me');
   return w;
 }
@@ -97,8 +97,8 @@ describe('input scheduling', () => {
 });
 
 describe('predictor', () => {
-  test('determinism: the server and a predictor fed the same inputs agree for 2000 ticks', () => {
-    const h = new Harness(soloWorld('race-01.json'));
+  test.each(['classic', 'snappy'] as const)('determinism (%s timing): the server and a predictor fed the same inputs agree for 2000 ticks', (timing) => {
+    const h = new Harness(soloWorld('race-01.json', 7, timing));
     const rnd = mulberry32(99);
     for (let t = 0; t < 2000; t++) {
       if (rnd() < 0.15) h.send({ fwdHeld: rnd() < 0.6, turn: rnd() < 0.2 ? (rnd() < 0.5 ? -1 : 1) : 0, jump: rnd() < 0.15, jumpHeld: rnd() < 0.1 });

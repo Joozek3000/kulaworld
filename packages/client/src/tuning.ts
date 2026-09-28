@@ -9,6 +9,8 @@ export type SoundName = (typeof SOUND_NAMES)[number];
 export const DEFAULT_TUNING = {
   /** Master volume 0..1 (also `[` / `]`). */
   master: 0.8,
+  /** Music volume 0..1 (phase 17), its own bus under the master. */
+  music: 0.6,
   /** Multiplier on every squash/stretch amount (0 = rigid balls). */
   squash: 1,
   /** Squash spring (per second²) and damping (per second). ζ ≈ 0.35: a visible jiggle. */
@@ -29,7 +31,7 @@ function load(): Tuning {
   const t: Tuning = { ...DEFAULT_TUNING, gains: { ...DEFAULT_TUNING.gains } };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Tuning>;
-    for (const k of ['master', 'squash', 'stiffness', 'damping', 'hitStopMs', 'markerLeadTicks'] as const) {
+    for (const k of ['master', 'music', 'squash', 'stiffness', 'damping', 'hitStopMs', 'markerLeadTicks'] as const) {
       if (typeof saved[k] === 'number') t[k] = saved[k];
     }
     for (const n of SOUND_NAMES) if (typeof saved.gains?.[n] === 'number') t.gains[n] = saved.gains[n];

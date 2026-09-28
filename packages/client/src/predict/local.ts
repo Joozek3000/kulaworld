@@ -1,5 +1,5 @@
 import {
-  Action, crumbleBands, Predictor, UNPREDICTED,
+  Action, crumbleBands, isTimingName, Predictor, UNPREDICTED,
   type Dir, type Effect, type Input, type InputMsg, type Level, type Pickup, type PickupType, type Pose, type ReconcileResult, type ServerPlayer,
 } from '@kula/shared';
 import type { GameState, Net, PlayerS } from '../net.ts';
@@ -90,10 +90,10 @@ export class LocalPrediction {
   private onPatch(): void {
     const s = this.net.state, me = this.me;
     if (s.phase !== 'playing' || !me || me.spectating) { this.pred = null; return; }
-    if (!this.pred || this.levelId !== s.levelId) {
+    if (!this.pred || this.levelId !== s.levelId || this.pred.world.rules.timing !== (s.timing ?? 'classic')) {
       const level = this.findLevel(s.levelId);
       if (!level) return;
-      this.pred = new Predictor(level, this.net.sessionId);
+      this.pred = new Predictor(level, this.net.sessionId, isTimingName(s.timing) ? s.timing : 'classic');
       this.lateSeen = 0;
       this.serverMode = false;
       this.levelId = s.levelId;

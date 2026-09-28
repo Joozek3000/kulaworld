@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kulaworld</title>
+  <title>Flipside</title>
   <style>
     :root { --fs: clamp(13px, 0.95vw + 4px, 20px); --panel: #0b0e1acc; --ok: #3ddc6f; --warn: #ff6b5b; }
     html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2b; color: #fff; font: var(--fs) system-ui, sans-serif; }
@@ -74,6 +74,7 @@
     #hud-board .fruits { display: flex; gap: 0.25em; justify-content: flex-end; font-size: 1.3em; }
     .fruit.empty { filter: grayscale(1); opacity: 0.25; }
     #hud-center .big.ready { font-size: clamp(48px, 9vh, 110px); color: #e9e2ff; }
+    #menu .version { position: fixed; right: 12px; bottom: 10px; color: #e9e2ffaa; font-size: 0.8em; }
     #menu { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(#2a1f4a33, #120d2488); z-index: 5; }
     .mpanel { min-width: 20em; max-width: min(40em, 92vw); padding: 1.4em 1.8em 1.6em; text-align: center; color: #3b2d63;
       background: linear-gradient(160deg, #f6f2ff, #dcd2f5); border-radius: 22px; border: 1px solid #fff;
@@ -92,6 +93,10 @@
     .mbtn:active:not([disabled]) { transform: translateY(2px); box-shadow: 0 1px 0 #b7a8e0; }
     .mbtn.primary { background: linear-gradient(#8f78e0, #6b4fc8); color: #fff; border-color: #5a3fb5; box-shadow: 0 3px 0 #4a3296, 0 6px 16px #6b4fc855; }
     .mbtn[disabled] { opacity: 0.4; cursor: default; }
+    .mbtn:focus-visible, .mbtn:focus { outline: 3px solid #ffd166; outline-offset: 2px; }
+    .mpanel table.binds td .mbtn { padding: 0.25em 0.8em; min-width: 6em; text-align: center; }
+    .mpanel table.binds th { font-size: 0.85em; color: #6c5f93; text-align: center; }
+    #pad-hint { position: fixed; left: 12px; bottom: 16px; padding: 0.35em 0.8em; border-radius: 10px; background: var(--panel); font-size: 0.9em; }
     .mbtn small { display: block; font-size: 0.75em; opacity: 0.75; }
     .mpanel .field { display: flex; gap: 0.6em; align-items: center; justify-content: center; margin: 0.4em 0; }
     .mpanel input:not([type]) { font: inherit; padding: 0.35em 0.6em; border-radius: 10px; border: 1px solid #b7a8e0; }
@@ -100,6 +105,11 @@
     .mpanel td { padding: 0.2em 0.6em; text-align: left; } .mpanel td + td { text-align: right; }
     .mpanel tr.total td { border-top: 2px solid #b7a8e0; font-weight: 800; }
     .mpanel td small { opacity: 0.7; }
+    /* Phase 17: off-screen enemy arrows (multiplayer). */
+    #offscreen { position: fixed; inset: 0; pointer-events: none; }
+    .offscreen-arrow { position: absolute; left: 0; top: 0; width: 0; height: 0; margin: -10px 0 0 -10px;
+      border-left: 20px solid currentColor; border-top: 10px solid transparent; border-bottom: 10px solid transparent;
+      filter: drop-shadow(0 0 3px #000a); transform-origin: 0 10px; }
     #debug { position: fixed; bottom: 12px; right: 12px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
   </style>
 </head>

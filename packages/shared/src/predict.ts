@@ -1,6 +1,6 @@
 // Client-side prediction for the local player (ARCHITECTURE §17). Pure and deterministic, so it's unit-testable; the
 // client wraps it (client/src/predict/) and the server shares the input scheduling rule.
-import { INPUT_BUFFER_TICKS } from './constants.ts';
+import { INPUT_BUFFER_TICKS, type TimingName } from './constants.ts';
 import type { Level, Pose } from './level/types.ts';
 import { dirVec } from './dir.ts';
 import { add, cellKey, eq } from './vec.ts';
@@ -149,8 +149,8 @@ export class Predictor {
   private serverPickups: Pickup[] = [];
   private taken = new Set<number>();
 
-  constructor(level: Level, readonly localId: string) {
-    this.world = createWorld(level, 0, { push: false });
+  constructor(level: Level, readonly localId: string, timing: TimingName = 'classic') {
+    this.world = createWorld(level, 0, { push: false, timing }); // the server's movement preset (phase 17)
     this.world.mode = 'race';
     this.world.knockout = null;
     this.world.heat = null; // hot-tile deaths are the server's call

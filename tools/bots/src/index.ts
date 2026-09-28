@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  Action, add, airHop, ALL_DIRS, beamHit, cellKey, createWorld, dirVec, findPath, findPathLasers, isPushable, isSolid, lintCorridors, loadLevel, opposite, pathCells, perpendicular,
+  Action, add, airHop, ALL_DIRS, isTimingName, beamHit, cellKey, createWorld, dirVec, findPath, findPathLasers, isPushable, isSolid, lintCorridors, loadLevel, opposite, pathCells, perpendicular,
   blockTileAt, lethalForPlanning, RANDOM_VOTE, previewAction, reservations, resultPose, stompPreview, sub, tileKey, turnFwd,
   type Dir, type Effect, type Input, type PathStep, type PickupType, type PlayerState, type Pose, type Reservations, type SimEvent, type Vec3, type World,
 } from '@kula/shared';
@@ -68,11 +68,12 @@ async function connect(client: Client, name: string): Promise<Room> {
  */
 const planWorlds = new Map<string, World>();
 type MapOf<T> = { forEach(cb: (v: T, k: string) => void): void };
-function planWorld(state: { levelId: string; crumbled: number; warnBand: number; crumbling?: MapOf<number>; lasers?: MapOf<number> }): World {
-  let w = planWorlds.get(state.levelId);
+function planWorld(state: { levelId: string; timing?: string; crumbled: number; warnBand: number; crumbling?: MapOf<number>; lasers?: MapOf<number> }): World {
+  const timing = isTimingName(state.timing) ? state.timing : 'classic', key = `${state.levelId}|${timing}`; // phase 17 preset
+  let w = planWorlds.get(key);
   if (!w) {
     const json = JSON.parse(readFileSync(new URL(`../../../levels/${state.levelId}.json`, import.meta.url), 'utf8'));
-    planWorlds.set(state.levelId, (w = createWorld(loadLevel(json), 0)));
+    planWorlds.set(key, (w = createWorld(loadLevel(json), 0, { push: true, timing })));
   }
   w.removed = new Set(w.knockout ? w.knockout.bands.slice(0, Math.max(state.crumbled, state.warnBand + 1)).flat() : []);
   state.crumbling?.forEach((_, k) => w.removed.add(k)); // crumble tiles (§18): counting down or gone, don't plan on them

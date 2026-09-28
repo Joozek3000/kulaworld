@@ -15,6 +15,14 @@ const OFFSETS = [OFFSET, new THREE.Vector3(0, 3.2, -2.4), new THREE.Vector3(0, 3
 const probePos = new THREE.Vector3(), probeOut = new THREE.Vector3();
 const DAMP_PER_SEC = 10;
 const ORBIT_SPEED = 0.15; // rad/s
+/** Fly-over (phase 17): half the vertical field of view, the elevation (40°), the start angle, and the swoop's share. */
+const FLY_HALF_FOV = (60 / 2) * (Math.PI / 180), FLY_SIN = Math.sin(0.7), FLY_COS = Math.cos(0.7), FLY_START = -Math.PI / 2, SWOOP = 0.25;
+const flyQuat = new THREE.Quaternion();
+/** Free look (phase 17): the yaw/pitch limits (rad), and how fast the view follows the input and springs back. */
+export const LOOK_YAW_MAX = Math.PI, LOOK_PITCH_MAX = Math.PI / 3;
+const LOOK_DAMP = 12;
+const lookQ = new THREE.Quaternion(), lookYawQ = new THREE.Quaternion(), X = new THREE.Vector3(1, 0, 0);
+const lookOffset = new THREE.Vector3(), lookAt = new THREE.Vector3();
 
 const frame = new THREE.Quaternion(), m = new THREE.Matrix4(), Y = new THREE.Vector3(0, 1, 0);
 const goalPos = new THREE.Vector3(), goalQuat = new THREE.Quaternion(), ball = new THREE.Vector3(), up = new THREE.Vector3();
@@ -63,6 +71,11 @@ export class CameraRig {
   private solid: SolidFn | null = null;
   /** A short jolt (a boost launch, phase 14c): cells the camera is pushed back along its view, easing out. */
   private kickAmt = 0;
+  /** Free look (phase 17): the wanted yaw about the ball's up and pitch (0 = the normal follow view; release → 0). */
+  lookYaw = 0;
+  lookPitch = 0;
+  private yaw = 0;
+  private pitch = 0;
   /** Lethargy (15a): 0..1, a slow woozy roll of the view. */
   sway = 0;
   private swayT = 0;
@@ -74,10 +87,45 @@ export class CameraRig {
   /** Solid test for camera occlusion (the level minus crumbled blocks). */
   setSolid(solid: SolidFn | null): void { this.solid = solid; }
 
+  /**
+   * The level fly-over (phase 17): at `t` 0..1, one full orbit over the level, high enough to fit it all in view
+   * (`center`, `radius`), and over the last SWOOP of it a swoop down into the follow cam behind `pose` (if any).
+   * Places the camera directly; the follow cam then carries on damping from there.
+   */
+  flyover(t: number, pose: RenderPose | null, center: THREE.Vector3, radius: number): void {
+    const a = FLY_START + t * Math.PI * 2, d = (radius / Math.sin(FLY_HALF_FOV)) * 1.05;
+    goalPos.set(center.x + Math.cos(a) * d * FLY_COS, center.y + d * FLY_SIN, center.z + Math.sin(a) * d * FLY_COS);
+    goalQuat.setFromRotationMatrix(m.lookAt(goalPos, center, Y));
+    const s = pose ? Math.min(1, Math.max(0, (t - (1 - SWOOP)) / SWOOP)) : 0;
+    if (s > 0) {
+      followTarget(pose!, probePos, flyQuat);
+      const e = s * s * (3 - 2 * s); // smoothstep
+      goalPos.lerp(probePos, e);
+      goalQuat.slerp(flyQuat, e);
+    }
+    this.pos.copy(goalPos);
+    this.camera.position.copy(goalPos);
+    this.camera.quaternion.copy(goalQuat);
+    this.snap = false;
+  }
+
   /** follow: chase `pose`; hold: stay put (local ball dead); orbit: circle the level. */
   update(dt: number, mode: CameraMode, pose: RenderPose | null, center: THREE.Vector3, radius: number): void {
     if (mode === 'hold') return;
-    if (mode === 'follow' && pose) {
+    const k = dampAlpha(LOOK_DAMP, dt);
+    this.yaw += (Math.max(-LOOK_YAW_MAX, Math.min(LOOK_YAW_MAX, this.lookYaw)) - this.yaw) * k;
+    this.pitch += (Math.max(-LOOK_PITCH_MAX, Math.min(LOOK_PITCH_MAX, this.lookPitch)) - this.pitch) * k;
+    const looking = Math.abs(this.yaw) > 1e-3 || Math.abs(this.pitch) > 1e-3;
+    if (mode === 'follow' && pose && looking) {
+      // Orbit the follow offset about the ball: pitch about its left axis, then yaw about its up.
+      frame.fromArray(pose.quat);
+      ball.fromArray(pose.position).addScaledVector(up.fromArray(pose.up), -pose.lift);
+      lookQ.setFromAxisAngle(Y, this.yaw).multiply(lookYawQ.setFromAxisAngle(X, this.pitch));
+      lookOffset.copy(OFFSET).applyQuaternion(lookQ);
+      lookAt.copy(LOOK).applyAxisAngle(Y, this.yaw).multiplyScalar(Math.cos(this.pitch));
+      goalQuat.setFromRotationMatrix(m.lookAt(lookOffset, lookAt, Y)).premultiply(frame);
+      goalPos.copy(lookOffset).applyQuaternion(frame).add(ball);
+    } else if (mode === 'follow' && pose) {
       followTarget(pose, goalPos, goalQuat);
       if (this.solid) {
         for (const { o, q } of OFFSETS) {

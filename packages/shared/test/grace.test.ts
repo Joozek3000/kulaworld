@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { Action, JUMP_GRACE_TICKS, mulberry32, ROLL_TICKS, setInput, step, vec, type World } from '../src/index.ts';
-import { input, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
+import {
+  Action, JUMP_GRACE_TICKS, mulberry32, setInput, step, vec, type World,
+} from '../src/index.ts';
+import { input, makeWorld, player, row, run, serialize, type Spawn, ROLL_TICKS } from './util.ts';
 
 // Jump grace (ARCHITECTURE §6): p0 at x=0 facing +X on a long row.
 const start = (): Spawn => [[0, 1, 0], '+Y', '+X'];

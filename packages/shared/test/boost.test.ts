@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, add, addPlayer, ALL_DIRS, BOOST_HOLD_TICKS, BOOST_TICKS, cellKey, createWorld, Dir, dirName, dirVec, findPath, loadLevel,
-  mulberry32, perpendicular, ROLL_TICKS, setInput, step, sub, vec,
-  type SimEvent, type TileJson, type World,
+  Action, add, addPlayer, ALL_DIRS, BOOST_HOLD_TICKS, cellKey, createWorld, Dir, dirName, dirVec, findPath, loadLevel, mulberry32, perpendicular, setInput, step, sub, vec, type SimEvent, type TileJson, type World,
 } from '../src/index.ts';
-import { input, levelFiles, makeWorld, player, readLevelJson, row, run, serialize, type Spawn } from './util.ts';
+import { input, levelFiles, makeWorld, player, readLevelJson, row, run, serialize, type Spawn, BOOST_TICKS, ROLL_TICKS, rules } from './util.ts';
 
 // Boost pads always launch (phase 14c, §18): a 3-wide plate x 0..10, z -1..1; the pad on top of (3,0,0) points +X,
 // so a far launch lands in (6,1,0) whichever way the ball arrived.
@@ -174,7 +172,7 @@ describe.each(levelFiles().filter((f) => readLevelJson(f).pool && (readLevelJson
     for (const d of ALL_DIRS.filter((x) => perpendicular(x, up))) {
       const from = sub(C, dirVec(d));
       if (level.solid.has(cellKey(from)) || !level.solid.has(cellKey(sub(from, U)))) continue; // no neighbour tile that way
-      const w = createWorld(level, 1);
+      const w = createWorld(level, 1, { ...rules });
       const p = addPlayer(w, 'p', 'p');
       p.pose = { cell: from, up, fwd: d };
       p.to = p.pose;

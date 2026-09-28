@@ -51,6 +51,8 @@ export const GameState = schema({
   tick: t.int32(),
   phaseEndTick: t.int32(),
   levelId: t.string(),
+  /** Movement timing preset (phase 17): 'classic' | 'snappy'. The predictor and bots build their worlds with it. */
+  timing: t.string().default('classic'),
   mode: t.string().default('race'), // 'race' | 'knockout', from the level
   /** Knockout crumble: bands removed so far (the client recomputes bands from the level), the warned band (-1 none),
    * and the tick the next band goes (-1 none). */

@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, Dir, loadLevel, mulberry32, ROLL_TICKS, setInput, step, turnFwd,
-  type Dir as DirT, type World,
+  Action, addPlayer, createWorld, Dir, loadLevel, mulberry32, setInput, step, turnFwd, type Dir as DirT, type World,
 } from '../src/index.ts';
-import { inOrder, input, rules, makeWorld, player, readLevelJson, row, run, serialize } from './util.ts';
+import { inOrder, input, rules, makeWorld, player, readLevelJson, row, run, serialize, ROLL_TICKS } from './util.ts';
 
 describe('key race', () => {
   test('key is collected when an action finishes in its cell and removed for everyone', () => {

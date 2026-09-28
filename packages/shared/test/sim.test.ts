@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, ALL_DIRS, addPlayer, dirName, dirVec, FALL_TICKS_PER_CELL, FLIP_TICKS, INPUT_BUFFER_TICKS, JUMP_TICKS,
-  opposite, perpendicular, previewAction, removePlayer, RESPAWN_TICKS, ROLL_TICKS, setInput, step, TURN_TICKS, vec,
-  Dir,
+  Action, ALL_DIRS, addPlayer, dirName, dirVec, FALL_TICKS_PER_CELL, INPUT_BUFFER_TICKS, opposite, perpendicular, previewAction, removePlayer, RESPAWN_TICKS, setInput, step, vec, Dir,
 } from '../src/index.ts';
-import { input, makeWorld, player, row, rules, run, type Spawn } from './util.ts';
+import { input, makeWorld, player, row, rules, run, type Spawn, FLIP_TICKS, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from './util.ts';
 
 const onRow = (): Spawn => [[0, 1, 0], '+Y', '+X'];
 

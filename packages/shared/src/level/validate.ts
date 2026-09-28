@@ -58,6 +58,7 @@ export function validateLevel(level: Level): string[] {
   }
   if (r && (r.weights.some((w) => !(w >= 0)) || !r.weights.some((w) => w > 0))) errors.push(`randomPickups weights must be ≥ 0 (given ones ≤ 100 in total) with one > 0, got ${r.weights.join(', ')}`);
   if (level.lab && level.pool) errors.push('a lab level is never in the pool');
+  for (const [k, t] of level.tints) if (!/^#[0-9a-fA-F]{6}$/.test(t)) errors.push(`block ${k}: tint must be "#rrggbb", got ${JSON.stringify(t)}`);
   if (level.theme !== null && !MODIFIER_TILES.includes(level.theme)) errors.push(`theme must be a non-lethal trap type (${MODIFIER_TILES.join(', ')}), got ${level.theme}`);
   if (typeof level.notes !== 'object' || Array.isArray(level.notes) || Object.values(level.notes).some((n) => typeof n !== 'string')) {
     errors.push('notes must be an object of strings');

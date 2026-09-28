@@ -1,5 +1,5 @@
 import {
-  campaignLevels, levelCard, levelDied, levelDone, newCampaign, type Campaign, type Level, type LevelCard,
+  campaignLevels, levelCard, levelDied, levelDone, newCampaign, type Campaign, type Level, type LevelCard, type TimingName,
 } from '@kula/shared';
 import { LocalGame } from './local.ts';
 
@@ -58,9 +58,12 @@ export class SinglePlayer {
   level: Level;
   label = '';
 
-  constructor(public campaign: Campaign, private readonly levels: readonly Level[], public save: Save, private readonly onOutcome: (o: Outcome) => void) {
+  constructor(
+    public campaign: Campaign, private readonly levels: readonly Level[], public save: Save, private readonly onOutcome: (o: Outcome) => void,
+    timing: TimingName = 'classic',
+  ) {
     this.level = this.current();
-    this.game = new LocalGame(this.level);
+    this.game = new LocalGame(this.level, 'You', timing);
     this.relabel();
     this.persist();
   }
@@ -106,14 +109,14 @@ export class SinglePlayer {
     return { kind: 'card', level, card, bonus, best, score: this.campaign.score, finished: this.finished };
   }
 
-  /** Starts what the campaign says is next (after a card, a death or a game over). */
-  next(): void {
+  /** Starts what the campaign says is next (after a card, a death or a game over). A restart after a death skips the fly-over. */
+  next(flyover = true): void {
     if (this.finished) return;
     this.reported = false;
     this.resultAt = -1;
     this.game.paused = false;
     this.relabel();
-    this.game.start(this.level);
+    this.game.start(this.level, flyover);
   }
 
   /** Pause menu: restarting costs a life-penalty, as a death (§22). */

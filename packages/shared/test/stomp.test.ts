@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, Dir, isPushable, JUMP_TICKS, KNOCK_TICKS, loadLevel, mulberry32, REBOUND_TICKS, setInput,
-  step, stompPreview, STUN_TICKS, turnFwd, vec,
-  type PlayerState, type SimEvent, type World,
+  Action, addPlayer, createWorld, Dir, isPushable, KNOCK_TICKS, loadLevel, mulberry32, REBOUND_TICKS, setInput, step, stompPreview, STUN_TICKS, turnFwd, vec, type PlayerState, type SimEvent, type World,
 } from '../src/index.ts';
-import { inOrder, input, levelJson, makeWorld, player, row, run, serialize, type Spawn } from './util.ts';
+import { inOrder, input, levelJson, makeWorld, player, row, run, serialize, type Spawn, JUMP_TICKS } from './util.ts';
 
 // ARCHITECTURE §16. p0 is the attacker at x=0 facing +X; a forward jump lands on A2 = x=2.
 const attacker = (): Spawn => [[0, 1, 0], '+Y', '+X'];

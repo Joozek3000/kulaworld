@@ -67,3 +67,14 @@ export const DEATH_PENALTY_PER_LEVEL = 50;
 export const CLOCK_FREEZE_TICKS = 5 * 20;
 /** Every this many campaign levels is a checkpoint. */
 export const CHECKPOINT_EVERY = 5;
+/**
+ * Movement timing presets (phase 17, for playtesting): the durations of the ball's own moves, in ticks. `classic` is
+ * the constants above; `snappy` is quicker. Knocks, stuns, falls and teleports are the same in both.
+ */
+export interface Timing { roll: number; turn: number; flip: number; climb: number; jump: number; boost: number }
+export const TIMINGS = {
+  classic: { roll: ROLL_TICKS, turn: TURN_TICKS, flip: FLIP_TICKS, climb: CLIMB_TICKS, jump: JUMP_TICKS, boost: BOOST_TICKS },
+  snappy: { roll: 4, turn: 2, flip: 5, climb: 4, jump: 8, boost: 10 },
+} as const satisfies Record<string, Timing>;
+export type TimingName = keyof typeof TIMINGS;
+export const isTimingName = (s: unknown): s is TimingName => typeof s === 'string' && s in TIMINGS;

@@ -58,11 +58,12 @@ const advance = (c: Campaign): Campaign => {
 
 /**
  * A death on a normal level: the level restarts with the score it started with, minus the penalty. If that would go
- * below 0 it's game over: back to the last checkpoint with its score. (A death on a bonus level just ends it: levelDone.)
+ * below 0 it's game over: back to the last checkpoint with its score. Before the first checkpoint (levels 1–4, phase
+ * 17) the score is clamped at 0 instead: no game over there. (A death on a bonus level just ends it: levelDone.)
  */
 export function levelDied(c: Campaign): { campaign: Campaign; penalty: number; gameOver: boolean } {
   const penalty = deathPenalty(c.level), score = c.score - penalty;
-  if (score >= 0) return { campaign: { ...c, score }, penalty, gameOver: false };
+  if (score >= 0 || c.level < CHECKPOINT_EVERY) return { campaign: { ...c, score: Math.max(0, score) }, penalty, gameOver: false };
   return { campaign: { ...c, level: c.checkpoint.level, score: c.checkpoint.score, bonus: -1 }, penalty, gameOver: true };
 }
 

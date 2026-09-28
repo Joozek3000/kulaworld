@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, Dir, JUMP_TICKS, loadLevel, opposite, ROLL_TICKS, setInput, step, turnFwd,
-  vec, type Input, type World,
+  Action, addPlayer, createWorld, Dir, loadLevel, opposite, setInput, step, turnFwd, vec, type Input, type World,
 } from '../src/index.ts';
-import { input, makeWorld, player, readLevelJson, row, run, type Spawn } from './util.ts';
+import { input, makeWorld, player, readLevelJson, row, run, type Spawn, JUMP_TICKS, ROLL_TICKS, TURN_TICKS } from './util.ts';
 
 const onRow = (): Spawn => [[0, 1, 0], '+Y', '+X'];
 const send = (w: World, i: Partial<Input>) => setInput(w, 'p0', input(i));
@@ -94,8 +93,7 @@ describe('mid-air turns', () => {
     send(w, { turn: 1 });
     step(w);
     expect(p.action).toBe(Action.Turn);
-    expect(p.endTick - p.startTick).toBe(3);
-    expect(ROLL_TICKS).toBe(5); // sanity: constants untouched
+    expect(p.endTick - p.startTick).toBe(TURN_TICKS);
   });
 });
 

@@ -39,7 +39,7 @@ export function voiceToDrop(levels: number[], level: number, max = MAX_VOICES): 
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
-  private buses!: { sfx: GainNode; ui: GainNode };
+  private buses!: { sfx: GainNode; ui: GainNode; music: GainNode };
   private voices: Voice[] = [];
   private samples = new Map<SoundName, AudioBuffer | null | 'loading'>();
   private rolls = new Map<string, { gain: GainNode; src: AudioBufferSourceNode; panner: PannerNode | null }>();
@@ -50,6 +50,7 @@ export class AudioEngine {
     try { this.muted = localStorage.getItem('kula.muted') === '1'; } catch { /* storage unavailable */ }
     // Browsers only allow audio after a user gesture: the first key press creates (or resumes) the context.
     addEventListener('keydown', () => this.start(), { capture: true });
+    addEventListener('pointerdown', () => this.start(), { capture: true }); // menus are clicked too (phase 17)
   }
 
   private start(): void {
@@ -57,15 +58,28 @@ export class AudioEngine {
       const c = (this.ctx = new AudioContext());
       this.master = c.createGain();
       this.master.connect(c.destination);
-      this.buses = { sfx: c.createGain(), ui: c.createGain() };
+      this.buses = { sfx: c.createGain(), ui: c.createGain(), music: c.createGain() };
       this.buses.sfx.connect(this.master);
       this.buses.ui.connect(this.master);
+      this.buses.music.connect(this.master);
       this.applyVolume();
+      this.onStart?.(c, this.buses.music);
     }
     if (this.ctx.state !== 'running') void this.ctx.resume();
   }
 
+  /** Called once the context exists (after the first key press): the music player hooks its bus here (phase 17). */
+  onStart: ((ctx: AudioContext, music: GainNode) => void) | null = null;
+  get context(): AudioContext | null { return this.ctx; }
+
   get volume(): number { return tuning.master; }
+  get musicVolume(): number { return tuning.music; }
+  /** Music volume 0..1 (phase 17), persisted with the tuning. */
+  setMusicVolume(v: number): void {
+    tuning.music = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
+    saveTuning();
+    this.applyVolume();
+  }
   /** Master volume 0..1, persisted with the tuning. */
   setVolume(v: number): void {
     tuning.master = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
@@ -78,7 +92,9 @@ export class AudioEngine {
     this.applyVolume();
   }
   private applyVolume(): void {
-    if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : tuning.master, this.ctx.currentTime, 0.02);
+    if (!this.ctx) return;
+    this.master.gain.setTargetAtTime(this.muted ? 0 : tuning.master, this.ctx.currentTime, 0.02);
+    this.buses.music.gain.setTargetAtTime(tuning.music, this.ctx.currentTime, 0.02);
   }
 
   /** The listener rides on the camera. */

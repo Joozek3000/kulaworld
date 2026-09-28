@@ -3,6 +3,7 @@ import type { GameState, PlayerS } from '../net.ts';
 import { PILL_ICONS } from '../render/players.ts';
 import type { LocalState } from '../local.ts';
 import { fruitSlots } from './menu.ts';
+import { GAME_NAME } from '../config.ts';
 
 /** Single player's HUD extras (§22): the campaign's banked score and fruits, and the level's label. */
 export interface SingleHud { score: number; fruits: number; label: string }
@@ -59,6 +60,9 @@ export function createHud(lobby: LobbyHooks) {
     if (card) lobby.onVote(Number(card.dataset.vote));
   });
   top.textContent = 'connecting…';
+  const padHint = div('pad-hint');
+  padHint.innerHTML = '🎮 ▲/stick roll · ◀▶ turn · Ⓐ jump · R-stick look · Ⓑ ready · Ⓧ/Ⓨ vote · Start pause';
+  padHint.hidden = true;
   const cache = new Map<HTMLElement, string>();
   const set = (el: HTMLElement, html: string) => {
     if (cache.get(el) === html) return;
@@ -84,6 +88,11 @@ export function createHud(lobby: LobbyHooks) {
 
   return {
     error(text: string) { set(top, esc(text)); },
+
+    /** Gamepad in use (phase 17): a hint with the controller glyphs, bottom left. */
+    padHint(on: boolean) {
+      padHint.hidden = !on;
+    },
 
     /** Hides every HUD panel (the main menu). */
     clear() { for (const el of [top, center, board, status, fx]) set(el, ''); },
@@ -154,7 +163,7 @@ export function createHud(lobby: LobbyHooks) {
           });
           cards.push(card(RANDOM_VOTE, '<div class="random">?</div><div class="cname">Random</div><div class="cmode dim">any level</div>'));
           const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : myVote < 0 ? 'Vote for the next level, then press <kbd>R</kbd>' : 'Press <kbd>R</kbd> to ready';
-          set(top, `Lobby${sound}`);
+          set(top, `${GAME_NAME} · Lobby${sound}`);
           set(center, `<div class="panel lobby"><h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
           set(status, LOBBY_CONTROLS);

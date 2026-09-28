@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  addPlayer, createWorld, loadLevel, step,
+  addPlayer, createWorld, loadLevel, step, TIMINGS, type TimingName,
   type DirName, type Input, type LevelJson, type PlayerState, type Rules, type SimEvent, type World,
 } from '../src/index.ts';
 
@@ -9,6 +9,17 @@ export type Spawn = [V3, DirName, DirName];
 
 /** Rules for test worlds. pushOff.test.ts turns push off and re-runs the pre-push suites under it. */
 export const rules: Rules = { push: true };
+
+/**
+ * Movement durations of the timing preset in use (phase 17). Live bindings: snappy.test.ts calls useTiming('snappy')
+ * before re-running the core movement suites, which import these from here instead of from src.
+ */
+export let ROLL_TICKS: number = TIMINGS.classic.roll, TURN_TICKS: number = TIMINGS.classic.turn, FLIP_TICKS: number = TIMINGS.classic.flip;
+export let CLIMB_TICKS: number = TIMINGS.classic.climb, JUMP_TICKS: number = TIMINGS.classic.jump, BOOST_TICKS: number = TIMINGS.classic.boost;
+export function useTiming(name: TimingName): void {
+  rules.timing = name;
+  ({ roll: ROLL_TICKS, turn: TURN_TICKS, flip: FLIP_TICKS, climb: CLIMB_TICKS, jump: JUMP_TICKS, boost: BOOST_TICKS } = TIMINGS[name]);
+}
 
 export const levelsDir = new URL('../../../levels/', import.meta.url);
 export const levelFiles = () => readdirSync(levelsDir).filter((f) => f.endsWith('.json'));

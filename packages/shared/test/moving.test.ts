@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  Action, addPlayer, createWorld, KNOCK_TICKS, loadLevel, mulberry32, ROLL_TICKS, setInput, step, STUN_TICKS, vec,
-  type SimEvent, type TileJson, type World,
+  Action, addPlayer, createWorld, KNOCK_TICKS, loadLevel, mulberry32, setInput, step, STUN_TICKS, vec, type SimEvent, type TileJson, type World,
 } from '../src/index.ts';
-import { input, makeWorld, player, readLevelJson, row, run, serialize, type Spawn } from './util.ts';
+import { input, makeWorld, player, readLevelJson, row, run, serialize, type Spawn, ROLL_TICKS } from './util.ts';
 
 // Moving collisions (§20, phase 14d). Floor at y=0, balls at y=1.
 type V3 = [number, number, number];

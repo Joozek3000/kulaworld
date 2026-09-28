@@ -1,4 +1,5 @@
 import { FRUITS, type LevelCard } from '@kula/shared';
+import { GAME_NAME, GAME_VERSION } from '../config.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -14,7 +15,9 @@ export type Screen =
   | { kind: 'single'; canContinue: string | null; highest: number; names: string[] }
   | { kind: 'levels'; highest: number; names: string[]; best: (number | null)[] }
   | { kind: 'multi'; name: string; error?: string }
-  | { kind: 'settings'; volume: number }
+  | { kind: 'settings'; volume: number; music: number; timing: string | null }
+  | { kind: 'controls'; rows: { action: string; label: string; keys: string; pad: string }[]; waiting: string | null }
+  | { kind: 'credits'; rows: { slot: string; track: string; artist: string; source: string; licence: string }[] }
   | { kind: 'reset' }
   | { kind: 'pause' }
   | { kind: 'card'; name: string; card: LevelCard; bonus: boolean; painted: boolean; par: number; best: number | null; score: number; finished: boolean }
@@ -39,7 +42,7 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
     if (t.dataset.act) onAction(t.dataset.act, t.value, root);
   });
   addEventListener('keydown', (e) => {
-    if (root.hidden || e.code !== 'Enter' || e.repeat) return;
+    if (root.hidden || e.code !== 'Enter' || e.repeat || e.defaultPrevented) return;
     const b = root.querySelector<HTMLButtonElement>('button.primary:not([disabled])');
     if (b) { e.preventDefault(); b.click(); }
   });
@@ -48,7 +51,7 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
   const html = (s: Screen): string => {
     switch (s.kind) {
       case 'main':
-        return `<h1 class="logo">KULAWORLD</h1><div class="col">${btn('Single Player', 'single', { primary: true })}${btn('Multiplayer', 'multi')}${btn('Settings', 'settings')}${btn('Reset Progress', 'reset')}</div>`;
+        return `<h1 class="logo">${GAME_NAME.toUpperCase()}</h1><div class="col">${btn('Single Player', 'single', { primary: true })}${btn('Multiplayer', 'multi')}${btn('Settings', 'settings')}${btn('Reset Progress', 'reset')}</div>`;
       case 'single':
         return `<h2>Single Player</h2><div class="col">${s.canContinue ? btn(`Continue <small>${esc(s.canContinue)}</small>`, 'continue', { primary: true }) : ''}`
           + `${btn('New Game', 'new', { primary: !s.canContinue })}${btn(`Level Select <small>${s.highest} reached</small>`, 'levels')}${btn('Back', 'main')}</div>`;
@@ -60,7 +63,19 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
           + `${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}<div class="col">${btn('Join lobby', 'join', { primary: true })}${btn('Back', 'main')}</div>`;
       case 'settings':
         return `<h2>Settings</h2><label class="field">Volume <input type="range" min="0" max="1" step="0.05" value="${s.volume}" data-act="volume"></label>`
-          + `<div class="col">${btn('Sounds &amp; feel… <small>F4</small>', 'tuning')}${btn('Back', 'main', { primary: true })}</div>`;
+          + `<label class="field">Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" data-act="music"></label>`
+          + `<div class="col">${btn('Controls…', 'controls')}${btn('Sounds &amp; feel… <small>F4</small>', 'tuning')}${btn('Credits', 'credits')}`
+          + `${s.timing ? btn(`Timing: ${esc(s.timing)} <small>dev · single player</small>`, 'timing') : ''}${btn('Back', 'main', { primary: true })}</div>`;
+      case 'controls':
+        return `<h2>Controls</h2><table class="binds"><tr><th></th><th>Keyboard</th><th>Pad</th></tr>${s.rows.map((r) => `<tr><td>${esc(r.label)}</td>`
+          + `<td>${btn(s.waiting === `key:${r.action}` ? '<i>press a key…</i>' : esc(r.keys) || '—', 'bindKey', { arg: r.action })}</td>`
+          + `<td>${btn(s.waiting === `pad:${r.action}` ? '<i>press a button…</i>' : esc(r.pad) || '—', 'bindPad', { arg: r.action })}</td></tr>`).join('')}</table>`
+          + `<div class="sub">Esc cancels a rebind. The left stick always rolls and turns, the right stick always looks.</div>`
+          + `<div class="row">${btn('Reset to defaults', 'bindReset')}${btn('Back', 'settings', { primary: true })}</div>`;
+      case 'credits':
+        return `<h2>Credits</h2>${s.rows.length ? `<table class="binds"><tr><th>Slot</th><th>Track</th><th>Artist</th><th>Licence</th></tr>${s.rows.map((r) =>
+          `<tr><td>${esc(r.slot)}</td><td>${r.source ? `<a href="${esc(r.source)}" target="_blank" rel="noopener">${esc(r.track)}</a>` : esc(r.track)}</td><td>${esc(r.artist)}</td><td>${esc(r.licence)}</td></tr>`).join('')}</table>`
+          : '<p>No music yet.</p>'}<p class="sub">${GAME_NAME} v${GAME_VERSION} · made with Three.js and Colyseus</p><div class="col">${btn('Back', 'settings', { primary: true })}</div>`;
       case 'reset':
         return `<h2>Reset progress?</h2><p>Your campaign, level select and best times are deleted.</p><div class="row">${btn('Reset', 'resetYes')}${btn('Cancel', 'main', { primary: true })}</div>`;
       case 'pause':
@@ -79,10 +94,10 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
           + `<div class="col">${s.finished ? btn('Finish', 'finish', { primary: true }) : btn('Next level', 'next', { primary: true })}</div>`;
       }
       case 'gameOver':
-        return `<h1 class="over">GAME OVER</h1><p>Back to the checkpoint: level ${s.checkpoint}, ${esc(s.name)} (score ${s.score})</p>`
+        return `<h1 class="over">GAME OVER</h1><div class="sub">${GAME_NAME}</div><p>Back to the checkpoint: level ${s.checkpoint}, ${esc(s.name)} (score ${s.score})</p>`
           + `<div class="col">${btn('Restart from checkpoint', 'next', { primary: true })}${btn('Quit to Menu', 'quit')}</div>`;
       case 'done':
-        return `<h1 class="logo">You did it!</h1><p>The campaign is complete. Final score <b>${s.score}</b></p><div class="col">${btn('Main menu', 'quit', { primary: true })}</div>`;
+        return `<h1 class="logo">You did it!</h1><p>You finished the ${GAME_NAME} campaign. Final score <b>${s.score}</b></p><div class="col">${btn('Main menu', 'quit', { primary: true })}</div>`;
     }
   };
 
@@ -90,11 +105,25 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
     get screen() { return current; },
     show(s: Screen) {
       current = s.kind;
-      root.innerHTML = `<div class="mpanel ${s.kind}">${html(s)}</div>`;
+      root.innerHTML = `<div class="mpanel ${s.kind}">${html(s)}</div><div class="version">${GAME_NAME} v${GAME_VERSION}</div>`;
       root.hidden = false;
       root.querySelector<HTMLInputElement>('#menu-name')?.focus();
     },
     hide() { current = null; root.hidden = true; root.innerHTML = ''; },
+    /** Gamepad (phase 17): move the focus ring through the enabled buttons, wrapping. */
+    focusStep(dir: -1 | 1) {
+      const buttons = [...root.querySelectorAll<HTMLButtonElement>('button[data-act]:not([disabled])')];
+      if (!buttons.length) return;
+      const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const start = i < 0 ? Math.max(0, buttons.findIndex((b) => b.classList.contains('primary'))) - (dir > 0 ? 1 : 0) : i;
+      buttons[(start + dir + buttons.length) % buttons.length].focus();
+    },
+    /** Gamepad confirm: the focused button, else the primary one. */
+    confirm() {
+      const f = document.activeElement;
+      const b = f instanceof HTMLButtonElement && root.contains(f) ? f : root.querySelector<HTMLButtonElement>('button.primary:not([disabled])');
+      b?.click();
+    },
     get name() { return root.querySelector<HTMLInputElement>('#menu-name')?.value.trim() ?? ''; },
   };
 }

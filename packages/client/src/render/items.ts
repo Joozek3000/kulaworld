@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { dirVec, type Dir } from '@kula/shared';
 import type { GameState, ItemS } from '../net.ts';
 import { art } from './art.ts';
+import { addXray } from './xray.ts';
 
 const keyGeo = new THREE.OctahedronGeometry(0.22);
 const keyMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0x6b5200, roughness: 0.3, metalness: 0.4 });
@@ -39,6 +40,8 @@ export class ItemsView {
   private meshes = new Map<string, THREE.Object3D>();
   private popping: { mesh: THREE.Object3D; materials: THREE.Material[]; start: number }[] = [];
   private exitMat = new THREE.MeshStandardMaterial({ color: LOCKED, roughness: 0.4 });
+  /** 0..1: keys, the exit and score items grow and bob (the level fly-over, phase 17). */
+  highlight = 0;
 
   constructor(private scene: THREE.Scene) {}
 
@@ -50,6 +53,8 @@ export class ItemsView {
       let m = this.meshes.get(key);
       if (!m) this.meshes.set(key, (m = this.create(item)));
       m.visible = visible;
+      const h = this.highlight;
+      m.scale.setScalar(1 + h * (0.8 + 0.2 * Math.sin(timeSec * 6)));
       if (item.kind !== 'exit') { // keys and score items spin about their up
         up.copy(dirVec(item.up as Dir) as THREE.Vector3Like);
         m.quaternion.setFromUnitVectors(Y, up).multiply(spin.setFromAxisAngle(Y, timeSec * 2));
@@ -97,6 +102,7 @@ export class ItemsView {
     else if (!exit && art.models['key-marigold']) m = art.models['key-marigold'].clone(true);
     else m = new THREE.Mesh(exit ? exitGeo : keyGeo, exit ? this.exitMat : keyMat);
     m.userData.kind = item.kind;
+    addXray(m, item.kind === 'key' ? 0xffd23f : exit ? 0x3ddc6f : item.kind === 'gem' ? 0x3fd0ff : 0xf2c230); // phase 17
     m.position.set(item.x, item.y, item.z);
     if (exit) {
       const ceramic = m instanceof THREE.Group;
