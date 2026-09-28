@@ -34,7 +34,33 @@ export const PlayerS = schema({
   /** Lobby level vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
   vote: t.int8().default(-1),
   spectating: t.boolean().default(false),
+  /** Matches (phase 18): the match-length vote (0..2 → 3/5/7 rounds, -1 none) and the rematch vote at matchEnd. */
+  lengthVote: t.int8().default(-1),
+  rematch: t.boolean().default(false),
 }, 'PlayerS');
+
+/**
+ * A player's line on the match board (phase 18, §23). Stays after they leave (`left`, shown greyed). `roundPoints`
+ * and `breakdown` are the last scored round's ("Exit +5 · KO ×1 +1").
+ */
+export const StandingS = schema({
+  id: t.string(),
+  name: t.string(),
+  color: t.string(),
+  points: t.int16().default(0),
+  roundPoints: t.int16().default(0),
+  breakdown: t.string().default(''),
+  /** The round the last scoring was for (the client pops it once per round). */
+  scoredRound: t.uint8().default(0),
+  left: t.boolean().default(false),
+  wins: t.uint8().default(0),
+  knockouts: t.uint16().default(0),
+  pushes: t.uint16().default(0),
+  stomps: t.uint16().default(0),
+  deaths: t.uint16().default(0),
+  keys: t.uint16().default(0),
+}, 'StandingS');
+export type StandingS = SchemaType<typeof StandingS>;
 export type PlayerS = SchemaType<typeof PlayerS>;
 
 export const ItemS = schema({
@@ -46,7 +72,7 @@ export const ItemS = schema({
 export type ItemS = SchemaType<typeof ItemS>;
 
 export const GameState = schema({
-  phase: t.string(), // 'lobby' | 'countdown' | 'playing' | 'results'
+  phase: t.string(), // 'lobby' | 'countdown' | 'playing' | 'results' | 'matchEnd' (phase 18)
   /** Round clock: -countdown..0 during countdown, the sim tick while playing, keeps counting in results. */
   tick: t.int32(),
   phaseEndTick: t.int32(),
@@ -60,6 +86,13 @@ export const GameState = schema({
   warnBand: t.int8().default(-1),
   nextCrumbleTick: t.int32().default(-1),
   winnerId: t.string(), // '' = none / draw
+  /** Matches (phase 18, §23): the round being (or last) played (0 before the first), the match length, the crowned
+   * leader ('' = nobody), the board, and the length-vote counts (3/5/7) shown before round 1. */
+  matchRound: t.uint8().default(0),
+  matchRounds: t.uint8().default(5),
+  crownId: t.string().default(''),
+  standings: t.map(StandingS),
+  lengthVotes: t.array('uint8'),
   players: t.map(PlayerS),
   items: t.map(ItemS),
   /** Pickups on the map (phase 15a), by id; `kind` is the pill type. */

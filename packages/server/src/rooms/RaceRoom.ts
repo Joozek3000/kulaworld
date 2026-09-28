@@ -2,18 +2,20 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
 import { Room, type Client } from 'colyseus';
 import {
-  Action, addPlayer, createWorld, InputQueue, loadLevel, mulberry32, pickCandidates, removePlayer, setInput, step, tallyVotes,
-  TICK_RATE, validateLevel, validVote, voteCounts, type InputMsg, type Level, type SimEvent, type World,
+  Action, addPlayer, addRoundStats, createWorld, crownOf, emptyStats, InputQueue, loadLevel, MATCH_LENGTHS, mulberry32, pickCandidates, removePlayer,
+  scoreRound, setInput, step, tallyVotes, TICK_RATE, validateLevel, validVote, voteCounts, type InputMsg, type Level, type MatchStats, type SimEvent, type World,
 } from '@kula/shared';
 import { config } from '../config.ts';
-import { GameState, PlayerS, syncSchema } from '../schema/State.ts';
+import { GameState, PlayerS, StandingS, syncSchema } from '../schema/State.ts';
 
 const COUNTDOWN_TICKS = 3 * TICK_RATE;
 const RESULTS_TICKS = 5 * TICK_RATE;
+/** The end of a match (phase 18): podium, stats card and the rematch vote. */
+const MATCH_END_TICKS = 12 * TICK_RATE;
 const MAX_INPUTS_PER_SEC = 30;
 const PALETTE = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45'];
 
-type Phase = 'lobby' | 'countdown' | 'playing' | 'results';
+type Phase = 'lobby' | 'countdown' | 'playing' | 'results' | 'matchEnd';
 
 /**
  * Soak metric (phase 12, logged with each round's result): ticks in which at least two live players have both sat in
@@ -102,6 +104,11 @@ export class RaceRoom extends Room<{ state: GameState }> {
   /** Per player: inputs waiting for their tick (§17), and the last one applied (echoed as ackSeq/ackTick). */
   private queues = new Map<string, InputQueue>();
   private warned = new Set<string>();
+  /** Matches (phase 18): this round's events (for scoring and stats), and the crown holder while it's played. */
+  private roundEvents: SimEvent[] = [];
+  private roundCrown: string | null = null;
+  /** A rematch keeps the match length: no length vote before its first round. */
+  private lengthLocked = false;
 
   onCreate() {
     this.pool = levelPool();
@@ -109,6 +116,10 @@ export class RaceRoom extends Room<{ state: GameState }> {
     this.onMessage('input', (client, msg) => this.onInput(client, msg));
     this.onMessage('ready', (client) => this.onReady(client));
     this.onMessage('vote', (client, option) => this.onVote(client, option));
+    this.onMessage('length', (client, option) => this.onLengthVote(client, option));
+    this.onMessage('rematch', (client, yes) => this.onRematch(client, yes));
+    this.state.matchRounds = config.matchRounds;
+    if (!this.state.lengthVotes.length) this.state.lengthVotes.push(0, 0, 0);
     this.setFixedTimestep(() => this.update(), TICK_RATE);
     this.setPhase('lobby');
   }
@@ -119,6 +130,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
     const color = PALETTE.find((c) => !used.has(c)) ?? PALETTE[0];
     const spectating = this.state.phase !== 'lobby';
     this.state.players.set(client.sessionId, new PlayerS({ id: client.sessionId, name, color, spectating }));
+    // Matches (§23): a new player joins the board with 0 points.
+    this.state.standings.set(client.sessionId, new StandingS({ id: client.sessionId, name, color }));
     console.log(`join ${name} (${client.sessionId})${spectating ? ' as spectator' : ''}, players=${this.state.players.size}`);
   }
 
@@ -126,6 +139,8 @@ export class RaceRoom extends Room<{ state: GameState }> {
     const id = client.sessionId;
     console.log(`leave ${this.nameOf(id)} (${id}), players=${this.state.players.size - 1}`);
     this.state.players.delete(id);
+    const st = this.state.standings.get(id);
+    if (st) st.left = true; // their points stay on the board, greyed (§23)
     this.inputCounts.delete(id);
     this.queues.delete(id);
     this.syncVotes();
@@ -133,7 +148,78 @@ export class RaceRoom extends Room<{ state: GameState }> {
       removePlayer(this.world, id);
       if (this.world.players.length === 0) this.setPhase('lobby');
     }
+    if (!this.state.players.size) this.resetMatch(false); // everyone left: the next ones start a fresh match
+    this.syncLengthVotes();
     this.maybeStart();
+  }
+
+  /** Lobby before round 1 only: 0..2 for 3/5/7 rounds. Voting again changes the vote. */
+  private onLengthVote(client: Client, option: unknown) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p || this.state.phase !== 'lobby' || this.state.matchRound > 0 || this.lengthLocked) return;
+    if (option !== 0 && option !== 1 && option !== 2) return;
+    p.lengthVote = option;
+    this.syncLengthVotes();
+  }
+
+  private syncLengthVotes() {
+    const counts = [0, 0, 0];
+    for (const p of this.state.players.values()) if (p.lengthVote >= 0) counts[p.lengthVote]++;
+    counts.forEach((n, i) => { if (this.state.lengthVotes[i] !== n) this.state.lengthVotes[i] = n; });
+  }
+
+  /** matchEnd only: yes/no to a rematch. */
+  private onRematch(client: Client, yes: unknown) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p || this.state.phase !== 'matchEnd' || typeof yes !== 'boolean') return;
+    p.rematch = yes;
+  }
+
+  /**
+   * A new match (§23): points and stats back to 0 for everyone here, leavers off the board. `rematch` keeps the length
+   * (no length vote); otherwise the length goes back to the default and the lobby votes on it.
+   */
+  private resetMatch(rematch: boolean) {
+    const s = this.state;
+    s.matchRound = 0;
+    s.crownId = '';
+    this.lengthLocked = rematch;
+    if (!rematch) s.matchRounds = config.matchRounds;
+    s.standings.clear();
+    for (const [id, p] of s.players) s.standings.set(id, new StandingS({ id, name: p.name, color: p.color }));
+    for (const p of s.players.values()) { p.lengthVote = -1; p.rematch = false; }
+    this.syncLengthVotes();
+  }
+
+  /** The match length vote: the most-voted length; on a tie the default if it's among them, else the shortest. */
+  private tallyLength(): number {
+    const v = [...this.state.lengthVotes];
+    const top = Math.max(...v);
+    if (!top) return this.state.matchRounds;
+    const best: number[] = v.flatMap((n, i) => (n === top ? [MATCH_LENGTHS[i]] : []));
+    return best.includes(this.state.matchRounds) ? this.state.matchRounds : best[0];
+  }
+
+  /** A round ended: score it (§23), add the stats, move the crown (the strict leader among players still here). */
+  private scoreMatchRound(world: World) {
+    const s = this.state;
+    const scores = scoreRound(world.mode, world.result, this.roundEvents, world.players, this.roundCrown);
+    const stats = new Map<string, MatchStats>();
+    for (const id of s.standings.keys()) stats.set(id, emptyStats());
+    addRoundStats(stats, this.roundEvents);
+    for (const [id, st] of s.standings) {
+      const sc = scores.get(id), add = stats.get(id)!;
+      st.roundPoints = sc?.points ?? 0;
+      st.breakdown = sc ? sc.breakdown.map((b) => `${b.label} +${b.points}`).join(' · ') : '';
+      st.scoredRound = s.matchRound;
+      st.points += st.roundPoints;
+      st.wins += add.wins; st.knockouts += add.knockouts; st.pushes += add.pushes; st.stomps += add.stomps; st.deaths += add.deaths; st.keys += add.keys;
+    }
+    const before = s.crownId;
+    const present = new Map([...s.standings].filter(([id]) => s.players.has(id)).map(([id, st]) => [id, st.points]));
+    s.crownId = crownOf(present) ?? '';
+    const board = [...s.standings.values()].map((st) => `${st.name}:${st.points}(+${st.roundPoints})`).join(' ');
+    console.log(`match round ${s.matchRound}/${s.matchRounds}: ${board}, crown ${s.crownId ? this.nameOf(s.crownId) : 'nobody'}${s.crownId !== before ? ' (changed)' : ''}`);
   }
 
   private onReady(client: Client) {
@@ -210,7 +296,16 @@ export class RaceRoom extends Room<{ state: GameState }> {
         break;
       }
       case 'results':
-        if (++s.tick >= s.phaseEndTick) this.setPhase('lobby');
+        if (++s.tick >= s.phaseEndTick) this.setPhase(s.matchRound >= s.matchRounds ? 'matchEnd' : 'lobby');
+        break;
+      case 'matchEnd':
+        if (++s.tick >= s.phaseEndTick) {
+          const here = [...s.players.values()], yes = here.filter((p) => p.rematch).length;
+          const rematch = here.length > 0 && yes * 2 > here.length;
+          console.log(`match over: rematch ${yes}/${here.length} → ${rematch ? 'rematch' : 'fresh lobby'}`);
+          this.resetMatch(rematch);
+          this.setPhase('lobby');
+        }
         break;
     }
   }
@@ -239,6 +334,13 @@ export class RaceRoom extends Room<{ state: GameState }> {
         this.level = this.pool.find((l) => l.id === id)!;
         this.lastLevelId = s.levelId = id;
         const level = config.antiStalemate ? this.level : { ...this.level, heat: null, crumble: this.level.mode === 'race' ? null : this.level.crumble };
+        // Matches (§23): the first round fixes the length from the vote; the crown is fixed for the round.
+        if (s.matchRound === 0 && !this.lengthLocked) s.matchRounds = this.tallyLength();
+        s.matchRound++;
+        this.roundCrown = s.crownId || null;
+        this.roundEvents = [];
+        for (const p of s.players.values()) p.lengthVote = -1;
+        this.syncLengthVotes();
         const world = createWorld(level, ++this.round, { push: config.push, chain: config.antiStalemate, timing: config.timing });
         s.timing = config.timing;
         for (const [id, p] of s.players) if (!p.spectating) addPlayer(world, id, p.name);
@@ -260,14 +362,22 @@ export class RaceRoom extends Room<{ state: GameState }> {
         syncSchema(world, s);
         s.tick = -COUNTDOWN_TICKS;
         s.phaseEndTick = 0;
-        console.log(`phase countdown: round ${this.round}, ${world.players.length} players, level ${this.level.id} (${this.level.mode}), push ${world.rules.push ? 'on' : 'off'}, timing ${config.timing}`);
+        console.log(`phase countdown: round ${this.round} (match round ${s.matchRound}/${s.matchRounds}), ${world.players.length} players, level ${this.level.id} (${this.level.mode}), push ${world.rules.push ? 'on' : 'off'}, timing ${config.timing}`);
         break;
       }
+      case 'matchEnd':
+        this.world = null;
+        s.tick = 0;
+        s.phaseEndTick = MATCH_END_TICKS;
+        for (const p of s.players.values()) p.rematch = false;
+        console.log(`phase matchEnd: ${[...s.standings.values()].sort((a, b) => b.points - a.points).map((st) => `${st.name}:${st.points}`).join(' ')}`);
+        break;
       case 'playing':
         s.phaseEndTick = this.world!.timeLimitTick;
         console.log('phase playing');
         break;
       case 'results': {
+        this.scoreMatchRound(this.world!);
         const result = this.world!.result!;
         s.winnerId = result.winnerId ?? '';
         s.phaseEndTick = s.tick + RESULTS_TICKS;
@@ -284,6 +394,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
 
   private emit(e: SimEvent) {
     this.broadcast('event', e);
+    this.roundEvents.push(e);
     const who = 'playerId' in e ? this.nameOf(e.playerId) : '';
     const pills = (id: string) => this.world?.players.find((p) => p.id === id)?.effects.map((x) => x.type) ?? [];
     if (e.type === 'push' || e.type === 'cradle') this.knockPills.set(e.victimId, pills(e.pusherId));

@@ -595,3 +595,18 @@ Kula World's campaign, played fully in the browser with no server: the same shar
 
 **Progress** is saved in localStorage (try/catch): the highest level reached, checkpoint score, fruits collected, best time per level. Resetting is available from the menu.
 
+## 23. Matches (phase 18)
+
+Multiplayer rounds are grouped into a **match**, so there's something at stake beyond a single round.
+
+- **Length:** `MATCH_ROUNDS` (lobby option 3 / 5 / 7, default 5, chosen by vote alongside the level; the host default comes from `.env` `MATCH_ROUNDS`). Level vote each round as now.
+- **Points per round:**
+  - **Race:** exit winner 5. Everyone else is ranked by keys held at the end (ties share the higher place): 2nd 3, 3rd 2, 4th+ 1 if they hold ≥ 1 key, else 0. A timeout with no exit ranks everyone by keys.
+  - **Knockout:** by elimination order: last alive 5, 2nd 3, 3rd 2, others 1. Plus **+1 per knockout** credited that round (cap +3).
+  - **Race with push:** +1 per knockout credited (cap +2), so fighting pays in races too.
+- **Crown:** the match leader (most points; ties → nobody) wears a crown, visible to everyone and drawn through walls with the x-ray pass.
+  - Knocking out the crowned player gives **+1 bonus**, so the leader is a target.
+- **End of match:** a podium scene (the top 3 balls on stepped blocks, confetti, a stinger), then a stats card per player (points, wins, knockouts, pushes, stomps, deaths, keys) and "MVP" badges (most knockouts, most keys, fewest deaths). Then back to a fresh lobby, with a Rematch vote (same players, points reset).
+- **Joining mid-match:** a new player joins with 0 points and spectates until the next round's lobby, as now. **Leaving:** their points stay on the board, greyed.
+- Match state lives in the room (server), not the sim. Scoring is a pure function in shared (`scoreRound(result, events) → points`) so it's testable.
+

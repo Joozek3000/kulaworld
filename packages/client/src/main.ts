@@ -5,6 +5,7 @@ import { ACTION_LABELS, ACTIONS, keyLabel, loadBindings, PAD_GLYPHS, rebind, res
 import { connect, playerName, serverUrl, type GameSource, type Net } from './net.ts';
 import { campaignFrom, loadSave, resetSave, SinglePlayer, type Outcome } from './campaign.ts';
 import { SingleTilesView } from './render/single.ts';
+import { Podium, PODIUM_AT, type PodiumEntry } from './render/podium.ts';
 import { createMenu, FRUIT_ICONS } from './ui/menu.ts';
 import { GAME_NAME } from './config.ts';
 
@@ -21,7 +22,7 @@ import { Fx } from './render/fx.ts';
 import { createScene } from './render/scene.ts';
 import { levelPreview } from './render/preview.ts';
 import { createDebug } from './ui/debug.ts';
-import { createHud, type SingleHud } from './ui/hud.ts';
+import { createHud, PODIUM_SEC, type SingleHud } from './ui/hud.ts';
 import { createTuningPanel } from './ui/tuning.ts';
 import { AudioEngine } from './audio/engine.ts';
 import { Music, type MusicSlot } from './audio/music.ts';
@@ -43,7 +44,10 @@ let net: GameSource | null = null;
 let online: Net | null = null;
 let sp: SinglePlayer | null = null;
 let predict: LocalPrediction | null = null;
-const hud = createHud({ onVote: (i) => net?.sendVote(i), preview: levelPreview, findLevel });
+const hud = createHud({
+  onVote: (i) => net?.sendVote(i), preview: levelPreview, findLevel,
+  onLength: (i) => net?.sendLength?.(i), onRematch: (yes) => net?.sendRematch?.(yes), // matches (phase 18)
+});
 await loadArt();
 const view = createScene();
 view.setSky();
@@ -51,6 +55,7 @@ const debug = createDebug();
 const players = new PlayersView(view.scene);
 const items = new ItemsView(view.scene);
 const pills = new PillsView(view.scene);
+const podium = new Podium(view.scene); // the end of a match (phase 18)
 const rig = new CameraRig(view.camera);
 const fx = new Fx(view.scene);
 const audio = new AudioEngine();
@@ -136,7 +141,13 @@ let screenshot = false;
 let frozen = false;
 const bindings = loadBindings();
 const input = setupInput({
-  sendInput: (i) => net?.sendInput(i), sendReady: () => net?.sendReady(), sendVote: (o) => net?.sendVote(o),
+  sendInput: (i) => net?.sendInput(i), sendVote: (o) => net?.sendVote(o),
+  // Ready doubles as the rematch vote at the end of a match (phase 18).
+  sendReady: () => {
+    const me = net?.state.players.get(net.sessionId);
+    if (net?.state.phase === 'matchEnd') net.sendRematch?.(!me?.rematch);
+    else net?.sendReady();
+  },
 }, {
   onPress: debug.press,
   onDebug: debug.toggle,
@@ -360,7 +371,7 @@ function quitToMenu(): void {
 hud.clear();
 menu.show({ kind: 'main' });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, get predict() { return predict; }, debug, latency } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, camera: view.camera, get predict() { return predict; }, debug, latency } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;
@@ -449,8 +460,11 @@ function musicSlots(): MusicSlot[] {
     return SINGLE_SLOTS[Math.min(3, Math.floor((sp.campaign.level - 1) / 5))]; // a "world" is 5 levels
   }
   const s = net.state;
-  return s.phase === 'results' ? SLOTS.results : s.phase === 'lobby' ? SLOTS.menu : s.mode === 'knockout' ? SLOTS.knockout : SLOTS.race;
+  return s.phase === 'results' || s.phase === 'matchEnd' ? SLOTS.results : s.phase === 'lobby' ? SLOTS.menu : s.mode === 'knockout' ? SLOTS.knockout : SLOTS.race;
 }
+
+/** The last crown seen (phase 18), for the "takes the lead" toast; undefined until the first state. */
+let lastCrown: string | undefined;
 
 /** The main menu (15b): an empty level orbiting slowly behind the panel. */
 const NO_GAME = { phase: 'lobby', tick: 0, phaseEndTick: 0, levelId: '', winnerId: '', players: new Map(), items: new Map(), pickups: new Map(),
@@ -535,9 +549,29 @@ view.renderer.setAnimationLoop((now: number) => {
   const pose = players.poseOf(out ? mine!.eliminatedBy : me);
   const mode: CameraMode = !active || !mine || mine.spectating || (out && !pose) ? 'orbit' : pose ? 'follow' : 'hold';
   const fly = flyProgress(s, renderTick);
-  if (fly >= 0) rig.flyover(fly, pose, bounds.center, bounds.radius);
-  else rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
-  view.fitFog(bounds.center, bounds.radius);
+  // Matches (phase 18): the crown follows the leader; the end of a match cuts to the podium.
+  players.crownId = s.crownId ?? '';
+  if (s.crownId !== lastCrown) {
+    if (s.crownId && lastCrown !== undefined) hud.toast(`👑 ${nameOf(s.crownId)} take${s.crownId === me ? '' : 's'} the lead`, colorOf(s.crownId));
+    lastCrown = s.crownId;
+  }
+  if (s.phase === 'matchEnd') {
+    if (!podium.shown) {
+      const top: PodiumEntry[] = [];
+      s.standings?.forEach((st) => top.push({ name: st.name, color: st.color, points: st.points }));
+      podium.show(top.sort((a, b) => b.points - a.points).slice(0, 3));
+      audio.play('win', {}, 'ui');
+    }
+    podium.update(dtMs / 1000, now / 1000);
+    podium.labelsVisible(s.tick < PODIUM_SEC * TICK_RATE); // the stats card takes over after PODIUM_SEC
+    podium.place(view.camera);
+    view.fitFog(PODIUM_AT, 6);
+  } else {
+    podium.hide();
+    if (fly >= 0) rig.flyover(fly, pose, bounds.center, bounds.radius);
+    else rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
+    view.fitFog(bounds.center, bounds.radius);
+  }
   // Off-screen enemy arrows (multiplayer only; phase 17).
   offscreen.begin(view.camera, !sp && active && !!mine && !mine.spectating ? players.positionOf(me) : null);
   if (!sp && active) players.eachBall(offscreenBall);

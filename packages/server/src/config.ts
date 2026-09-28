@@ -20,6 +20,8 @@ export const config = {
    * rules, for before/after soaks. Default on.
    */
   antiStalemate: env.ANTI_STALEMATE !== 'off',
+  /** Match length default (phase 18): MATCH_ROUNDS=3|5|7, default 5. The lobby votes on it before round 1. */
+  matchRounds: [3, 5, 7].includes(Number(env.MATCH_ROUNDS)) ? Number(env.MATCH_ROUNDS) : 5,
   /** Movement timing preset (phase 17): TIMING=classic|snappy, default classic. */
   timing: (isTimingName(env.TIMING) ? env.TIMING : 'classic') as TimingName,
   latencyMs: prod ? 0 : Number(env.LATENCY_MS ?? 0),

@@ -14,7 +14,7 @@ export function createOffscreen() {
   let camera: THREE.Camera, me: THREE.Vector3 | null = null;
 
   /** One ball: shows (or hides) its arrow. Call between begin() and end(). */
-  const ball = (id: string, at: THREE.Vector3, color: string, local: boolean) => {
+  const ball = (id: string, at: THREE.Vector3, color: string, local: boolean, crowned = false) => {
     if (local || !me) return;
     const d = at.distanceTo(me);
     if (d > RANGE) return;
@@ -33,6 +33,7 @@ export function createOffscreen() {
       arrows.set(id, el);
     }
     el.style.color = color;
+    el.classList.toggle('crowned', crowned); // phase 18: the leader's arrow wears a crown
     el.style.opacity = String(1 - (d / RANGE) * 0.7);
     el.style.transform = `translate(${x + MARGIN}px, ${y + MARGIN}px) rotate(${Math.atan2(-v.y, v.x)}rad)`;
     el.hidden = false;

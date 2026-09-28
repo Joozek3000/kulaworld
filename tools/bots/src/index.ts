@@ -10,13 +10,16 @@ import {
 const { values } = parseArgs({
   options: {
     count: { type: 'string', default: '1' },
-    behaviour: { type: 'string', default: 'wander' }, // comma list, assigned round-robin: seek,wander,bully,blocker
+    behaviour: { type: 'string', default: 'wander' }, // comma list, assigned round-robin: seek,wander,bully,blocker,rival
     duration: { type: 'string' }, // seconds; default: run until Ctrl+C
     server: { type: 'string', default: 'ws://localhost:2567' },
     skill: { type: 'string', default: '0.5' }, // 0..1: reaction speed and reliability; 1 = instant, never misses
+    length: { type: 'string', default: 'random' }, // match-length vote (phase 18): 3, 5, 7 or random
   },
 });
-const BEHAVIOURS = ['wander', 'seek', 'bully', 'blocker'] as const;
+const BEHAVIOURS = ['wander', 'seek', 'bully', 'blocker', 'rival'] as const;
+/** rival (phase 18): hunts the crowned player (or the points leader) when it's this many moves away or closer. */
+const RIVAL_MOVES = 4;
 type Behaviour = (typeof BEHAVIOURS)[number];
 const count = Number(values.count);
 const duration = values.duration === undefined ? Infinity : Number(values.duration);
@@ -26,6 +29,8 @@ if (!(duration > 0)) throw new Error(`--duration must be a positive number of se
 for (const b of behaviours) if (!BEHAVIOURS.includes(b as Behaviour)) throw new Error(`unknown --behaviour ${b} (available: ${BEHAVIOURS.join(', ')})`);
 const skill = Number(values.skill);
 if (!(skill >= 0 && skill <= 1)) throw new Error(`--skill must be 0..1, got ${values.skill}`);
+const lengthVote = values.length === 'random' ? -1 : [3, 5, 7].indexOf(Number(values.length));
+if (values.length !== 'random' && lengthVote < 0) throw new Error(`--length must be 3, 5, 7 or random, got ${values.length}`);
 /**
  * Human-like reactions (phase 10b) for *reactive* inputs (the defensive hop, jumping over a blocker). At the default
  * skill 0.5: 150-300 ms before reacting and a 25 % chance of missing a hop. Skill 1 is instant and never misses (the
@@ -44,6 +49,8 @@ interface Stats {
   stomps: number; stomped: number; clashes: number; dodges: number; missedDodges: number; detours: number; heatEscapes: number; burns: number;
   cradles: number; edgePushes: number; headOns: number; sideHits: number; sideTries: number; teleports: number; zapped: number; toggles: number;
   pillDetours: number;
+  /** rival (phase 18): times it switched to hunting the crown / leader. */
+  rivalHunts: number;
   /** Pills taken (phase 15a), by type. */
   pills: Record<string, number>;
 }
@@ -417,7 +424,22 @@ const samePose = (a: Pose, b: Pose) => cellKey(a.cell) === cellKey(b.cell) && a.
  * Executes one step at a time: press, then release once the action has started (holding fwd would chain rolls).
  * Replans when the target disappears, the pose drifts from the plan, or a move is blocked twice.
  */
-function seekBrain(ctx: Ctx, bully: boolean) {
+/**
+ * rival (phase 18): who to go after. The crowned player, or before any crown the points leader (the first on a tie);
+ * never itself, a spectator or a dead ball.
+ */
+function rivalTarget(state: { players: { get(id: string): SchemaPlayer | undefined }; crownId?: string; standings?: MapOf<{ points: number }> }, selfId: string): string | null {
+  const live = (id: string) => { const o = state.players.get(id); return !!o && !o.spectating && o.action !== Action.Dead; };
+  if (state.crownId) return state.crownId !== selfId && live(state.crownId) ? state.crownId : null;
+  let best: string | null = null, top = 0;
+  state.standings?.forEach((st, id) => { if (id !== selfId && live(id) && st.points > top) { best = id; top = st.points; } });
+  return best;
+}
+
+function seekBrain(ctx: Ctx, mode: 'seek' | 'bully' | 'rival') {
+  /** Bully tactics: always for the bully; for the rival only while it hunts its target (phase 18). */
+  let bully = mode === 'bully';
+  let rivalOf: string | null = null;
   let path: PathStep[] = [];
   let target = '';
   let expected: Pose | null = null; // where the next step of `path` starts
@@ -428,7 +450,7 @@ function seekBrain(ctx: Ctx, bully: boolean) {
   let lastChange = Date.now();
   let facing: { id: string; since: number } | null = null; // bully: opponent it's waiting to push
   const ignored = new Map<string, number>(); // bully: opponent id → ignored until (ms)
-  const skip = (id: string) => (ignored.get(id) ?? 0) > Date.now() || (ctx.headOnUntil.get(id) ?? 0) > Date.now();
+  const skip = (id: string) => (ignored.get(id) ?? 0) > Date.now() || (ctx.headOnUntil.get(id) ?? 0) > Date.now() || (rivalOf !== null && id !== rivalOf);
   // After a bounce, wait a random moment: two bots that bounced off each other recover on the same tick and would
   // otherwise push each other again in lockstep forever.
   let holdUntil = 0;
@@ -517,6 +539,18 @@ function seekBrain(ctx: Ctx, bully: boolean) {
 
     const world = planWorld(s);
     const me = ctx.room.sessionId;
+    if (mode === 'rival') {
+      // Phase 18: the crown (or leader) within RIVAL_MOVES → hunt it like the bully; in knockout, hunt it first anywhere.
+      const t = rivalTarget(s, me);
+      rivalOf = null;
+      if (t && s.mode !== 'knockout') {
+        rivalOf = t; // for besideOpponents' skip: only the target
+        const reach = findPath(world, pose, new Set(besideOpponents(s, me, world, skip).keys()));
+        if (!reach || reach.length > RIVAL_MOVES) rivalOf = null;
+      } else rivalOf = t;
+      if (rivalOf && !bully) ctx.stats.rivalHunts++;
+      bully = rivalOf !== null;
+    }
     const hunter = bully || s.mode === 'knockout';
     // Standing on a warned (or already crumbled) tile: get off it before anything else.
     const unsafe = !isSolid(world, sub(pose.cell, dirVec(pose.up))); // also a crumble tile counting down (§18)
@@ -775,14 +809,14 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
   const stats: Stats = {
     rounds: 0, wins: 0, keys: 0, deaths: 0, hops: 0, replans: 0, stuck: 0, pushes: 0, bounces: 0, knockouts: 0, keyDrops: 0, livesLost: 0,
     eliminated: 0, stomps: 0, stomped: 0, clashes: 0, dodges: 0, missedDodges: 0, detours: 0, heatEscapes: 0, burns: 0, cradles: 0, edgePushes: 0,
-    headOns: 0, sideHits: 0, sideTries: 0, teleports: 0, zapped: 0, toggles: 0, pillDetours: 0, pills: {},
+    headOns: 0, sideHits: 0, sideTries: 0, teleports: 0, zapped: 0, toggles: 0, pillDetours: 0, rivalHunts: 0, pills: {},
   };
   let seq = 0;
   const ctx: Ctx = {
     name, room, stats, headOnUntil: new Map(),
     send: (i) => room.send('input', { seq: ++seq, fwdHeld: false, turn: 0, jump: false, jumpHeld: false, ...i }),
   };
-  const brain = behaviour === 'wander' ? wanderBrain(ctx) : behaviour === 'blocker' ? blockerBrain(ctx) : seekBrain(ctx, behaviour === 'bully');
+  const brain = behaviour === 'wander' ? wanderBrain(ctx) : behaviour === 'blocker' ? blockerBrain(ctx) : seekBrain(ctx, behaviour);
 
   room.onMessage('event', (e: SimEvent) => {
     if (e.type === 'win') {
@@ -830,6 +864,9 @@ async function runBot(client: Client, name: string, behaviour: Behaviour): Promi
       room.send('vote', options[Math.floor(Math.random() * options.length)]);
       voted = true;
     }
+    // Matches (phase 18): a random match length before round 1, and always yes to a rematch.
+    if (room.state.phase === 'lobby' && room.state.matchRound === 0 && p.lengthVote < 0) room.send('length', lengthVote >= 0 ? lengthVote : Math.floor(Math.random() * 3));
+    if (room.state.phase === 'matchEnd' && !p.rematch) { room.send('rematch', true); return; }
     if (room.state.phase === 'lobby' && !p.ready) { room.send('ready'); return; }
     const playing = room.state.phase === 'playing' && !p.spectating;
     // Hot tile (phase 12): past the warn threshold, step off (any legal move: W rolls, flips or climbs).
@@ -884,7 +921,7 @@ results.forEach((r, i) => {
   if (r.status === 'rejected') console.log(`  ${names[i]}: failed (${r.reason?.message ?? r.reason})`);
   else {
     const v = r.value;
-    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}, teleports ${v.teleports}, zapped ${v.zapped}, toggles ${v.toggles}, pills ${Object.entries(v.pills).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'} (detours ${v.pillDetours})`);
+    console.log(`  ${names[i]}: rounds ${v.rounds}, wins ${v.wins}, keys ${v.keys}, deaths ${v.deaths}, hops ${v.hops}, replans ${v.replans}, stuck ${v.stuck}, pushes ${v.pushes}, bounces ${v.bounces}, knockouts ${v.knockouts}, keyDrops ${v.keyDrops}, livesLost ${v.livesLost}, eliminated ${v.eliminated}, stomps ${v.stomps}, stomped ${v.stomped}, clashes ${v.clashes}, dodges ${v.dodges}, missedDodges ${v.missedDodges}, detours ${v.detours}, heatEscapes ${v.heatEscapes}, burns ${v.burns}, cradles ${v.cradles}, edgePushes ${v.edgePushes}, headOns ${v.headOns}, sideHits ${v.sideHits}/${v.sideTries}, teleports ${v.teleports}, zapped ${v.zapped}, toggles ${v.toggles}, pills ${Object.entries(v.pills).map(([k, n]) => `${k}:${n}`).join(' ') || 'none'} (detours ${v.pillDetours}), rival hunts ${v.rivalHunts}`);
   }
 });
 process.exit(results.some((r) => r.status === 'rejected') ? 1 : 0);

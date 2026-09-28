@@ -13,12 +13,22 @@ export interface PlayerS {
   effects?: MapLike<number>;
   /** Lobby vote (phase 14): 0..2 a candidate, 3 Random, -1 none. */
   vote: number;
+  /** Matches (phase 18): match-length vote (0..2 → 3/5/7, -1 none) and the rematch vote. */
+  lengthVote?: number;
+  rematch?: boolean;
+}
+/** A line on the match board (phase 18, §23). */
+export interface StandingS {
+  id: string; name: string; color: string; points: number; roundPoints: number; breakdown: string; scoredRound: number; left: boolean;
+  wins: number; knockouts: number; pushes: number; stomps: number; deaths: number; keys: number;
 }
 /** `kind`: 'key' | 'exit' in `items`; the pill type in `pickups` (15a). */
 export interface ItemS { id: string; kind: string; x: number; y: number; z: number; up: number }
 interface MapLike<T> { get(k: string): T | undefined; has(k: string): boolean; forEach(cb: (v: T, k: string) => void): void; size: number }
 export interface GameState {
-  phase: 'lobby' | 'countdown' | 'playing' | 'results'; tick: number; phaseEndTick: number;
+  phase: 'lobby' | 'countdown' | 'playing' | 'results' | 'matchEnd'; tick: number; phaseEndTick: number;
+  /** Matches (phase 18, §23); absent in single player. */
+  matchRound?: number; matchRounds?: number; crownId?: string; standings?: MapLike<StandingS>; lengthVotes?: ArrayLike<number>;
   levelId: string; winnerId: string;
   /** Movement timing preset (phase 17); absent from older servers. */
   timing?: string; players: MapLike<PlayerS>; items: MapLike<ItemS>;
@@ -51,6 +61,9 @@ export interface GameSource {
   sendInput(input: Input): void;
   sendReady(): void;
   sendVote(option: number): void;
+  /** Matches (phase 18): the length vote (0..2) and the rematch vote. No-ops in single player. */
+  sendLength?(option: number): void;
+  sendRematch?(yes: boolean): void;
 }
 
 const TICK_MS = 50;
@@ -124,6 +137,8 @@ export class Net implements GameSource {
   sendInput(input: Input): void { this.room.send('input', this.stamp ? this.stamp(input) : input); }
   sendReady(): void { this.room.send('ready'); }
   sendVote(option: number): void { this.room.send('vote', option); }
+  sendLength(option: number): void { this.room.send('length', option); }
+  sendRematch(yes: boolean): void { this.room.send('rematch', yes); }
 }
 
 export async function connect(name = playerName): Promise<Net> {

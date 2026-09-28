@@ -11,6 +11,31 @@ import { applySquash, Spring } from './squash.ts';
 import { art, BALL_MODELS } from './art.ts';
 import { addXray } from './xray.ts';
 
+/** The match leader's crown (phase 18): gold ceramic, floating CROWN_LIFT above the ball, turning slowly. */
+const CROWN_LIFT = 0.85;
+const crownUp = new THREE.Vector3(), crownY = new THREE.Vector3(0, 1, 0), crownSpin = new THREE.Quaternion();
+function makeCrown(scene: THREE.Scene): THREE.Group {
+  const gold = new THREE.MeshStandardMaterial({ color: 0xf2c230, emissive: 0x4a3500, roughness: 0.25, metalness: 0.5 });
+  const pearl = new THREE.MeshStandardMaterial({ color: 0xfff6e6, roughness: 0.2 });
+  const g = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.1, 24, 1, true), gold);
+  band.material.side = THREE.DoubleSide;
+  g.add(band);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 8), gold);
+    spike.position.set(Math.cos(a) * 0.19, 0.11, Math.sin(a) * 0.19);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), pearl);
+    bead.position.set(Math.cos(a) * 0.19, 0.19, Math.sin(a) * 0.19);
+    g.add(spike, bead);
+  }
+  addXray(g, 0xf2c230); // seen through walls, like the balls
+  g.scale.setScalar(1.7);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+
 /**
  * Feel events (phase 08), raised at render time when a ball's on-screen action changes, so sounds match what you see.
  * `hit` is push contact (at the victim), `pop` a death, `clack` a middle ball of a cradle passing the strike on.
@@ -769,9 +794,22 @@ export class PlayersView {
   }
 
   /** Where a ball is drawn (for effects such as the burn puff), or null when it isn't on screen. */
-  /** Every ball on screen (phase 17 off-screen arrows): id, position, colour, local. No allocations. */
-  eachBall(cb: (id: string, at: THREE.Vector3, color: string, local: boolean) => void): void {
-    for (const [id, v] of this.views) if (v.shown) cb(id, v.ball.position, v.color, v.local);
+  /** Every ball on screen (phase 17 off-screen arrows): id, position, colour, local, crowned. No allocations. */
+  eachBall(cb: (id: string, at: THREE.Vector3, color: string, local: boolean, crowned: boolean) => void): void {
+    for (const [id, v] of this.views) if (v.shown) cb(id, v.ball.position, v.color, v.local, id === this.crownId);
+  }
+
+  /** Matches (phase 18): who wears the crown ('' = nobody). It floats above that ball, seen through walls too. */
+  crownId = '';
+  private crown: THREE.Group | null = null;
+  private placeCrown(timeSec: number): void {
+    const v = this.crownId ? this.views.get(this.crownId) : undefined;
+    if (!v?.shown) { if (this.crown) this.crown.visible = false; return; }
+    const c = (this.crown ??= makeCrown(this.scene));
+    c.visible = true;
+    crownUp.fromArray(v.pose.up);
+    c.position.copy(v.ball.position).addScaledVector(crownUp, CROWN_LIFT + Math.sin(timeSec * 2.4) * 0.04);
+    c.quaternion.setFromUnitVectors(crownY, crownUp).multiply(crownSpin.setFromAxisAngle(crownY, timeSec * 1.2));
   }
 
   /** The ball's drawn position (not a copy; don't keep it), or null when it isn't shown. */
@@ -853,6 +891,7 @@ export class PlayersView {
       this.onFeel?.({ kind: 'clack', at: sh.view.ball.position, local: sh.view.local, intensity: sh.of > 1 ? sh.step / (sh.of - 1) : 0 });
     }
     this.placeEdgeGlow(localId, dt, nowMs / 1000);
+    this.placeCrown(nowMs / 1000);
     this.rollUnder();
     const cfg = this.heat;
     for (const v of this.views.values()) {

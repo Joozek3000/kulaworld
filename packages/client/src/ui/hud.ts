@@ -1,5 +1,6 @@
 import { EFFECT_TICKS, RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type PickupType, type TileType } from '@kula/shared';
-import type { GameState, PlayerS } from '../net.ts';
+import type { GameState, PlayerS, StandingS } from '../net.ts';
+import { MATCH_LENGTHS, mvps, type MatchStats } from '@kula/shared';
 import { PILL_ICONS } from '../render/players.ts';
 import type { LocalState } from '../local.ts';
 import { fruitSlots } from './menu.ts';
@@ -33,6 +34,18 @@ function pillRings(p: PlayerS | undefined, tick: number): string {
   return out.join('');
 }
 const CRUMBLE_COUNTDOWN_SEC = 5;
+/** Matches (phase 18): "Round n/N" over the in-round board, points and the crown on each line. */
+const matchHead = (s: GameState) => (s.matchRounds && s.matchRound ? `<div class="round">Round ${s.matchRound}/${s.matchRounds}</div>` : '');
+const matchPoints = (s: GameState, id: string) => {
+  const st = s.standings?.get(id);
+  return st ? ` · <b>${st.points}</b> pts` : '';
+};
+const crownMark = (s: GameState, id: string) => (s.crownId && s.crownId === id ? '👑 ' : '');
+/** A board line: name, points, and (`pop`) the round's gain and its breakdown popping in. Leavers are greyed. */
+function standingRow(st: StandingS, me: string, crownId: string, pop = false): string {
+  const gain = pop && st.roundPoints ? ` <span class="pop">+${st.roundPoints}</span> <small class="dim">${esc(st.breakdown)}</small>` : '';
+  return `<li class="${st.id === me ? 'me' : ''}${st.left ? ' out' : ''}">${dot(st.color)}<span class="name">${crownId === st.id ? '👑 ' : ''}${esc(st.name)}${st.id === me ? ' (you)' : ''}${st.left ? ' <span class="dim">(left)</span>' : ''}</span><span class="val"><b>${st.points}</b>${gain}</span></li>`;
+}
 const hearts = (lives: number, max: number) =>
   `<span class="hearts">${'♥'.repeat(lives)}<span class="dim">${'♥'.repeat(Math.max(0, max - lives))}</span></span>`;
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`); // up to 8 players
@@ -50,7 +63,19 @@ export interface LobbyHooks {
   /** Cached preview image (data URL) of a level. */
   preview(level: Level): string;
   findLevel(id: string): Level | null;
+  /** Matches (phase 18): a match-length card (0..2) or a rematch button was clicked. */
+  onLength?(option: number): void;
+  onRematch?(yes: boolean): void;
 }
+
+/** Match board lines (phase 18), most points first; players who left sort by points too, drawn greyed. */
+function boardOf(s: GameState): StandingS[] {
+  const list: StandingS[] = [];
+  s.standings?.forEach((st) => list.push(st));
+  return list.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
+/** Seconds into the matchEnd phase before the stats card replaces the podium names. */
+export const PODIUM_SEC = 5;
 
 /** HTML overlay per phase: lobby vote + list, big countdown, timer + scoreboard + exit status, results banner, toasts. */
 export function createHud(lobby: LobbyHooks) {
@@ -58,6 +83,10 @@ export function createHud(lobby: LobbyHooks) {
   center.addEventListener('click', (e) => {
     const card = (e.target as HTMLElement).closest<HTMLElement>('[data-vote]');
     if (card) lobby.onVote(Number(card.dataset.vote));
+    const len = (e.target as HTMLElement).closest<HTMLElement>('[data-length]');
+    if (len) lobby.onLength?.(Number(len.dataset.length));
+    const re = (e.target as HTMLElement).closest<HTMLElement>('[data-rematch]');
+    if (re) lobby.onRematch?.(re.dataset.rematch === 'yes');
   });
   top.textContent = 'connecting…';
   const padHint = div('pad-hint');
@@ -164,7 +193,19 @@ export function createHud(lobby: LobbyHooks) {
           cards.push(card(RANDOM_VOTE, '<div class="random">?</div><div class="cname">Random</div><div class="cmode dim">any level</div>'));
           const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : myVote < 0 ? 'Vote for the next level, then press <kbd>R</kbd>' : 'Press <kbd>R</kbd> to ready';
           set(top, `${GAME_NAME} · Lobby${sound}`);
-          set(center, `<div class="panel lobby"><h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
+          const round = s.matchRound ?? 0, rounds = s.matchRounds ?? 0;
+          let match = '';
+          if (s.standings && round === 0) {
+            const lv = mine?.lengthVote ?? -1;
+            match = `<h2>Match length</h2><div class="cards lengths">${MATCH_LENGTHS.map((n, i) => {
+              const c = s.lengthVotes?.[i] ?? 0;
+              return `<button class="card len${lv === i ? ' mine' : ''}" data-length="${i}"><div class="cname">${n} rounds</div>`
+                + `<div class="votes">${c ? `${'●'.repeat(c)} ${c}` : '<span class="dim">no votes</span>'}</div></button>`;
+            }).join('')}</div>`;
+          } else if (s.standings && rounds) {
+            match = `<h2>Round ${round + 1} of ${rounds}</h2><ul class="list board">${boardOf(s).map((st) => standingRow(st, me, s.crownId ?? '')).join('')}</ul>`;
+          }
+          set(center, `<div class="panel lobby">${match}<h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
           set(status, LOBBY_CONTROLS);
           break;
@@ -184,7 +225,7 @@ export function createHud(lobby: LobbyHooks) {
             set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${crumble}${sound}`);
             const by = mine?.eliminatedBy ? ` by ${esc(name(mine.eliminatedBy))}` : '';
             set(center, out ? `<div class="panel"><h1 class="warn">ELIMINATED</h1><div class="sub">Knocked out${by} · spectating</div></div>` : hot ? MOVE : '');
-            set(board, `<ul class="list">${byPlace(s).map((p) => row(p, me, p.eliminated ? '<span class="dim">out</span>' : `${hearts(p.lives, maxLives)} ${p.knockouts ? `KO ${p.knockouts}` : ''}`)).join('')}</ul>`);
+            set(board, `${matchHead(s)}<ul class="list">${byPlace(s).map((p) => row(p, me, `${crownMark(s, p.id)}${p.eliminated ? '<span class="dim">out</span>' : `${hearts(p.lives, maxLives)} ${p.knockouts ? `KO ${p.knockouts}` : ''}`}${matchPoints(s, p.id)}`)).join('')}</ul>`);
             set(status, spectating ? 'Spectating: you join next round' : out ? 'Spectating until the round ends'
               : `Lives ${hearts(mine!.lives, maxLives)} · Knockouts <b>${mine!.knockouts}</b>`);
             break;
@@ -195,9 +236,33 @@ export function createHud(lobby: LobbyHooks) {
           const crumble = crumbleIn > 0 && crumbleIn <= CRUMBLE_COUNTDOWN_SEC ? ` · <span class="warn">Floor crumbles in ${crumbleIn}</span>` : '';
           set(top, `<span class="timer${secs <= 10 ? ' warn' : ''}">${clock(secs)}</span>${spectating ? ' · spectating' : ''}${crumble}${sound}`);
           set(center, hot ? MOVE : '');
-          set(board, `<ul class="list">${byKeys(s).map((p) => row(p, me, `${p.keys}/${required}`)).join('')}</ul>`);
+          set(board, `${matchHead(s)}<ul class="list">${byKeys(s).map((p) => row(p, me, `${crownMark(s, p.id)}${p.keys}/${required}${matchPoints(s, p.id)}`)).join('')}</ul>`);
           set(status, spectating ? 'Spectating: you join next round'
             : `Keys <b>${keys}/${required}</b> · ${open ? '<span class="ok">Exit OPEN</span>' : '<span class="dim">Exit locked</span>'}`);
+          break;
+        }
+        case 'matchEnd': {
+          // The podium (phase 18): names float above the balls in 3D; after PODIUM_SEC, the stats card and rematch vote.
+          const list = boardOf(s), champ = list[0];
+          set(top, `${GAME_NAME} · Match over${sound}`);
+          set(board, '');
+          set(status, '');
+          if (s.tick < PODIUM_SEC * TICK_RATE) {
+            set(center, champ ? `<div class="podium-title" style="color:${esc(champ.color)}">🏆 ${esc(champ.name)} wins the match!</div>` : '');
+            break;
+          }
+          const stats = new Map<string, MatchStats>(list.map((st) => [st.id, st]));
+          const badges = new Map<string, string[]>();
+          for (const m of mvps(stats)) badges.set(m.id, [...(badges.get(m.id) ?? []), m.badge]);
+          const here: PlayerS[] = [];
+          s.players.forEach((p) => here.push(p));
+          const yes = here.filter((p) => p.rematch).length, mineYes = !!mine?.rematch;
+          const rowsHtml = list.map((st, i) => `<tr class="${st.id === me ? 'me' : ''}${st.left ? ' out' : ''}"><td>${ordinal(i + 1)}</td><td>${dot(st.color)}${esc(st.name)}${st.left ? ' <span class="dim">(left)</span>' : ''}</td>`
+            + `<td><b>${st.points}</b></td><td>${st.wins}</td><td>${st.knockouts}</td><td>${st.pushes}</td><td>${st.stomps}</td><td>${st.deaths}</td><td>${st.keys}</td>`
+            + `<td>${(badges.get(st.id) ?? []).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}</td></tr>`).join('');
+          set(center, `<div class="panel stats"><h1>Match stats</h1><table class="statcard"><tr><th></th><th></th><th>Pts</th><th>Wins</th><th>KOs</th><th>Pushes</th><th>Stomps</th><th>Deaths</th><th>Keys</th><th></th></tr>${rowsHtml}</table>`
+            + `<div class="rematch"><button class="card${mineYes ? ' mine' : ''}" data-rematch="yes">Rematch</button><button class="card" data-rematch="no">New lobby</button>`
+            + `<span class="votes">${'●'.repeat(yes)} ${yes}/${here.length} for a rematch · ${secs}s</span></div></div>`);
           break;
         }
         case 'results': {
@@ -207,7 +272,9 @@ export function createHud(lobby: LobbyHooks) {
           const rows = ko
             ? byPlace(s).map((p, i) => row(p, me, `${ordinal(i + 1)} · ${p.eliminated ? 'out' : hearts(p.lives, maxLives)} · KO ${p.knockouts}`))
             : byKeys(s).map((p) => row(p, me, `${p.keys} key${p.keys === 1 ? '' : 's'}`));
-          set(center, `<div class="panel">${banner}<ul class="list">${rows.join('')}</ul><div class="hint">Next: vote in lobby (${secs}s)</div></div>`);
+          const last = (s.matchRound ?? 0) >= (s.matchRounds ?? 0);
+          const boardHtml = s.standings?.size ? `<h2>Round ${s.matchRound} of ${s.matchRounds}</h2><ul class="list board">${boardOf(s).map((st) => standingRow(st, me, s.crownId ?? '', true)).join('')}</ul>` : '';
+          set(center, `<div class="panel">${banner}<ul class="list">${rows.join('')}</ul>${boardHtml}<div class="hint">${last ? `Match over: the podium in ${secs}s` : `Next: vote in lobby (${secs}s)`}</div></div>`);
           set(board, '');
           set(status, '');
           break;
