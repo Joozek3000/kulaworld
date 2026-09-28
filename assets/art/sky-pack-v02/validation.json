@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "skies": [
+    {
+      "name": "amber-afterglow-4k",
+      "size": [
+        4096,
+        2048
+      ],
+      "mean_seam_error_rgb_8bit": [
+        0.555,
+        0.467,
+        0.588
+      ],
+      "exr_bytes": 50365364
+    },
+    {
+      "name": "peach-dawn-4k",
+      "size": [
+        4096,
+        2048
+      ],
+      "mean_seam_error_rgb_8bit": [
+        0.58,
+        0.478,
+        0.446
+      ],
+      "exr_bytes": 50365354
+    },
+    {
+      "name": "teal-moon-4k",
+      "size": [
+        4096,
+        2048
+      ],
+      "mean_seam_error_rgb_8bit": [
+        0.994,
+        0.892,
+        0.876
+      ],
+      "exr_bytes": 50365352
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "version": 2,
+  "units": "1 unit = 1 game cell",
+  "gltf_up": "+Y",
+  "face_forward": "+Z",
+  "face_origin": "supporting block face centre",
+  "block_origin": "block centre",
+  "assets": [
+    {
+      "name": "tile-celadon",
+      "file": "tile-celadon.glb",
+      "type": "block",
+      "description": "Decorative base tile; material has no gameplay effect.",
+      "triangles": 108,
+      "bytes": 2915376
+    },
+    {
+      "name": "tile-limestone",
+      "file": "tile-limestone.glb",
+      "type": "block",
+      "description": "Decorative base tile; material has no gameplay effect.",
+      "triangles": 108,
+      "bytes": 2921508
+    },
+    {
+      "name": "tile-basalt",
+      "file": "tile-basalt.glb",
+      "type": "block",
+      "description": "Decorative base tile; material has no gameplay effect.",
+      "triangles": 108,
+      "bytes": 2917708
+    },
+    {
+      "name": "tile-terracotta",
+      "file": "tile-terracotta.glb",
+      "type": "block",
+      "description": "Decorative base tile; material has no gameplay effect.",
+      "triangles": 108,
+      "bytes": 2779240
+    },
+    {
+      "name": "block-ice",
+      "file": "block-ice.glb",
+      "type": "block",
+      "description": "Whole-block ice; opaque frosted glaze avoids transparency sorting.",
+      "triangles": 2052,
+      "bytes": 892168
+    },
+    {
+      "name": "block-fire",
+      "file": "block-fire.glb",
+      "type": "block",
+      "description": "Whole-block fire. Glowing X marks all six faces; no extra rules implied.",
+      "triangles": 2700,
+      "bytes": 2894172
+    },
+    {
+      "name": "block-crumble",
+      "file": "block-crumble.glb",
+      "type": "block",
+      "description": "Whole-block crumble with a connected fracture network.",
+      "triangles": 108,
+      "bytes": 901692
+    },
+    {
+      "name": "block-crumble-fragments",
+      "file": "block-crumble-fragments.glb",
+      "type": "fragments",
+      "description": "Eight named fragments for the existing crumble event; no collision changes.",
+      "triangles": 864,
+      "bytes": 64092
+    },
+    {
+      "name": "trap-spikes-raised",
+      "file": "trap-spikes-raised.glb",
+      "type": "face",
+      "description": "Retractable four-spike assembly. Animate spikes separately along local normal.",
+      "triangles": 4116,
+      "bytes": 179356
+    },
+    {
+      "name": "trap-spikes-retracted",
+      "file": "trap-spikes-retracted.glb",
+      "type": "face",
+      "description": "Retractable four-spike assembly. Animate spikes separately along local normal.",
+      "triangles": 4116,
+      "bytes": 179340
+    },
+    {
+      "name": "tile-arrow",
+      "file": "tile-arrow.glb",
+      "type": "face",
+      "description": "Single gold arrow. Local glTF +Z points along the allowed direction.",
+      "triangles": 348,
+      "bytes": 26928
+    },
+    {
+      "name": "pad-boost-far",
+      "file": "pad-boost-far.glb",
+      "type": "face",
+      "description": "Far: 3 forward. Local glTF +Z is launch direction.",
+      "triangles": 1548,
+      "bytes": 84432
+    },
+    {
+      "name": "pad-boost-high",
+      "file": "pad-boost-high.glb",
+      "type": "face",
+      "description": "High: 2 forward + 1 up.",
+      "triangles": 1960,
+      "bytes": 113804
+    }
+  ]
+}

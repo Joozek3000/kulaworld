@@ -249,7 +249,7 @@ view.renderer.setAnimationLoop((now: number) => {
     players.heat = level?.heat ?? null;
     rig.setSolid(solid);
     if (level && levelView) { view.scene.add(levelView.group); bounds = levelBounds(level); }
-    view.setSky(level?.sky ?? undefined);
+    view.setSky(level?.sky ?? undefined, level?.id);
   }
 
   const renderTick = net.estServerTick - INTERP_TICKS;

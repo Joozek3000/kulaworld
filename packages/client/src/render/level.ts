@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { crumbleBands, loadLevel, type Level, type LevelJson } from '@kula/shared';
-import { art } from './art.ts';
+import { art, environmentFor, type ModelName } from './art.ts';
 
 const files = import.meta.glob<LevelJson>('../../../../levels/*.json', { eager: true, import: 'default' });
 
@@ -10,20 +10,22 @@ export function findLevel(id: string): Level | null {
 }
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const fallbackMat = new THREE.MeshStandardMaterial({ roughness: 0.28 });
 const WARN = new THREE.Color(0xff3b3b);
 const SHAKE = 0.06; // cells
 const REGROW_SEC = 0.4;
 const m = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0), tint = new THREE.Color();
 
 /**
- * One InstancedMesh of bevelled ceramic blocks; alternating ivory/cobalt glaze works on every gravity face.
+ * Textured blocks batched by model/material; one cell transform drives all parts of a special block.
  * Knockout crumble (§15): bands the server reports as removed get a zero-scale matrix; the
  * warned band shakes and blinks red. Bands come from the shared `crumbleBands`, the same as the sim's.
  */
 export class LevelView {
   readonly group = new THREE.Group();
   private readonly cells: number[][];
-  private readonly mesh: THREE.InstancedMesh;
+  private readonly meshes: THREE.InstancedMesh[] = [];
+  private readonly instances: { meshes: THREE.InstancedMesh[]; slot: number; textured: boolean }[] = [];
   private readonly bands: number[][]; // instance indices per band
   private crumbled = 0;
   private warnBand = -1;
@@ -41,13 +43,33 @@ export class LevelView {
     this.crumbleKeys = [...level.blockTiles].filter(([, t]) => t.type === 'crumble').map(([k]) => k);
     this.bands = level.crumble ? crumbleBands(level).map((b) => b.map((k) => index.get(k)!)) : [];
 
-    this.mesh = new THREE.InstancedMesh(art.block?.geometry ?? boxGeo,
-      art.block?.material.clone() ?? new THREE.MeshStandardMaterial({ roughness: 0.28 }), this.cells.length);
-    this.cells.forEach((_, i) => { this.place(i, 0); this.mesh.setColorAt(i, this.baseColor(i)); });
-    this.group.add(this.mesh);
+    const batches = new Map<ModelName, number[]>();
+    this.cells.forEach(([x, y, z], i) => {
+      const trap = level.blockTiles.get(keys[i])?.type;
+      const name: ModelName = trap === 'ice' || trap === 'fire' || trap === 'crumble'
+        ? `block-${trap}` : (x + y + z) & 1 ? environmentFor(level.id).tile : 'tile-limestone';
+      const cells = batches.get(name) ?? [];
+      cells.push(i);
+      batches.set(name, cells);
+    });
+    for (const [name, cells] of batches) {
+      const parts = art.blocks[name];
+      const meshes = (parts ?? [art.block ?? new THREE.Mesh(boxGeo, fallbackMat)])
+        .map((part) => {
+          const mesh = new THREE.InstancedMesh(part.geometry, part.material.clone(), cells.length);
+          mesh.name = name;
+          mesh.userData.cells = cells.map((i) => keys[i]);
+          this.meshes.push(mesh);
+          this.group.add(mesh);
+          return mesh;
+        });
+      cells.forEach((i, slot) => { this.instances[i] = { meshes, slot, textured: !!parts }; });
+    }
+    this.cells.forEach((_, i) => { this.place(i, 0); this.color(i, this.baseColor(i)); });
   }
 
   private baseColor(i: number): THREE.Color {
+    if (this.instances[i].textured) return tint.set(0xffffff);
     const [x, y, z] = this.cells[i];
     const trap = this.level.blockTiles.get(this.cells[i].join(','))?.type;
     if (trap === 'ice') return tint.set(0xbfe4f5); // pale blue glaze (TrapsView adds the gloss shell)
@@ -58,7 +80,24 @@ export class LevelView {
   private place(i: number, shake: number, scale = 1): void {
     const [x, y, z] = this.cells[i];
     const j = shake ? (k: number) => Math.sin(shake * 47 + i * 13 + k) * SHAKE : () => 0;
-    this.mesh.setMatrixAt(i, m.makeScale(scale, scale, scale).setPosition(x + j(0), y + j(1), z + j(2)));
+    this.matrix(i, m.makeScale(scale, scale, scale).setPosition(x + j(0), y + j(1), z + j(2)));
+  }
+
+  private matrix(i: number, matrix: THREE.Matrix4): void {
+    const { meshes, slot } = this.instances[i];
+    for (const mesh of meshes) mesh.setMatrixAt(slot, matrix);
+  }
+
+  private color(i: number, color: THREE.Color): void {
+    const { meshes, slot } = this.instances[i];
+    for (const mesh of meshes) mesh.setColorAt(slot, color);
+  }
+
+  private refresh(): void {
+    for (const mesh of this.meshes) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   /**
@@ -70,7 +109,7 @@ export class LevelView {
     for (const key of this.crumbleKeys) {
       const i = this.index.get(key)!, at = crumbling.get(key);
       if (at !== undefined && at <= serverTick) {
-        if (!this.trapGone.has(key)) { this.trapGone.add(key); this.mesh.setMatrixAt(i, ZERO); }
+        if (!this.trapGone.has(key)) { this.trapGone.add(key); this.matrix(i, ZERO); }
         continue;
       }
       if (this.trapGone.delete(key)) this.regrowFrom.set(key, timeSec);
@@ -79,18 +118,24 @@ export class LevelView {
       if (scale >= 1) this.regrowFrom.delete(key);
       this.place(i, at !== undefined ? timeSec : 0, scale);
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.refresh();
   }
 
   /** Per frame, from the synced `crumbled` (bands removed) and `warnBand`. A new round resets both to none. */
   update(crumbled: number, warnBand: number, timeSec: number): void {
+    for (const mesh of this.meshes) {
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      if (mesh.name === 'block-fire' && material.emissive.getHex() !== 0) {
+        material.emissiveIntensity = 1.2 + 0.35 * Math.sin(timeSec * 13) + 0.15 * Math.sin(timeSec * 31);
+      }
+    }
     if (!this.bands.length) return;
     if (crumbled !== this.crumbled || warnBand !== this.warnBand) {
       // Restore everything, then apply the new state (rare: once per band change or round).
       this.bands.forEach((band, b) => band.forEach((i) => {
         const gone = b < crumbled;
-        if (gone) this.mesh.setMatrixAt(i, ZERO); else this.place(i, 0);
-        this.mesh.setColorAt(i, this.baseColor(i));
+        if (gone) this.matrix(i, ZERO); else this.place(i, 0);
+        this.color(i, this.baseColor(i));
       }));
       this.removed.clear();
       for (const band of this.bands.slice(0, crumbled)) for (const i of band) this.removed.add(this.cells[i].join(','));
@@ -101,11 +146,10 @@ export class LevelView {
       const red = Math.floor(timeSec * 8) % 2 === 0; // blinks 4 times a second
       for (const i of this.bands[warnBand]) {
         this.place(i, timeSec);
-        this.mesh.setColorAt(i, red ? WARN : this.baseColor(i));
+        this.color(i, red ? WARN : this.baseColor(i));
       }
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.refresh();
   }
 
   /** Solid for rendering (blob shadows): the level minus crumbled blocks. */
@@ -115,8 +159,10 @@ export class LevelView {
   };
 
   dispose(): void {
-    this.mesh.dispose();
-    (this.mesh.material as THREE.Material).dispose();
+    for (const mesh of this.meshes) {
+      mesh.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
   }
 }
 

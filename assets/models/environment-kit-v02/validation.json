@@ -1,0 +1,135 @@
+{
+  "passed": true,
+  "assets": [
+    {
+      "asset": "tile-celadon.glb",
+      "triangles": 108,
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "tile-limestone.glb",
+      "triangles": 108,
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "tile-basalt.glb",
+      "triangles": 108,
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "tile-terracotta.glb",
+      "triangles": 108,
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "block-ice.glb",
+      "triangles": 2052,
+      "size": [
+        1.026,
+        1.026,
+        1.026
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "block-fire.glb",
+      "triangles": 2700,
+      "size": [
+        1.044,
+        1.044,
+        1.044
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "block-crumble.glb",
+      "triangles": 108,
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "embedded_textures": 3
+    },
+    {
+      "asset": "block-crumble-fragments.glb",
+      "triangles": 864,
+      "size": [
+        0.988,
+        0.988,
+        0.988
+      ],
+      "embedded_textures": 0
+    },
+    {
+      "asset": "trap-spikes-raised.glb",
+      "triangles": 4116,
+      "size": [
+        0.83,
+        0.335,
+        0.83
+      ],
+      "embedded_textures": 0
+    },
+    {
+      "asset": "trap-spikes-retracted.glb",
+      "triangles": 4116,
+      "size": [
+        0.83,
+        0.053,
+        0.83
+      ],
+      "embedded_textures": 0
+    },
+    {
+      "asset": "tile-arrow.glb",
+      "triangles": 348,
+      "size": [
+        0.79,
+        0.06,
+        0.83
+      ],
+      "embedded_textures": 0
+    },
+    {
+      "asset": "pad-boost-far.glb",
+      "triangles": 1548,
+      "size": [
+        0.82,
+        0.083,
+        0.82
+      ],
+      "embedded_textures": 0
+    },
+    {
+      "asset": "pad-boost-high.glb",
+      "triangles": 1960,
+      "size": [
+        0.82,
+        0.105,
+        0.82
+      ],
+      "embedded_textures": 0
+    }
+  ]
+}

@@ -34,3 +34,13 @@ The existing audio engine supports `.ogg`/`.wav` overrides in `packages/client/p
 ## Validation
 
 See `docs/reports/art-integration-report.md`. The user-requested departure from placeholder-only art is recorded in `docs/DECISIONS.md`.
+
+## Environment extension — 2026-09-27
+
+`assets/models/environment-kit-v02/` adds 13 model exports for the six currently implemented trap/tile types and four decorative base materials: celadon glaze, limestone, basalt and terracotta. Seven sets of baked base-colour, roughness and normal maps are embedded in the GLBs, with editable procedural masters retained in Blender. Separate spike states, named moving parts and crumble fragments support the existing game states.
+
+`assets/art/sky-pack-v02/` adds Peach Dawn, Teal Moon and Amber Afterglow, each with a full-sphere 4K PNG/linear EXR, 2K JPEG, editable world and reference lighting rig. The environment kit's three lighting scenes and review images show the assets together.
+
+The user then requested game integration. All 13 exports and the three 2K sky panoramas are now copied into the client's public assets and used by gameplay and lobby previews. Numbered maps cycle through celadon/Peach Dawn, basalt/Teal Moon and terracotta/Amber Afterglow, each paired with limestone; cube maps use Teal Moon and labs default to Peach Dawn. Camera-relative key/rim lights and hemisphere fill preserve visibility through gravity changes. The vanilla ceramic/primitive and gradient paths remain download-failure fallbacks.
+
+Whole blocks are instanced by model/material. Spike states follow the shared timing function; crumble fragments, regrowth and boost charge glow use existing synchronized state. Vanishing blocks inherit the base textures; invisible blocks retain their glass reveal. Teleporter, switch and laser geometry from phase 13b remains in use. No map layout, simulation rule or dependency changes are part of this integration. See `docs/reports/environment-integration-report.md` for checks and limitations. Unity import remains untested.

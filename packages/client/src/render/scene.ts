@@ -1,8 +1,35 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { art } from './art.ts';
+import { art, environmentFor } from './art.ts';
 
 const DEFAULT_SKY: [string, string] = ['#1a1d2b', '#1a1d2b'];
+
+/** Shared by gameplay and lobby cards. Camera fill keeps every gravity face readable. */
+export function createEnvironment(scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer) {
+  renderer.toneMapping = THREE.AgXToneMapping;
+  const fill = new THREE.HemisphereLight(0xffffff, 0x777777, 1.6);
+  const key = new THREE.DirectionalLight(0xffffff, 2.4);
+  const rim = new THREE.DirectionalLight(0xffffff, 1.1);
+  key.position.set(2, 4, 1);
+  rim.position.set(-4, 1, -3);
+  key.target.position.set(0, 0, -4);
+  rim.target.position.set(0, 0, -4);
+  camera.add(key, rim, key.target, rim.target);
+  scene.add(fill);
+  return (id?: string) => {
+    const theme = environmentFor(id);
+    const texture = art.skies[theme.id] ?? art.sky;
+    scene.background = texture ?? new THREE.Color(theme.fog);
+    scene.environment = texture ?? null;
+    scene.environmentIntensity = 0.4;
+    renderer.toneMappingExposure = theme.exposure;
+    fill.color.set(theme.fill);
+    fill.groundColor.set(theme.ground);
+    key.color.set(theme.key);
+    rim.color.set(theme.rim);
+    return { theme, texture };
+  };
+}
 
 /** Vertical two-colour gradient on an inverted sphere that rides with the camera (world +Y is "top"). */
 function createSky() {
@@ -37,22 +64,12 @@ export function createScene() {
   const scene = new THREE.Scene();
   const sky = createSky();
   scene.add(sky.mesh);
-  if (art.sky) {
-    sky.mesh.visible = false;
-    scene.background = art.sky;
-    scene.environment = art.sky;
-    scene.environmentIntensity = 0.35;
-  }
   const fog = new THREE.Fog(0, 18, 50);
   scene.fog = fog;
 
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
   scene.add(camera);
-  scene.add(new THREE.HemisphereLight(0xdde6ff, 0x3a3a4a, 1.4));
-  // Key light rides with the camera: with gravity on any face there is no fixed "sky".
-  const key = new THREE.DirectionalLight(0xffffff, 1.6);
-  key.position.set(2, 4, 1);
-  camera.add(key);
+  const setEnvironment = createEnvironment(scene, camera, renderer);
 
   const resize = () => {
     renderer.setSize(innerWidth, innerHeight);
@@ -65,12 +82,14 @@ export function createScene() {
 
   return {
     renderer, scene, camera,
-    /** Ceramic panorama overrides per-level gradients, which remain the missing-asset fallback. */
-    setSky([top, bottom]: [string, string] = DEFAULT_SKY) {
+    /** Per-map panorama and lighting; gradients remain the missing-asset fallback. */
+    setSky([top, bottom]: [string, string] = DEFAULT_SKY, levelId?: string) {
+      const { theme, texture } = setEnvironment(levelId);
+      sky.mesh.visible = !texture;
       sky.uniforms.top.value.set(top);
       sky.uniforms.bottom.value.set(bottom);
       fog.color.copy(sky.uniforms.bottom.value).lerp(sky.uniforms.top.value, 0.35);
-      if (art.sky) fog.color.set(0xc8b5d6);
+      if (texture) fog.color.set(theme.fog);
     },
     render() {
       sky.mesh.position.copy(camera.position);

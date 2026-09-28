@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { cellKey, dirVec, vanishOn, type Dir, type Level, type Tile, type Vanish } from '@kula/shared';
 import { onFace } from './traps.ts';
+import { art, environmentFor } from './art.ts';
 
 /**
  * Phase 13b traps, procedural, in the ceramic/lavender look: teleporter ring pads (pair colour, a turning swirl), laser
@@ -128,9 +129,12 @@ export class Traps2View {
   /** An invisible (lavender glass) or vanishing (ivory glaze) block with its own material, for per-block opacity. */
   private block(key: string, vanish?: Vanish): void {
     const [x, y, z] = key.split(',').map(Number);
-    const mat = this.mat(new THREE.MeshStandardMaterial({ color: vanish ? IVORY : LAVENDER, roughness: vanish ? 0.28 : 0.08, metalness: 0.1, transparent: true, depthWrite: !!vanish }));
+    const tile = art.blocks[(x + y + z) & 1 ? environmentFor(this.level.id).tile : 'tile-limestone']?.[0];
+    const mat = this.mat(vanish && tile ? tile.material.clone() : new THREE.MeshStandardMaterial({ color: vanish ? IVORY : LAVENDER, roughness: vanish ? 0.28 : 0.08, metalness: 0.1 }));
+    mat.transparent = true;
+    mat.depthWrite = !!vanish;
     const edgeMat = this.mat(new THREE.LineBasicMaterial({ color: vanish ? 0x8a7bb0 : 0xffffff, transparent: true }));
-    const mesh = new THREE.Mesh(boxGeo, mat), edges = new THREE.LineSegments(edgesGeo, edgeMat);
+    const mesh = new THREE.Mesh(tile?.geometry ?? boxGeo, mat), edges = new THREE.LineSegments(edgesGeo, edgeMat);
     mesh.position.set(x, y, z);
     edges.position.set(x, y, z);
     this.group.add(mesh, edges);

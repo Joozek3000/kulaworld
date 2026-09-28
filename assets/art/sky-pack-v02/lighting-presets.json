@@ -1,0 +1,228 @@
+{
+  "units": "Blender metres / 1 metre per game cell",
+  "note": "Reference art rig, not interchangeable engine intensity units; maintain camera-relative fill for gravity changes.",
+  "presets": [
+    {
+      "id": "peach-dawn",
+      "sky_jpeg": "peach-dawn-2k.jpg",
+      "sky_exr": "peach-dawn-4k.exr",
+      "view_transform": "AgX",
+      "look": "Medium High Contrast",
+      "exposure": 0,
+      "preview_world_strength": 0.4,
+      "lights": [
+        {
+          "name": "Key / peach-dawn",
+          "type": "AREA",
+          "location_blender_z_up": [
+            -3.0,
+            -4.0,
+            7.0
+          ],
+          "rotation_euler_xyz": [
+            0.6202496290206909,
+            -3.0146779295137094e-08,
+            -0.6435012221336365
+          ],
+          "linear_rgb": [
+            1.0,
+            0.7454041838645935,
+            0.5149176716804504
+          ],
+          "energy_watts": 850.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Fill / peach-dawn",
+          "type": "AREA",
+          "location_blender_z_up": [
+            5.0,
+            -1.0,
+            4.0
+          ],
+          "rotation_euler_xyz": [
+            0.9056003093719482,
+            4.579728152265261e-09,
+            1.3734009265899658
+          ],
+          "linear_rgb": [
+            0.47353148460388184,
+            0.672443151473999,
+            0.8549926280975342
+          ],
+          "energy_watts": 550.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Rim / peach-dawn",
+          "type": "AREA",
+          "location_blender_z_up": [
+            0.0,
+            5.0,
+            5.0
+          ],
+          "rotation_euler_xyz": [
+            0.7853981852531433,
+            6.181721801112872e-08,
+            3.141592502593994
+          ],
+          "linear_rgb": [
+            1.0,
+            0.672443151473999,
+            0.5088813304901123
+          ],
+          "energy_watts": 1000.0,
+          "size_m": 4.0
+        }
+      ]
+    },
+    {
+      "id": "teal-moon",
+      "sky_jpeg": "teal-moon-2k.jpg",
+      "sky_exr": "teal-moon-4k.exr",
+      "view_transform": "AgX",
+      "look": "Medium High Contrast",
+      "exposure": 0.3,
+      "preview_world_strength": 0.65,
+      "lights": [
+        {
+          "name": "Key / teal-moon",
+          "type": "AREA",
+          "location_blender_z_up": [
+            -3.0,
+            -4.0,
+            7.0
+          ],
+          "rotation_euler_xyz": [
+            0.6202496290206909,
+            -3.0146779295137094e-08,
+            -0.6435012221336365
+          ],
+          "linear_rgb": [
+            0.48514994978904724,
+            0.7379103899002075,
+            0.8468732237815857
+          ],
+          "energy_watts": 700.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Fill / teal-moon",
+          "type": "AREA",
+          "location_blender_z_up": [
+            5.0,
+            -1.0,
+            4.0
+          ],
+          "rotation_euler_xyz": [
+            0.9056003093719482,
+            4.579728152265261e-09,
+            1.3734009265899658
+          ],
+          "linear_rgb": [
+            0.40724021196365356,
+            0.577580451965332,
+            0.6104955673217773
+          ],
+          "energy_watts": 420.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Rim / teal-moon",
+          "type": "AREA",
+          "location_blender_z_up": [
+            0.0,
+            5.0,
+            5.0
+          ],
+          "rotation_euler_xyz": [
+            0.7853981852531433,
+            6.181721801112872e-08,
+            3.141592502593994
+          ],
+          "linear_rgb": [
+            0.18447498977184296,
+            0.6938717365264893,
+            0.577580451965332
+          ],
+          "energy_watts": 1100.0,
+          "size_m": 4.0
+        }
+      ]
+    },
+    {
+      "id": "amber-afterglow",
+      "sky_jpeg": "amber-afterglow-2k.jpg",
+      "sky_exr": "amber-afterglow-4k.exr",
+      "view_transform": "AgX",
+      "look": "Medium High Contrast",
+      "exposure": 0,
+      "preview_world_strength": 0.35,
+      "lights": [
+        {
+          "name": "Key / amber-afterglow",
+          "type": "AREA",
+          "location_blender_z_up": [
+            -3.0,
+            -4.0,
+            7.0
+          ],
+          "rotation_euler_xyz": [
+            0.6202496290206909,
+            -3.0146779295137094e-08,
+            -0.6435012221336365
+          ],
+          "linear_rgb": [
+            1.0,
+            0.6307571530342102,
+            0.35153260827064514
+          ],
+          "energy_watts": 900.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Fill / amber-afterglow",
+          "type": "AREA",
+          "location_blender_z_up": [
+            5.0,
+            -1.0,
+            4.0
+          ],
+          "rotation_euler_xyz": [
+            0.9056003093719482,
+            4.579728152265261e-09,
+            1.3734009265899658
+          ],
+          "linear_rgb": [
+            0.4564110338687897,
+            0.5149176716804504,
+            0.8227857351303101
+          ],
+          "energy_watts": 600.0,
+          "size_m": 5.0
+        },
+        {
+          "name": "Rim / amber-afterglow",
+          "type": "AREA",
+          "location_blender_z_up": [
+            0.0,
+            5.0,
+            5.0
+          ],
+          "rotation_euler_xyz": [
+            0.7853981852531433,
+            6.181721801112872e-08,
+            3.141592502593994
+          ],
+          "linear_rgb": [
+            1.0,
+            0.40724021196365356,
+            0.18782077729701996
+          ],
+          "energy_watts": 1100.0,
+          "size_m": 4.0
+        }
+      ]
+    }
+  ]
+}

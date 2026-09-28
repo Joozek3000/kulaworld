@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Level } from '@kula/shared';
 import { levelBounds, LevelView } from './level.ts';
 import { TrapsView } from './traps.ts';
+import { createEnvironment } from './scene.ts';
+import { staticLevel, Traps2View } from './traps2.ts';
 
 const W = 320, H = 200;
 const cache = new Map<string, string>();
@@ -21,13 +23,9 @@ export function levelPreview(level: Level): string {
   renderer.setSize(W, H, false);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xd8c8e8); // lavender, like the sky
-  scene.add(new THREE.HemisphereLight(0xfff4ee, 0x6a5a88, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.8);
-  sun.position.set(3, 6, 2);
-  scene.add(sun);
-  const blocks = new LevelView(level), traps = new TrapsView(level);
-  scene.add(blocks.group, traps.group);
+  const blocks = new LevelView(staticLevel(level)), traps = new TrapsView(level), traps2 = new Traps2View(level);
+  traps2.update(0, (group) => !!level.lasers.find((laser) => laser.group === group)?.on, null, 0);
+  scene.add(blocks.group, traps.group, traps2.group);
   for (const [p, mat] of [...level.keys.map((k) => [k, keyMat] as const), ...(level.exit ? [[level.exit, exitMat] as const] : [])]) {
     const m = new THREE.Mesh(keyGeo, mat);
     m.position.set(p.cell.x, p.cell.y, p.cell.z);
@@ -38,10 +36,13 @@ export function levelPreview(level: Level): string {
   const camera = new THREE.PerspectiveCamera(35, W / H, 0.1, 500);
   camera.position.copy(center).add(new THREE.Vector3(1, 0.85, 1.25).normalize().multiplyScalar(radius * 2.5));
   camera.lookAt(center);
+  scene.add(camera);
+  createEnvironment(scene, camera, renderer)(level.id);
   renderer.render(scene, camera);
   const url = renderer.domElement.toDataURL('image/jpeg', 0.85);
   blocks.dispose();
   traps.dispose();
+  traps2.dispose();
   cache.set(level.id, url);
   return url;
 }

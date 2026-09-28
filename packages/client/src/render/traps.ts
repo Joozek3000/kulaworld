@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { ALL_DIRS, dirVec, spikesUp, type Dir, type Level, type Pose, type Tile } from '@kula/shared';
+import { art } from './art.ts';
 
 /**
- * Tiles & traps (ARCHITECTURE §18), procedural, in the ceramic look. Whole-block glazes (ice, fire tint) live in
- * LevelView's instance colours; this draws what sits on the faces: spikes, fire crosses, crumble cracks, the ice
- * gloss shell, arrows and boost pads.
+ * Face models and crumble fragments follow existing synchronized trap states.
+ * LevelView draws the whole-block models; procedural geometry remains the missing-asset fallback.
  */
 
 const IVORY = 0xf1e5cc, GOLD = 0xe8b04a, CORAL = 0xff7a59, CRACK = 0x3a2f2a;
@@ -39,8 +39,8 @@ export function onFace(block: { x: number; y: number; z: number }, face: Dir, fw
   return g;
 }
 
-interface Spikes { tile: Tile; cones: THREE.Mesh[]; holes: THREE.Mesh[]; h: number }
-interface Pad { tile: Tile; mat: THREE.MeshStandardMaterial; glow: number; chevrons: THREE.Mesh[]; run: number }
+interface Spikes { tile: Tile; cones: THREE.Mesh[]; holes: THREE.Mesh[]; h: number; states?: THREE.Group[] }
+interface Pad { tile: Tile; mat: THREE.MeshStandardMaterial; glow: number; chevrons: THREE.Mesh[]; run: number; imported?: boolean }
 interface Crumble { key: string; group: THREE.Group }
 interface Fragment { mesh: THREE.Mesh; vel: THREE.Vector3; born: number }
 
@@ -71,6 +71,15 @@ export class TrapsView {
       switch (t.type) {
         case 'spikes': {
           const g = onFace(b, t.face!), s: Spikes = { tile: t, cones: [], holes: [], h: 1 };
+          if (art.models['trap-spikes-raised'] && art.models['trap-spikes-retracted']) {
+            s.states = [art.models['trap-spikes-raised'].clone(true), art.models['trap-spikes-retracted'].clone(true)];
+            s.states[0].visible = spikesUp(t, 0);
+            s.states[1].visible = !s.states[0].visible;
+            g.add(...s.states);
+            this.spikes.push(s);
+            this.group.add(g);
+            break;
+          }
           for (const [x, z] of SPIKE_OFFSETS) {
             const hole = new THREE.Mesh(holeGeo, holeMat);
             hole.rotation.x = -Math.PI / 2;
@@ -86,6 +95,12 @@ export class TrapsView {
           break;
         }
         case 'arrow': {
+          if (art.models['tile-arrow']) {
+            const g = onFace(b, t.face!, t.dir!);
+            g.add(art.models['tile-arrow'].clone(true));
+            this.group.add(g);
+            break;
+          }
           const g = onFace(b, t.face!, t.dir!), m = new THREE.Mesh(arrow, arrowMat);
           m.rotation.set(-Math.PI / 2, 0, Math.PI); // shape +Y → local +Z (the arrow dir), extruded along the normal
           m.position.y = 0.002;
@@ -94,6 +109,25 @@ export class TrapsView {
           break;
         }
         case 'boost': {
+          const model = art.models[t.variant === 'high' ? 'pad-boost-high' : 'pad-boost-far'];
+          if (model) {
+            const g = onFace(b, t.face!, t.dir!), pad = model.clone(true), chevrons: THREE.Mesh[] = [];
+            let enamel: THREE.MeshStandardMaterial | undefined;
+            pad.traverse((object) => {
+              if (!(object instanceof THREE.Mesh)) return;
+              if (object.name.startsWith('pad-enamel')) {
+                enamel = object.material = (object.material as THREE.MeshStandardMaterial).clone();
+                enamel.emissive.copy(enamel.color);
+                enamel.emissiveIntensity = 0.1;
+                this.owned.push(enamel);
+              }
+              if (object.name.startsWith('chevron-')) chevrons.push(object);
+            });
+            g.add(pad);
+            this.group.add(g);
+            this.pads.push({ tile: t, mat: enamel!, glow: 0, chevrons, run: 0, imported: true });
+            break;
+          }
           // Local +Z is the pad's dir (phase 14b): it launches only a ball rolling on along it.
           const g = onFace(b, t.face!, t.dir!), mat = new THREE.MeshStandardMaterial({ color: CORAL, emissive: CORAL, emissiveIntensity: 0.1, roughness: 0.3 });
           this.owned.push(mat);
@@ -113,12 +147,14 @@ export class TrapsView {
           break;
         }
         case 'ice': {
+          if (art.blocks['block-ice']) break;
           const m = new THREE.Mesh(shellGeo, iceMat);
           m.position.set(b.x, b.y, b.z);
           this.group.add(m);
           break;
         }
         case 'fire':
+          if (art.blocks['block-fire']) break;
           for (const d of ALL_DIRS) {
             if (!open(b, d)) continue;
             const g = onFace(b, d);
@@ -134,6 +170,10 @@ export class TrapsView {
         case 'crumble': {
           const group = new THREE.Group(), mat = crackMat;
           group.position.set(b.x, b.y, b.z);
+          if (art.blocks['block-crumble']) {
+            this.crumbles.push({ key: `${b.x},${b.y},${b.z}`, group });
+            break;
+          }
           for (const d of ALL_DIRS) {
             if (!open(b, d)) continue;
             const g = onFace({ x: 0, y: 0, z: 0 }, d);
@@ -163,6 +203,12 @@ export class TrapsView {
   update(renderTick: number, serverTick: number, crumbling: { get(k: string): number | undefined }, onto: Pose[], dt: number, timeSec: number, charging: Pose[] = []): void {
     const k = Math.min(1, dt * 18);
     for (const s of this.spikes) {
+      if (s.states) {
+        // Swap at the authoritative phase boundary: a safe plate must never show raised tips.
+        s.states[0].visible = spikesUp(s.tile, Math.floor(renderTick));
+        s.states[1].visible = !s.states[0].visible;
+        continue;
+      }
       s.h += ((spikesUp(s.tile, Math.floor(renderTick)) ? 1 : 0) - s.h) * k;
       for (const c of s.cones) { c.scale.y = Math.max(0.02, s.h); c.position.y = 0.15 * s.h - 0.01; c.visible = s.h > 0.03; }
     }
@@ -173,9 +219,12 @@ export class TrapsView {
       const want = charging.some(on) ? 1.6 : onto.some(on) ? 1 : 0; // any direction launches now (phase 14c)
       p.glow += (want - p.glow) * Math.min(1, dt * (want > p.glow ? 20 : 4));
       p.mat.emissiveIntensity = 0.1 + 1.4 * p.glow;
-      // The chevrons run along dir all the time, faster while the pad glows; each wraps round in the pad's length.
+      // Imported chevrons pulse in place; the procedural fallback scrolls along the launch direction.
       p.run = (p.run + dt * (0.35 + 1.2 * p.glow)) % 0.6;
-      p.chevrons.forEach((c, k) => { c.position.z = ((p.run + 0.2 * k) % 0.6) - 0.3; });
+      p.chevrons.forEach((c, k) => {
+        if (p.imported) c.position.y = 0.008 * (1 + p.glow) * Math.sin(p.run / 0.6 * Math.PI * 2 - k);
+        else c.position.z = ((p.run + 0.2 * k) % 0.6) - 0.3;
+      });
     }
     for (const c of this.crumbles) {
       const at = crumbling.get(c.key);
@@ -201,6 +250,21 @@ export class TrapsView {
   /** The block breaks into eight ceramic chips that tumble away and fade. */
   private shatter(c: Crumble, timeSec: number): void {
     const [x, y, z] = c.key.split(',').map(Number);
+    const model = art.models['block-crumble-fragments'];
+    if (model) {
+      model.updateMatrixWorld(true);
+      model.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const mesh = new THREE.Mesh(object.geometry, (object.material as THREE.MeshStandardMaterial).clone());
+        object.matrixWorld.decompose(mesh.position, mesh.quaternion, mesh.scale);
+        const vel = new THREE.Vector3(Math.sign(mesh.position.x) * 0.8, 1 + Math.sign(mesh.position.y) * 0.4, Math.sign(mesh.position.z) * 0.8);
+        mesh.position.add(new THREE.Vector3(x, y, z));
+        mesh.material.transparent = true;
+        this.group.add(mesh);
+        this.frags.push({ mesh, vel, born: timeSec });
+      });
+      return;
+    }
     for (let i = 0; i < 8; i++) {
       const sx = i & 1 ? 1 : -1, sy = i & 2 ? 1 : -1, sz = i & 4 ? 1 : -1;
       const mesh = new THREE.Mesh(fragGeo, this.fragMat.clone());
