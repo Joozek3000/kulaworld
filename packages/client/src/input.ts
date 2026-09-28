@@ -1,4 +1,4 @@
-import type { Net } from './net.ts';
+import type { GameSource } from './net.ts';
 
 export interface InputHooks {
   onPress(): void; // gameplay key pressed (for the input→motion latency metric)
@@ -8,6 +8,7 @@ export interface InputHooks {
   onMute(): void; // M
   onVolume(delta: number): void; // [ and ]
   onTuning(): void; // F4 (dev)
+  onPause(): void; // Esc (single player, phase 15b)
   /** A gameplay key went down (not a repeat): its label and the event's timeStamp (latency audit). */
   onKey?(key: string, at: number): void;
 }
@@ -16,7 +17,7 @@ export interface InputHooks {
  * Keyboard per ARCHITECTURE §6/§11. Sends only on change. Turn and jump fire a pulse once per physical press;
  * forward and jump are also held states (holding Space keeps bouncing).
  */
-export function setupInput(net: Net, hooks: InputHooks): { readonly fwdHeld: boolean } {
+export function setupInput(net: Pick<GameSource, 'sendInput' | 'sendReady' | 'sendVote'>, hooks: InputHooks): { readonly fwdHeld: boolean } {
   let fwdHeld = false;
   let jumpHeld = false;
   let seq = 0;
@@ -53,6 +54,7 @@ export function setupInput(net: Net, hooks: InputHooks): { readonly fwdHeld: boo
       case 'BracketLeft': hooks.onVolume(-0.1); break;
       case 'BracketRight': hooks.onVolume(0.1); break;
       case 'F4': if (!e.repeat) hooks.onTuning(); break;
+      case 'Escape': if (!e.repeat) hooks.onPause(); break;
       case 'F3': if (!e.repeat) hooks.onDebug(); break;
       case 'F8': if (!e.repeat) hooks.onFreeze(); break;
       case 'F9': if (!e.repeat) hooks.onScreenshot(); break;

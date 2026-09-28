@@ -1,7 +1,7 @@
 import { HOP_PUSH_WINDOW, KILL_MARGIN, TICK_RATE } from '../constants.ts';
 import { ALL_DIRS, dirVec, perpendicular, type Dir } from '../dir.ts';
 import { mulberry32, rngNext } from '../rng.ts';
-import type { Level, Mode, PickupType, Placement, Pose, Vanish } from '../level/types.ts';
+import type { ItemType, Level, Mode, PickupType, Placement, Pose, Vanish } from '../level/types.ts';
 import { add, cellKey, sub, type Vec3 } from '../vec.ts';
 import { crumbleBands } from './crumble.ts';
 
@@ -85,7 +85,24 @@ export interface Pickup extends Placement { id: number; spot: number; type: Pick
 
 export interface KeyItem { id: number; cell: Vec3; collected: boolean }
 /** 'lastAlive': one knockout player left; 'allOut': the last ones were eliminated together (a draw). */
-export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' | 'lastAlive' | 'allOut' }
+/** Single player (§22): 'exit' done, 'death' (a timer death too), 'painted' a bonus level finished, 'timeout' a bonus level's time ran out. */
+export interface RaceResult { winnerId: string | null; reason: 'exit' | 'timeout' | 'lastAlive' | 'allOut' | 'death' | 'painted' }
+
+/** Single player's level state (§22, phase 15b). All ticks and points: integers. */
+export interface SingleState {
+  /** Points this attempt (items, keys); the campaign banks them when the level ends. */
+  gained: number;
+  /** Timer ticks left, and the tick a clock tile froze it until. */
+  timer: number;
+  frozenUntil: number;
+  /** Per level item (level.items order): taken this attempt. */
+  taken: boolean[];
+  /** Fruit kinds taken this attempt, as bits (1 << FRUITS index). */
+  fruits: number;
+  /** Lit paint tiles and used clock tiles (tileKeys). */
+  lit: Set<string>;
+  clocks: Set<string>;
+}
 
 /** `chain: false` turns the cradle push off: a player behind the victim bounces the pusher (phase 11 rules; soak comparisons). */
 export interface Rules { push: boolean; chain?: boolean }
@@ -139,6 +156,8 @@ export interface World {
   pickupRng: number;
   pickupSpots: Placement[] | null;
   spawnPickups: boolean;
+  /** Single player (§22): the level's timer, items and paint; null in multiplayer. */
+  single: SingleState | null;
 }
 
 export type SimEvent =
@@ -162,26 +181,32 @@ export type SimEvent =
   | { type: 'teleport'; playerId: string; result: 'go' | 'held' | 'released' }
   | { type: 'laser'; playerId: string; group: string; on: boolean }
   | { type: 'pickup'; playerId: string; pickupId: number; pickup: PickupType }
-  | { type: 'effectEnd'; playerId: string; effect: PickupType };
+  | { type: 'effectEnd'; playerId: string; effect: PickupType }
+  | { type: 'item'; playerId: string; itemId: number; item: ItemType; fruit: number; points: number }
+  | { type: 'timer'; playerId: string; kind: 'flip' | 'freeze'; ticks: number }
+  | { type: 'paint'; playerId: string; lit: number; total: number };
 
 /** Why a launch is held (phase 14c): a flown-through or landing cell is solid, the landing is taken, or its ball can't be stomped (or bumped). */
 export type BoostBlock = 'solid' | 'reserved' | 'unstompable' | 'bump';
 
 /** Why a ball died (§18), for the HUD and toasts. */
-export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn' | 'laser';
+export type DeathCause = 'fall' | 'spikes' | 'fire' | 'burn' | 'laser' | 'time';
 
-/** The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. */
+/**
+ * The level's `mode` picks the mode. Knockout always plays with push on, whatever `rules` says. Single player (§22)
+ * plays alone: no push rules, no heat, no sudden-death crumble; its timer, items and paint live in `single`.
+ */
 export function createWorld(level: Level, seed: number, rules: Rules = { push: true }): World {
-  const knockout = level.mode === 'knockout';
+  const knockout = level.mode === 'knockout', single = level.mode === 'single';
   return {
     level,
     mode: level.mode,
-    rules: knockout ? { ...rules, push: true } : rules,
+    rules: knockout ? { ...rules, push: true } : single ? { push: false } : rules,
     seed,
     rng: seed >>> 0,
     removed: new Set(),
-    knockout: level.crumble ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
-    heat: level.heat,
+    knockout: level.crumble && !single ? { bands: crumbleBands(level), next: 0, warn: -1, stopped: false } : null,
+    heat: single ? null : level.heat,
     hot: new Map(),
     lasers: new Map(level.lasers.map((l) => [l.group, l.on])),
     switchAt: new Map(),
@@ -198,6 +223,9 @@ export function createWorld(level: Level, seed: number, rules: Rules = { push: t
     pickupRng: (seed ^ 0x9e3779b9) >>> 0,
     pickupSpots: null,
     spawnPickups: true,
+    single: single ? {
+      gained: 0, timer: level.timeLimitSec * TICK_RATE, frozenUntil: 0, taken: level.items.map(() => false), fruits: 0, lit: new Set(), clocks: new Set(),
+    } : null,
   };
 }
 

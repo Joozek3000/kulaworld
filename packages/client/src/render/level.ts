@@ -8,6 +8,8 @@ export function findLevel(id: string): Level | null {
   const json = Object.values(files).find((j) => j.id === id);
   return json ? loadLevel(json) : null;
 }
+/** Every level in levels/ (the campaign's too, phase 15b). */
+export const allLevels = (): Level[] => Object.values(files).map(loadLevel);
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const fallbackMat = new THREE.MeshStandardMaterial({ roughness: 0.28 });

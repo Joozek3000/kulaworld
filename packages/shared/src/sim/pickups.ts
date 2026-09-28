@@ -21,7 +21,7 @@ export function collectPickup(world: World, p: PlayerState, events: SimEvent[]):
   const k = world.pickups.find((q) => eq(q.cell, p.pose.cell));
   if (!k) return;
   world.pickups = world.pickups.filter((q) => q !== k);
-  if (k.spot >= 0) world.pickupBack[k.spot] = world.tick + world.level.pickups[k.spot].respawnTicks;
+  if (k.spot >= 0 && !world.single) world.pickupBack[k.spot] = world.tick + world.level.pickups[k.spot].respawnTicks; // no respawn in single player (§22)
   // The same type refreshes its duration. Replaced, not mutated: the predictor keeps snapshots of this array.
   p.effects = [...p.effects.filter((e) => e.type !== k.type), { type: k.type, untilTick: world.tick + EFFECT_TICKS[k.type] }];
   events.push({ type: 'pickup', playerId: p.id, pickupId: k.id, pickup: k.type });

@@ -1,5 +1,5 @@
 import { Action, dirName, type Dir } from '@kula/shared';
-import type { Net } from '../net.ts';
+import type { GameSource } from '../net.ts';
 
 const ACTION_NAMES = Object.fromEntries(Object.entries(Action).map(([k, v]) => [v, k]));
 
@@ -21,7 +21,7 @@ export function createDebug() {
     motion() { if (pressAt) { latency = performance.now() - pressAt; pressAt = 0; samples.push(latency); } },
     /** Every measured input→motion latency (ms), for automated checks. */
     samples,
-    update(now: number, net: Net, renderTick: number, drawCalls: number, localAction: number | null, late: { count: number; max: number }, localInterp: number, extra: string[] = []) {
+    update(now: number, net: GameSource, renderTick: number, drawCalls: number, localAction: number | null, late: { count: number; max: number }, localInterp: number, extra: string[] = []) {
       frames++;
       if (now - windowStart >= 1000) { fps = (frames * 1000) / (now - windowStart); frames = 0; windowStart = now; }
       if (pressAt && now - pressAt > 2000) pressAt = 0; // press that didn't move (blocked, or not playing)

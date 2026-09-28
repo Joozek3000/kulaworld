@@ -66,6 +66,40 @@
     #tuning output { font-variant-numeric: tabular-nums; text-align: right; }
     #tuning button { font: inherit; cursor: pointer; }
     #tuning > div { margin-top: 8px; display: flex; gap: 6px; }
+    /* Single player (phase 15b): HUD extras, and the ceramic/lavender menu over the orbiting level. */
+    #hud-top .timer.flash { animation: flash 0.5s steps(2) infinite; }
+    #hud-top .timer.frozen { color: #8fd3ff; }
+    @keyframes flash { 50% { opacity: 0.25; } }
+    #hud-board .score { font-size: 1.8em; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+    #hud-board .fruits { display: flex; gap: 0.25em; justify-content: flex-end; font-size: 1.3em; }
+    .fruit.empty { filter: grayscale(1); opacity: 0.25; }
+    #hud-center .big.ready { font-size: clamp(48px, 9vh, 110px); color: #e9e2ff; }
+    #menu { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(#2a1f4a33, #120d2488); z-index: 5; }
+    .mpanel { min-width: 20em; max-width: min(40em, 92vw); padding: 1.4em 1.8em 1.6em; text-align: center; color: #3b2d63;
+      background: linear-gradient(160deg, #f6f2ff, #dcd2f5); border-radius: 22px; border: 1px solid #fff;
+      box-shadow: 0 2px 0 #fff inset, 0 -3px 0 #b7a8e0 inset, 0 18px 50px #1a103a88; }
+    .mpanel h1, .mpanel h2 { margin: 0.1em 0 0.6em; }
+    .mpanel .logo { font-size: 2.6em; letter-spacing: 0.12em; color: #6b4fc8; text-shadow: 0 2px 0 #fff, 0 4px 0 #b7a8e0; }
+    .mpanel .over { font-size: 2.6em; color: #d7263d; }
+    .mpanel .sub { color: #6c5f93; margin-bottom: 0.4em; }
+    .mpanel .col { display: flex; flex-direction: column; gap: 0.55em; margin-top: 0.8em; }
+    .mpanel .row { display: flex; gap: 0.6em; justify-content: center; margin-top: 0.8em; }
+    .mpanel .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5em; }
+    .mbtn { font: inherit; font-size: 1.05em; padding: 0.6em 1.2em; border-radius: 14px; cursor: pointer; color: #3b2d63; text-align: left;
+      background: linear-gradient(#ffffff, #ebe5fb); border: 1px solid #cbbff0; box-shadow: 0 3px 0 #b7a8e0, 0 6px 14px #6b4fc822; }
+    .mpanel .col .mbtn, .mpanel .row .mbtn { text-align: center; }
+    .mbtn:hover:not([disabled]) { background: linear-gradient(#fff, #f3efff); border-color: #8f78e0; }
+    .mbtn:active:not([disabled]) { transform: translateY(2px); box-shadow: 0 1px 0 #b7a8e0; }
+    .mbtn.primary { background: linear-gradient(#8f78e0, #6b4fc8); color: #fff; border-color: #5a3fb5; box-shadow: 0 3px 0 #4a3296, 0 6px 16px #6b4fc855; }
+    .mbtn[disabled] { opacity: 0.4; cursor: default; }
+    .mbtn small { display: block; font-size: 0.75em; opacity: 0.75; }
+    .mpanel .field { display: flex; gap: 0.6em; align-items: center; justify-content: center; margin: 0.4em 0; }
+    .mpanel input:not([type]) { font: inherit; padding: 0.35em 0.6em; border-radius: 10px; border: 1px solid #b7a8e0; }
+    .mpanel .err { color: #d7263d; margin-top: 0.4em; }
+    .mpanel table { margin: 0.6em auto 0; border-collapse: collapse; min-width: 16em; font-variant-numeric: tabular-nums; }
+    .mpanel td { padding: 0.2em 0.6em; text-align: left; } .mpanel td + td { text-align: right; }
+    .mpanel tr.total td { border-top: 2px solid #b7a8e0; font-weight: 800; }
+    .mpanel td small { opacity: 0.7; }
     #debug { position: fixed; bottom: 12px; right: 12px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
   </style>
 </head>

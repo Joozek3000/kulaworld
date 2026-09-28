@@ -10,6 +10,28 @@ const LOCKED = new THREE.Color(0x70748a), UNLOCKED = new THREE.Color(0x3ddc6f);
 const Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
 const up = new THREE.Vector3(), align = new THREE.Quaternion(), spin = new THREE.Quaternion();
 const POP_SEC = 0.35;
+// Single-player items (phase 15b, §22): placeholder primitives in flat colours.
+const coinGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 20).rotateX(Math.PI / 2);
+const gemGeo = new THREE.OctahedronGeometry(0.2).scale(1, 1.4, 1);
+const fruitGeo = new THREE.SphereGeometry(0.17, 16, 12);
+const glassGeo = new THREE.ConeGeometry(0.14, 0.2, 14);
+const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.3, ...extra });
+const coinMat = mat(0xf2c230, { metalness: 0.6, emissive: 0x4a3500 }), gemMat = mat(0x3fd0ff, { emissive: 0x0a3a55, roughness: 0.1 });
+const glassMat = mat(0xf6e7c8, { emissive: 0x3a2a10 });
+/** cherry, apple, banana, melon, grape (FRUITS order). */
+const FRUIT_MATS = [0xd7263d, 0x7ac74f, 0xf5d547, 0x9be58b, 0x7b3fa0].map((c) => mat(c));
+function scoreItem(kind: string): THREE.Object3D {
+  if (kind === 'coin') return new THREE.Mesh(coinGeo, coinMat);
+  if (kind === 'gem') return new THREE.Mesh(gemGeo, gemMat);
+  if (kind === 'hourglass') {
+    const g = new THREE.Group(), top = new THREE.Mesh(glassGeo, glassMat), bottom = new THREE.Mesh(glassGeo, glassMat);
+    top.rotation.x = Math.PI;
+    top.position.y = 0.1;
+    bottom.position.y = -0.1;
+    return g.add(top, bottom);
+  }
+  return new THREE.Mesh(fruitGeo, FRUIT_MATS[Number(kind.slice(6))] ?? FRUIT_MATS[0]); // 'fruit-N'
+}
 
 /** Spinning ceramic keys and a gate with distinct locked/open models on any gravity face. */
 export class ItemsView {
@@ -28,7 +50,7 @@ export class ItemsView {
       let m = this.meshes.get(key);
       if (!m) this.meshes.set(key, (m = this.create(item)));
       m.visible = visible;
-      if (item.kind === 'key') {
+      if (item.kind !== 'exit') { // keys and score items spin about their up
         up.copy(dirVec(item.up as Dir) as THREE.Vector3Like);
         m.quaternion.setFromUnitVectors(Y, up).multiply(spin.setFromAxisAngle(Y, timeSec * 2));
       } else if (m instanceof THREE.Group) {
@@ -39,8 +61,8 @@ export class ItemsView {
     for (const [key, m] of this.meshes) {
       if (live.has(key)) continue;
       this.meshes.delete(key);
-      // A key collected mid-round pops; anything else (new round, level change) just goes.
-      if (state.phase === 'playing' && m.userData.kind === 'key') {
+      // A key or score item collected mid-round pops; anything else (new round, level change) just goes.
+      if (state.phase === 'playing' && m.userData.kind !== 'exit') {
         const materials: THREE.Material[] = [];
         const clone = (source: THREE.Material) => {
           const material = source.clone();
@@ -71,7 +93,8 @@ export class ItemsView {
     let m: THREE.Object3D;
     if (exit && art.models['exit-locked'] && art.models['exit-open']) {
       m = new THREE.Group().add(art.models['exit-locked'].clone(true), art.models['exit-open'].clone(true));
-    } else if (!exit && art.models['key-marigold']) m = art.models['key-marigold'].clone(true);
+    } else if (item.kind !== 'key' && !exit) m = scoreItem(item.kind);
+    else if (!exit && art.models['key-marigold']) m = art.models['key-marigold'].clone(true);
     else m = new THREE.Mesh(exit ? exitGeo : keyGeo, exit ? this.exitMat : keyMat);
     m.userData.kind = item.kind;
     m.position.set(item.x, item.y, item.z);

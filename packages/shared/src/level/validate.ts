@@ -1,7 +1,7 @@
 import { dirName, dirVec, perpendicular } from '../dir.ts';
 import { cellKey, sub } from '../vec.ts';
 import { levelSolid } from './load.ts';
-import { BLOCK_TILES, FACE_TILES, MODIFIER_TILES, PICKUP_TYPES, type Level, type Placement } from './types.ts';
+import { BLOCK_TILES, FACE_TILES, ITEM_TYPES, MODIFIER_TILES, PICKUP_TYPES, type Level, type Placement } from './types.ts';
 
 /** Returns a list of human-readable errors; empty means valid. */
 export function validateLevel(level: Level): string[] {
@@ -22,7 +22,8 @@ export function validateLevel(level: Level): string[] {
     checkPlacement(`spawn ${i}`, s);
     if (!perpendicular(s.up, s.fwd)) errors.push(`spawn ${i}: fwd ${dirName(s.fwd)} is not perpendicular to up ${dirName(s.up)}`);
   });
-  if (level.spawns.length < 4) errors.push(`needs at least 4 spawns, has ${level.spawns.length}`);
+  const min = level.mode === 'single' ? 1 : 4; // a campaign level has one player (§22)
+  if (level.spawns.length < min) errors.push(`needs at least ${min} spawns, has ${level.spawns.length}`);
   if (level.sky && !(level.sky.length === 2 && level.sky.every((c) => /^#[0-9a-fA-F]{6}$/.test(c)))) {
     errors.push(`sky must be two "#rrggbb" colours, got ${JSON.stringify(level.sky)}`);
   }
@@ -41,7 +42,8 @@ export function validateLevel(level: Level): string[] {
     if (level.exit) checkPlacement('exit', level.exit);
     else errors.push('race level needs an exit');
     if (level.keys.length < level.keysRequired) errors.push(`keysRequired ${level.keysRequired} > ${level.keys.length} keys`);
-  } else errors.push(`unknown mode ${level.mode}`);
+  } else if (level.mode === 'single') validateSingle(level, errors, checkPlacement);
+  else errors.push(`unknown mode ${level.mode}`);
   validateTiles(level, errors);
   validate13b(level, errors);
   // Pickups (phase 15a): known types, placed like items, a positive respawn; a sane random spawner.
@@ -115,4 +117,29 @@ function validate13b(level: Level, errors: string[]): void {
     }
     if (level.blockTiles.get(k)?.type === 'crumble') errors.push(`vanishing block ${k}: can't also crumble`);
   }
+}
+
+/**
+ * Single player (§22): a campaign number, keys and an exit with every key required (a bonus level has neither, and
+ * needs paint tiles), items placed like keys, no random pickups, no pool.
+ */
+function validateSingle(level: Level, errors: string[], checkPlacement: (what: string, p: Placement) => void): void {
+  if (!(Number.isInteger(level.campaign) && level.campaign > 0)) errors.push(`a single-player level needs a campaign number > 0, got ${level.campaign}`);
+  if (level.pool) errors.push('a single-player level is never in the pool');
+  if (level.randomPickups) errors.push('a single-player level has no randomPickups (fixed spots only)');
+  level.keys.forEach((k, i) => checkPlacement(`key ${i}`, k));
+  if (level.bonus) {
+    if (level.keys.length || level.exit) errors.push('a bonus level has no keys or exit');
+    if (!level.tiles.some((t) => t.type === 'paint')) errors.push('a bonus level needs paint tiles');
+  } else {
+    if (level.exit) checkPlacement('exit', level.exit);
+    else errors.push('single-player level needs an exit');
+    if (level.keysRequired !== level.keys.length) errors.push(`single player needs every key: keysRequired ${level.keysRequired} ≠ ${level.keys.length} keys`);
+  }
+  level.items.forEach((it, i) => {
+    checkPlacement(`item ${i} (${it.type})`, it);
+    if (!ITEM_TYPES.includes(it.type)) errors.push(`item ${i}: unknown type ${it.type}`);
+    if ((it.type === 'fruit') !== it.fruit >= 0) errors.push(`item ${i}: a fruit needs a known fruit kind, other items none`);
+  });
+  if (!(level.parSec > 0 && level.parSec <= level.timeLimitSec)) errors.push(`parSec must be in (0, timeLimitSec], got ${level.parSec}`);
 }

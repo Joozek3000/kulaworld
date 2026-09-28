@@ -1,7 +1,7 @@
 import { CRUMBLE_REGROW_SEC, PICKUP_RESPAWN_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
 import { dirVec, parseDir } from '../dir.ts';
 import { add, cellKey, scale, vec, type Vec3 } from '../vec.ts';
-import { BLOCK_TILES, type BlockFlags, type Level, type LevelJson, type PickupType, type Tile, type Vanish } from './types.ts';
+import { BLOCK_TILES, FRUITS, type BlockFlags, type Level, type LevelJson, type PickupType, type Tile, type Vanish } from './types.ts';
 
 const v3 = (a: [number, number, number]): Vec3 => vec(a[0], a[1], a[2]);
 
@@ -93,6 +93,10 @@ export function loadLevel(json: LevelJson): Level {
       : null,
     theme: json.theme ?? null,
     notes: json.notes ?? {},
+    campaign: json.campaign ?? 0,
+    parSec: json.parSec ?? 0,
+    bonus: json.bonus ?? false,
+    items: (json.items ?? []).map((i) => ({ cell: v3(i.cell), up: parseDir(i.up), type: i.type, fruit: i.fruit ? FRUITS.indexOf(i.fruit) : -1 })),
     blockTiles,
     faceTiles,
     invisible,

@@ -1,0 +1,195 @@
+{
+  "id": "sp-04",
+  "name": "Sharp Turns",
+  "version": 1,
+  "mode": "single",
+  "pool": false,
+  "campaign": 4,
+  "heat": false,
+  "timeLimitSec": 75,
+  "parSec": 25,
+  "notes": {
+    "3.4 1,0,11 +Y": "seen from the middle lane on the way up; the edge lanes are the safe way round",
+    "3.4 3,0,11 +Y": "seen from the middle lane on the way up; the edge lanes are the safe way round"
+  },
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        4,
+        0,
+        14
+      ]
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        2,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    }
+  ],
+  "keys": [
+    {
+      "cell": [
+        2,
+        1,
+        9
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        2,
+        1,
+        13
+      ],
+      "up": "+Y"
+    }
+  ],
+  "exit": {
+    "cell": [
+      2,
+      -1,
+      1
+    ],
+    "up": "-Y"
+  },
+  "tiles": [
+    {
+      "block": [
+        1,
+        0,
+        3
+      ],
+      "type": "spikes",
+      "face": "+Y"
+    },
+    {
+      "block": [
+        3,
+        0,
+        3
+      ],
+      "type": "spikes",
+      "face": "+Y"
+    },
+    {
+      "block": [
+        2,
+        0,
+        6
+      ],
+      "type": "spikes",
+      "face": "+Y"
+    },
+    {
+      "block": [
+        2,
+        0,
+        7
+      ],
+      "type": "spikes",
+      "face": "+Y"
+    },
+    {
+      "block": [
+        1,
+        0,
+        11
+      ],
+      "type": "spikes",
+      "face": "+Y",
+      "period": 40,
+      "up": 20
+    },
+    {
+      "block": [
+        2,
+        0,
+        11
+      ],
+      "type": "spikes",
+      "face": "+Y",
+      "period": 40,
+      "up": 20
+    },
+    {
+      "block": [
+        3,
+        0,
+        11
+      ],
+      "type": "spikes",
+      "face": "+Y",
+      "period": 40,
+      "up": 20
+    }
+  ],
+  "items": [
+    {
+      "cell": [
+        0,
+        1,
+        11
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        4,
+        1,
+        11
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        2,
+        -1,
+        11
+      ],
+      "up": "-Y",
+      "type": "gem"
+    },
+    {
+      "cell": [
+        1,
+        1,
+        7
+      ],
+      "up": "+Y",
+      "type": "fruit",
+      "fruit": "melon"
+    },
+    {
+      "cell": [
+        3,
+        1,
+        6
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        5,
+        0,
+        7
+      ],
+      "up": "+X",
+      "type": "coin"
+    }
+  ],
+  "keysRequired": 2
+}

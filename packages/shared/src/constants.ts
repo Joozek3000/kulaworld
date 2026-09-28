@@ -51,3 +51,19 @@ export const HEAVY_TICKS = 8 * 20;
 export const SUNGLASSES_TICKS = 15 * 20;
 /** A fixed pickup spot comes back this long after it's taken (level `respawnSec` overrides). */
 export const PICKUP_RESPAWN_SEC = 15;
+// Single player (ARCHITECTURE §22, phase 15b). Points are Kula's.
+export const SCORE_COIN = 250;
+export const SCORE_GEM = 3000;
+export const SCORE_KEY = 1000;
+export const SCORE_FRUIT = 2500;
+/** Level completion: points per whole second left on the timer. */
+export const TIME_BONUS_PER_SEC = 20;
+/** A bonus level with every paint tile lit. */
+export const PAINT_BONUS = 10000;
+/** A death costs DEATH_PENALTY_BASE + DEATH_PENALTY_PER_LEVEL × the level number. */
+export const DEATH_PENALTY_BASE = 500;
+export const DEATH_PENALTY_PER_LEVEL = 50;
+/** A clock tile freezes the timer this long. */
+export const CLOCK_FREEZE_TICKS = 5 * 20;
+/** Every this many campaign levels is a checkpoint. */
+export const CHECKPOINT_EVERY = 5;

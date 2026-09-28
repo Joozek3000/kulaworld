@@ -568,3 +568,30 @@ Kula World's pills, as map pickups, in every mode. Score items (coins, gems, fru
 - The predictor must apply your own effects: they're synced, and they change durations and jump lengths.
 - Bots: seek takes good pills within 4 moves; everyone avoids lethargy; the bully values heavy and bouncy.
 
+## 22. Single player (phase 15b)
+
+Kula World's campaign, played fully in the browser with no server: the same shared sim, stepped locally at 20 Hz. So there's no latency and no prediction.
+
+**Flow**: Main menu → (Single player | Multiplayer) → level → results → next level. Pause menu (Esc): resume, restart level (costs a life-penalty as a death), quit to menu.
+
+**Level goal** (Kula): collect all `keysRequired` keys (in single player that's normally *all* keys), then reach the exit. The level timer runs down. At 0 it counts as a death.
+
+**Score (Kula-like)**:
+- coin 250, gem 3 000, key 1 000, fruit 2 500
+- level completion: time bonus = seconds left × 20
+- **death: −(500 + 50 × level number)**, and the level restarts with its items reset
+- game over when the score would go below 0; restart from the last checkpoint (every 5 levels)
+
+**Single-player-only items** (in the level JSON `items`, alongside pickups):
+- `coin`, `gem` (score)
+- `fruit` (5 kinds). Collecting all 5 across levels unlocks the next bonus level after the current one.
+- `hourglass`: flips the timer (remaining becomes total − remaining)
+- `clock` tile: freezes the timer for 5 s when you finish an action on it
+- Pills (§21) work as in multiplayer, with fixed spots and no respawn.
+
+**Bonus levels** (Kula): roll over every tile marked `paint` to light it. Light them all before time runs out for a big score bonus. You can't die from time here (it just ends). Falling ends it.
+
+**Rules in single player**: `push` rules irrelevant (no other balls), heat off, crumble without regrow, sudden death off.
+
+**Progress** is saved in localStorage (try/catch): the highest level reached, checkpoint score, fruits collected, best time per level. Resetting is available from the menu.
+

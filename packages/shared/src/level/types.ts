@@ -3,12 +3,13 @@ import type { Vec3 } from '../vec.ts';
 
 type V3 = [number, number, number];
 
-export type Mode = 'race' | 'knockout';
+/** 'single' (phase 15b): the campaign, one local player (ARCHITECTURE §22). */
+export type Mode = 'race' | 'knockout' | 'single';
 
 /** Tiles & traps (ARCHITECTURE §18). ice/fire/crumble cover the whole block; the rest are one face. */
-export type TileType = 'ice' | 'fire' | 'crumble' | 'spikes' | 'arrow' | 'boost' | 'teleport' | 'switch';
+export type TileType = 'ice' | 'fire' | 'crumble' | 'spikes' | 'arrow' | 'boost' | 'teleport' | 'switch' | 'clock' | 'paint';
 export const BLOCK_TILES: readonly TileType[] = ['ice', 'fire', 'crumble'];
-export const FACE_TILES: readonly TileType[] = ['spikes', 'arrow', 'boost', 'teleport', 'switch'];
+export const FACE_TILES: readonly TileType[] = ['spikes', 'arrow', 'boost', 'teleport', 'switch', 'clock', 'paint'];
 /** Lethal tile types (LEVEL-DESIGN: "lethal" also means void) and the non-lethal modifiers. */
 export const LETHAL_TILES: readonly TileType[] = ['spikes', 'fire'];
 export const MODIFIER_TILES: readonly TileType[] = ['ice', 'arrow', 'boost', 'crumble'];
@@ -67,6 +68,14 @@ export interface RandomPickupsJson { everySec: number; types: PickupType[]; maxO
 export interface PickupSpot extends Placement { type: PickupType; respawnTicks: number }
 /** `weights`: one per type, resolved from the JSON's (they sum to 100 unless every type was given). */
 export interface RandomPickups { everyTicks: number; types: PickupType[]; maxOnMap: number; weights: number[] }
+/** Single-player items (ARCHITECTURE §22, phase 15b). A fruit has one of 5 kinds. */
+export type ItemType = 'coin' | 'gem' | 'fruit' | 'hourglass';
+export const ITEM_TYPES: readonly ItemType[] = ['coin', 'gem', 'fruit', 'hourglass'];
+export const FRUITS = ['cherry', 'apple', 'banana', 'melon', 'grape'] as const;
+export type Fruit = (typeof FRUITS)[number];
+export interface ItemJson { cell: V3; up: DirName; type: ItemType; fruit?: Fruit }
+/** `fruit`: the kind's index in FRUITS, -1 for other items. */
+export interface ItemSpot extends Placement { type: ItemType; fruit: number }
 /** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
 export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
 
@@ -99,6 +108,12 @@ export interface LevelJson {
   /** Pickups (phase 15a): fixed spots, and seeded random spawns on safe tiles. */
   pickups?: PickupJson[];
   randomPickups?: RandomPickupsJson;
+  /** Single player (phase 15b, §22): the campaign order (bonus levels have their own), par time, a paint bonus
+   * level, and the score items. */
+  campaign?: number;
+  parSec?: number;
+  bonus?: boolean;
+  items?: ItemJson[];
   /** One non-lethal trap type exempt from the modifier cap (LEVEL-DESIGN 7.2), e.g. "ice" for an ice rink. */
   theme?: TileType;
   /** Why a level:check warning is intentional, keyed by the id it prints (e.g. "7.5 3,0,4|+Y"). Text only. */
@@ -135,6 +150,11 @@ export interface Level {
   randomPickups: RandomPickups | null;
   theme: TileType | null;
   notes: Record<string, string>;
+  /** Single player (§22): campaign number (0: not a campaign level), par in seconds, bonus (paint) level, items. */
+  campaign: number;
+  parSec: number;
+  bonus: boolean;
+  items: ItemSpot[];
   /** Whole-block tiles by block cellKey, face tiles by tileKey (block cellKey|face). */
   blockTiles: Map<string, Tile>;
   faceTiles: Map<string, Tile>;

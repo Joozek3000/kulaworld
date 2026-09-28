@@ -1,0 +1,123 @@
+{
+  "id": "sp-02",
+  "name": "Over the Edge",
+  "version": 1,
+  "mode": "single",
+  "pool": false,
+  "campaign": 2,
+  "heat": false,
+  "timeLimitSec": 60,
+  "parSec": 15,
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        2,
+        0,
+        4
+      ]
+    },
+    {
+      "min": [
+        0,
+        0,
+        6
+      ],
+      "max": [
+        2,
+        0,
+        10
+      ]
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        1,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    }
+  ],
+  "keys": [
+    {
+      "cell": [
+        1,
+        1,
+        8
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        1,
+        -1,
+        9
+      ],
+      "up": "-Y"
+    }
+  ],
+  "exit": {
+    "cell": [
+      1,
+      -1,
+      1
+    ],
+    "up": "-Y"
+  },
+  "items": [
+    {
+      "cell": [
+        1,
+        1,
+        6
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        0,
+        -1,
+        3
+      ],
+      "up": "-Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        2,
+        -1,
+        3
+      ],
+      "up": "-Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        1,
+        0,
+        11
+      ],
+      "up": "+Z",
+      "type": "gem"
+    },
+    {
+      "cell": [
+        3,
+        0,
+        8
+      ],
+      "up": "+X",
+      "type": "fruit",
+      "fruit": "apple"
+    }
+  ],
+  "keysRequired": 2
+}

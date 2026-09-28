@@ -16,6 +16,9 @@ import { LETHAL_TILES, MODIFIER_TILES, type Level, type Pose, type Tile, type Ti
 export interface RuleFinding { rule: string; error: boolean; where: string; msg: string; note?: string }
 export const findingId = (f: Pick<RuleFinding, 'rule' | 'where'>): string => `${f.rule} ${f.where}`;
 
+/** Tile types fine next to a spawn (rule 1.2): nothing forces or hurts you there. Clock and paint are 15b's. */
+const HARMLESS: readonly TileType[] = ['arrow', 'teleport', 'switch', 'clock', 'paint'];
+
 /** A place a ball stands: its (air) cell and up. The tile is the face `up` of block `cell − up`. */
 interface Spot { cell: Vec3; up: Dir }
 const spotKey = (s: Spot) => `${cellKey(s.cell)}|${s.up}`;
@@ -265,7 +268,7 @@ export function checkTrapRules(level: Level): RuleFinding[] {
     out.push({ rule, error, where, msg, note: error ? undefined : level.notes[id] });
   };
   const all = spots(w);
-  const race = level.mode === 'race';
+  const race = level.mode !== 'knockout'; // keys and an exit: race, or single player (15b)
   const spawnSpots: Spot[] = level.spawns.map((s) => ({ cell: s.cell, up: s.up }));
 
   // 1. Spawns are safe.
@@ -280,7 +283,7 @@ export function checkTrapRules(level: Level): RuleFinding[] {
   for (const { spot, d } of distances(w, spawnSpots, 3).values()) {
     const t = types(w, spot);
     if (d <= 2) {
-      if (t.some((x) => x !== 'arrow' && x !== 'teleport' && x !== 'switch')) add1('1.2', true, at(spot), `${t.join('+')} ${d} move(s) from a spawn`);
+      if (t.some((x) => !HARMLESS.includes(x))) add1('1.2', true, at(spot), `${t.join('+')} ${d} move(s) from a spawn`);
       if (beam(spot)) add1('1.2', true, at(spot), `a laser beam ${d} move(s) from a spawn`);
       if (t.includes('teleport')) add1('10.1', true, at(spot), `teleporter ${d} move(s) from a spawn`);
       if (t.includes('switch')) add1('10.5', true, at(spot), `switch ${d} move(s) from a spawn`);
@@ -381,7 +384,7 @@ export function checkTrapRules(level: Level): RuleFinding[] {
 
   // 5.2: crumble that never regrows (no regrowSec: single player) is never the only link to a key or the exit.
   const solid = level.tiles.filter((t) => t.type === 'crumble' && !t.regrows);
-  if (race && solid.length) {
+  if (level.mode === 'race' && solid.length) { // single player's crumble never regrows either, but it's one ball: a bridge you cross once
     const cut = createWorld(level, 0);
     for (const t of solid) cut.removed.add(cellKey(t.block));
     level.spawns.forEach((s, i) => {
@@ -417,7 +420,7 @@ export function checkTrapRules(level: Level): RuleFinding[] {
         if (!standable(w, prev) || spotKey(move(w, prev, d)) !== spotKey(c) || types(w, prev).length) break;
         c = prev;
       }
-      if (plain === 3) add1('7.5', false, at(s), `lethal at the end of a push lane along ${dirName(d)}`);
+      if (plain === 3 && level.mode !== 'single') add1('7.5', false, at(s), `lethal at the end of a push lane along ${dirName(d)}`);
     }
   }
   check13b(level, w, all, goals, reach, add1);

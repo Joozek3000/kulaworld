@@ -22,7 +22,7 @@ export interface GameState {
   levelId: string; winnerId: string; players: MapLike<PlayerS>; items: MapLike<ItemS>;
   /** Pickups on the map (15a), by id. */
   pickups: MapLike<ItemS>;
-  mode: 'race' | 'knockout'; crumbled: number; warnBand: number; nextCrumbleTick: number;
+  mode: 'race' | 'knockout' | 'single'; crumbled: number; warnBand: number; nextCrumbleTick: number;
   /** Hot tiles (phase 12c): tileKey → heat in ticks. */
   hot: MapLike<number>;
   /** Crumble tiles (§18): block cellKey → the tick it vanishes (or vanished). */
@@ -34,6 +34,23 @@ export interface GameState {
   voteCounts: ArrayLike<number>;
 }
 
+/**
+ * What the renderer, HUD and audio read (phase 15b): the server's room (Net) or the local single-player game
+ * (LocalGame). `estServerTick` is the clock to render at.
+ */
+export interface GameSource {
+  readonly state: GameState;
+  readonly sessionId: string;
+  readonly estServerTick: number;
+  readonly ping: number;
+  readonly patchRate: number;
+  update(now: number, dtMs: number): void;
+  onEvent(cb: (e: SimEvent) => void): void;
+  sendInput(input: Input): void;
+  sendReady(): void;
+  sendVote(option: number): void;
+}
+
 const TICK_MS = 50;
 const SNAP_TICKS = 5;
 
@@ -41,7 +58,7 @@ const params = new URLSearchParams(location.search);
 export const playerName = params.get('name') ?? `P-${Math.floor(1000 + Math.random() * 9000)}`;
 export const serverUrl = params.get('server') ?? `ws://${location.hostname}:2567`;
 
-export class Net {
+export class Net implements GameSource {
   /** Smoothed estimate of the server's round clock (float); never goes backwards except on a reset. */
   estServerTick = 0;
   ping = 0;
@@ -107,6 +124,6 @@ export class Net {
   sendVote(option: number): void { this.room.send('vote', option); }
 }
 
-export async function connect(): Promise<Net> {
-  return new Net(await new Client(serverUrl).joinOrCreate('race', { name: playerName }));
+export async function connect(name = playerName): Promise<Net> {
+  return new Net(await new Client(serverUrl).joinOrCreate('race', { name }));
 }

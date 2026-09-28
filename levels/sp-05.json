@@ -1,0 +1,222 @@
+{
+  "id": "sp-05",
+  "name": "Hot Steps",
+  "version": 1,
+  "mode": "single",
+  "pool": false,
+  "campaign": 5,
+  "heat": false,
+  "timeLimitSec": 70,
+  "parSec": 20,
+  "notes": {
+    "4.3 0,0,9 +Y": "the fire strip teaches Kula's rule: crossing it is one landing, rolling along it pops you",
+    "4.3 0,0,9 -Y": "the fire strip teaches Kula's rule: crossing it is one landing, rolling along it pops you"
+  },
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        3,
+        0,
+        3
+      ]
+    },
+    {
+      "min": [
+        1,
+        0,
+        4
+      ],
+      "max": [
+        1,
+        0,
+        7
+      ]
+    },
+    {
+      "min": [
+        0,
+        0,
+        8
+      ],
+      "max": [
+        3,
+        0,
+        11
+      ]
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        0,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    }
+  ],
+  "keys": [
+    {
+      "cell": [
+        2,
+        1,
+        8
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        1,
+        1,
+        11
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        2,
+        -1,
+        10
+      ],
+      "up": "-Y"
+    }
+  ],
+  "exit": {
+    "cell": [
+      0,
+      1,
+      11
+    ],
+    "up": "+Y"
+  },
+  "tiles": [
+    {
+      "block": [
+        0,
+        0,
+        9
+      ],
+      "type": "fire"
+    },
+    {
+      "block": [
+        1,
+        0,
+        9
+      ],
+      "type": "fire"
+    },
+    {
+      "block": [
+        2,
+        0,
+        9
+      ],
+      "type": "fire"
+    },
+    {
+      "block": [
+        3,
+        0,
+        9
+      ],
+      "type": "fire"
+    },
+    {
+      "block": [
+        1,
+        0,
+        4
+      ],
+      "type": "crumble"
+    },
+    {
+      "block": [
+        1,
+        0,
+        5
+      ],
+      "type": "crumble"
+    },
+    {
+      "block": [
+        1,
+        0,
+        6
+      ],
+      "type": "crumble"
+    },
+    {
+      "block": [
+        1,
+        0,
+        7
+      ],
+      "type": "crumble"
+    }
+  ],
+  "items": [
+    {
+      "cell": [
+        3,
+        1,
+        11
+      ],
+      "up": "+Y",
+      "type": "gem"
+    },
+    {
+      "cell": [
+        1,
+        1,
+        5
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        1,
+        1,
+        6
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        0,
+        -1,
+        9
+      ],
+      "up": "-Y",
+      "type": "fruit",
+      "fruit": "grape"
+    },
+    {
+      "cell": [
+        3,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        2,
+        1,
+        2
+      ],
+      "up": "+Y",
+      "type": "coin"
+    }
+  ],
+  "keysRequired": 3
+}

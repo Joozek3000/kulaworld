@@ -1,4 +1,4 @@
-import { KNOCKOUT_CREDIT_TICKS } from '../constants.ts';
+import { KNOCKOUT_CREDIT_TICKS, SCORE_KEY } from '../constants.ts';
 import { eq } from '../vec.ts';
 import type { PlayerState, SimEvent, World } from './world.ts';
 
@@ -10,6 +10,7 @@ export function onLand(world: World, p: PlayerState, events: SimEvent[]): void {
     k.collected = true;
     p.keys++;
     p.keyIds.push(k.id);
+    if (world.single) world.single.gained += SCORE_KEY;
     events.push({ type: 'key', playerId: p.id, keyId: k.id, keys: p.keys });
   }
   const exit = world.level.exit;

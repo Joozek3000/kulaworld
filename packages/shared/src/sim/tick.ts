@@ -9,6 +9,7 @@ import { boostBlock, previewAction, standingAt, startAction, startFall, turnFwd,
 import { checkTimeout, onDeath, onLand } from './keyRace.ts';
 import { loseLife, stepCrumble, stepKnockout } from './knockout.ts';
 import { collectPickup, ownTicks, stepPickups } from './pickups.ts';
+import { landSingle, stepTimer } from './single.ts';
 import { beamAt, beamHit, blockTileAt, faceTileAt, forcedAfter, fwdAllowed, onIce, pathCells, spiked } from './tiles.ts';
 import {
   Action, airHop, hasEffect, isFree, isPushable, occupiedCells, pushableState, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
@@ -76,7 +77,9 @@ export function step(world: World): SimEvent[] {
   updateHeat(world, events);
 
   if (world.mode === 'knockout') stepKnockout(world, events);
-  else {
+  else if (world.single) { // §22: the timer running out is a death (a bonus level just ends)
+    if (stepTimer(world, events)) for (const p of order) if (p.action !== Action.Dead) die(world, p, events, 'time');
+  } else {
     stepCrumble(world, events);
     checkTimeout(world, events);
   }
@@ -468,6 +471,10 @@ function die(world: World, p: PlayerState, events: SimEvent[], cause: DeathCause
   events.push({ type: 'death', playerId: p.id, cell: p.pose.cell, cause });
   const creditId = onDeath(world, p, events);
   if (world.mode === 'knockout') loseLife(world, p, creditId, events);
+  if (world.single && !world.result) { // single player (§22): a death ends the attempt; the campaign restarts the level
+    world.result = { winnerId: null, reason: 'death' };
+    events.push({ type: 'win', winnerId: null, reason: 'death' });
+  }
 }
 
 /**
@@ -517,6 +524,7 @@ function stepCrumbleTiles(world: World): void {
   for (const [key, at] of world.crumbling) {
     if (world.tick < at) continue;
     if (!world.removed.has(key)) { world.removed.add(key); continue; }
+    if (world.single) continue; // single player: crumble never regrows (§22)
     if (world.tick < at + world.level.blockTiles.get(key)!.regrowTicks) continue;
     taken ??= new Set(world.players.flatMap((p) => occupiedCells(p).map(cellKey))); // high hoppers too
     if (taken.has(key) || bandRemoved(world, key)) continue;
@@ -647,6 +655,7 @@ function finishAction(world: World, p: PlayerState, events: SimEvent[]): void {
     stun(p, tick, finished === Action.Knocked && bounced); // stagger: not pushable (§14); a head-on's knock-back ends in a bounce-stun (§20)
   }
   collectPickup(world, p, events); // pills (§21): any finish in the cell, a knock too
+  landSingle(world, p, events); // single player (§22): items, clock and paint tiles
   onLand(world, p, events);
 }
 

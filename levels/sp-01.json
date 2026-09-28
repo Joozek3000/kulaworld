@@ -1,0 +1,120 @@
+{
+  "id": "sp-01",
+  "name": "First Roll",
+  "version": 1,
+  "mode": "single",
+  "pool": false,
+  "campaign": 1,
+  "heat": false,
+  "timeLimitSec": 60,
+  "parSec": 15,
+  "boxes": [
+    {
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        2,
+        0,
+        8
+      ]
+    }
+  ],
+  "spawns": [
+    {
+      "cell": [
+        1,
+        1,
+        0
+      ],
+      "up": "+Y",
+      "fwd": "+Z"
+    }
+  ],
+  "keys": [
+    {
+      "cell": [
+        1,
+        1,
+        4
+      ],
+      "up": "+Y"
+    },
+    {
+      "cell": [
+        1,
+        -1,
+        6
+      ],
+      "up": "-Y"
+    }
+  ],
+  "exit": {
+    "cell": [
+      1,
+      1,
+      8
+    ],
+    "up": "+Y"
+  },
+  "items": [
+    {
+      "cell": [
+        1,
+        1,
+        2
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        1,
+        1,
+        6
+      ],
+      "up": "+Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        1,
+        -1,
+        4
+      ],
+      "up": "-Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        1,
+        -1,
+        2
+      ],
+      "up": "-Y",
+      "type": "coin"
+    },
+    {
+      "cell": [
+        2,
+        1,
+        3
+      ],
+      "up": "+Y",
+      "type": "fruit",
+      "fruit": "cherry"
+    },
+    {
+      "cell": [
+        -1,
+        0,
+        4
+      ],
+      "up": "-X",
+      "type": "gem"
+    }
+  ],
+  "keysRequired": 2
+}

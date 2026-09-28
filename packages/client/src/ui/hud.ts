@@ -1,6 +1,11 @@
 import { EFFECT_TICKS, RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type PickupType, type TileType } from '@kula/shared';
 import type { GameState, PlayerS } from '../net.ts';
 import { PILL_ICONS } from '../render/players.ts';
+import type { LocalState } from '../local.ts';
+import { fruitSlots } from './menu.ts';
+
+/** Single player's HUD extras (§22): the campaign's banked score and fruits, and the level's label. */
+export interface SingleHud { score: number; fruits: number; label: string }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const dot = (color: string) => `<span class="dot" style="background:${esc(color)}"></span>`;
@@ -10,7 +15,7 @@ const LOBBY_CONTROLS = '1–4 or click to vote · R ready · M mute';
 /** Lobby cards (phase 14): one icon per trap type a level uses. */
 const TRAP_ICONS: Record<TileType | 'laser' | 'invisible' | 'vanish', [string, string]> = {
   spikes: ['▲', 'spikes'], fire: ['🔥', 'fire'], crumble: ['▦', 'crumble'], ice: ['❄', 'ice'], arrow: ['➜', 'arrows'], boost: ['⏫', 'boost'],
-  teleport: ['◎', 'teleporters'], switch: ['⚡', 'lasers'], laser: ['⚡', 'lasers'], invisible: ['▢', 'invisible blocks'], vanish: ['◌', 'vanishing blocks'],
+  teleport: ['◎', 'teleporters'], switch: ['⚡', 'lasers'], clock: ['⏱', 'clock'], paint: ['🎨', 'paint'], laser: ['⚡', 'lasers'], invisible: ['▢', 'invisible blocks'], vanish: ['◌', 'vanishing blocks'],
 };
 const trapIcons = (level: Level) => [...new Set([
   ...level.tiles.map((t) => (t.type === 'switch' ? 'laser' : t.type)),
@@ -80,6 +85,26 @@ export function createHud(lobby: LobbyHooks) {
   return {
     error(text: string) { set(top, esc(text)); },
 
+    /** Hides every HUD panel (the main menu). */
+    clear() { for (const el of [top, center, board, status, fx]) set(el, ''); },
+
+    /**
+     * Single player (§22): score, the level timer (flashing under 10 s, blue while a clock froze it), keys x/total (or
+     * the paint count on a bonus level), the 5 fruit slots, the pill rings, and the level name.
+     */
+    single(s: LocalState, me: string, sp: SingleHud, muted: boolean) {
+      const v = s.single, mine = s.players.get(me);
+      const secs = Math.ceil(v.timer / TICK_RATE), low = secs <= 10 && !v.frozen && s.phase === 'playing';
+      const sound = muted ? ' · <span class="muted">muted</span>' : '';
+      set(fx, s.phase === 'playing' ? pillRings(mine, s.tick) : '');
+      set(top, `<span class="timer${low ? ' warn flash' : ''}${v.frozen ? ' frozen' : ''}">${v.frozen ? '⏸ ' : ''}${clock(secs)}</span> · <b>${esc(sp.label)}</b>${sound}`);
+      set(board, `<div class="score">${sp.score.toLocaleString('en-US')}</div><div class="fruits">${fruitSlots(sp.fruits | v.fruits)}</div>`);
+      const goal = v.paintTotal && !v.keysTotal ? `Paint <b>${v.lit.size}/${v.paintTotal}</b>`
+        : `Keys <b>${mine?.keys ?? 0}/${v.keysTotal}</b> · ${(mine?.keys ?? 0) >= v.keysTotal ? '<span class="ok">Exit OPEN</span>' : '<span class="dim">Exit locked</span>'}`;
+      set(status, s.phase === 'countdown' ? `${esc(sp.label)} · get ready` : goal);
+      set(center, s.phase === 'countdown' ? '<div class="big ready">READY</div>' : '');
+    },
+
     toast(text: string, color: string) {
       const el = document.createElement('div');
       el.className = 'toast';
@@ -89,7 +114,8 @@ export function createHud(lobby: LobbyHooks) {
       setTimeout(() => el.remove(), TOAST_MS);
     },
 
-    update(s: GameState, me: string, level: Level | null, muted: boolean) {
+    update(s: GameState, me: string, level: Level | null, muted: boolean, sp?: SingleHud) {
+      if (sp && 'single' in s) { this.single(s as LocalState, me, sp, muted); return; }
       const MOVE = '<div class="big move">MOVE!</div>';
       const mine = s.players.get(me);
       const required = level?.keysRequired ?? 0;

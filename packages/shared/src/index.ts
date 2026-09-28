@@ -15,6 +15,8 @@ export * from './sim/keyRace.ts';
 export * from './sim/tick.ts';
 export * from './sim/path.ts';
 export * from './sim/pickups.ts';
+export * from './sim/single.ts';
+export * from './sim/campaign.ts';
 export * from './sim/tiles.ts';
 export * from './sim/crumble.ts';
 export * from './sim/knockout.ts';
