@@ -4,3 +4,7 @@ dist
 coverage
 # decoded from the committed mp3 source (a generated intermediate)
 assets/audio/temporary-bounce/decoded-source.wav
+*.log
+.DS_Store
+Thumbs.db
+.vscode/

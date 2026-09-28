@@ -36,4 +36,5 @@ Workflow:
 | 13b | Traps 2 | Teleporters, lasers + switches, invisible/vanishing blocks |
 | 15a | Pickups & pills | Coins/gems/fruit, hourglass/clock, bouncy/lethargy/heavy pills, sunglasses |
 | 15b | Single player | Client-local sim, Kula scoring/timer/lives, 10-level campaign, save progress |
-| 16 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |
+| 17 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button |
+| 16 | GitHub prep | README, CI (typecheck/test/level:check), gc, main branch; push to a private repo |
