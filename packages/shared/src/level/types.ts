@@ -62,9 +62,11 @@ export interface Laser { group: string; from: Vec3; dir: Dir; length: number; on
 export type PickupType = 'bouncy' | 'lethargy' | 'heavy' | 'sunglasses';
 export const PICKUP_TYPES: readonly PickupType[] = ['bouncy', 'lethargy', 'heavy', 'sunglasses'];
 export interface PickupJson { cell: V3; up: DirName; type: PickupType; respawnSec?: number }
-export interface RandomPickupsJson { everySec: number; types: PickupType[]; maxOnMap: number }
+/** `weights` (15b): percent per type; types left out share the rest equally. Default `{ lethargy: 15 }`. */
+export interface RandomPickupsJson { everySec: number; types: PickupType[]; maxOnMap: number; weights?: Partial<Record<PickupType, number>> }
 export interface PickupSpot extends Placement { type: PickupType; respawnTicks: number }
-export interface RandomPickups { everyTicks: number; types: PickupType[]; maxOnMap: number }
+/** `weights`: one per type, resolved from the JSON's (they sum to 100 unless every type was given). */
+export interface RandomPickups { everyTicks: number; types: PickupType[]; maxOnMap: number; weights: number[] }
 /** Knockout floor crumbling (ARCHITECTURE §15), in seconds. */
 export interface Crumble { startSec: number; intervalSec: number; warnSec: number }
 

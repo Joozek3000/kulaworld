@@ -355,9 +355,9 @@
   "pickups": [
     {
       "cell": [
-        3,
+        0,
         1,
-        8
+        5
       ],
       "up": "+Y",
       "type": "heavy"

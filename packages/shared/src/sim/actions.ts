@@ -3,7 +3,7 @@ import { cross, dirVec, opposite, type Dir } from '../dir.ts';
 import type { Pose } from '../level/types.ts';
 import { add, cellKey, eq, sub, type Vec3 } from '../vec.ts';
 import { ownTicks } from './pickups.ts';
-import { faceTileAt, fwdAllowed } from './tiles.ts';
+import { faceTileAt, fwdAllowed, onIce } from './tiles.ts';
 import { Action, airHop, hasEffect, isFree, isPushable, isSolid, outOfBounds, reservations, type BoostBlock, type Cmd, type Effect, type PlayerState, type Reservations, type World } from './world.ts';
 
 /** `over`: a forward jump over a player on A1. `bump`: a stomp jump's bump cell B (§16). */
@@ -23,8 +23,8 @@ export type Mover = Pick<PlayerState, 'id' | 'pose'> & { effects?: readonly Effe
 /**
  * What `cmd` would do for a player at `self.pose`, or null if it is blocked.
  * Pure: reads the world, never mutates it. Bots use it for BFS.
- * Pills (§21): with bouncy, a forward roll is a 2-cell jump (a plain roll only where that jump can't start: a wall
- * ahead is still climbed) and a forward jump is 3 cells; with lethargy every duration is ×1.6.
+ * Pills (§21): with bouncy, a forward roll is a 2-cell jump (a plain roll only where that jump can't start, or on ice:
+ * a wall ahead is still climbed) and a forward jump is 3 cells; with lethargy every duration is ×1.6.
  */
 export function previewAction(world: World, self: Mover, cmd: Cmd, res: Reservations = reservations(world)): Plan | null {
   const plan = preview(world, self, cmd, res);
@@ -70,7 +70,8 @@ function preview(world: World, self: Mover, cmd: Cmd, res: Reservations): Plan |
       const A = add(C, F);
       // A wall ahead becomes the floor (§5, phase 11): the ball stays in C and turns up onto it.
       if (isSolid(world, A)) return { action: Action.Climb, to: { cell: C, up: opposite(fwd), fwd: up }, ticks: CLIMB_TICKS };
-      const bounce = bouncy ? jump(2) : null;
+      // On ice a bouncy ball still rolls, so ice slides stay slides (15b: bouncy doesn't change forced moves).
+      const bounce = bouncy && !onIce(world, self.pose) ? jump(2) : null;
       if (bounce) return bounce;
       if (!free(A)) return null; // a player
       const below = sub(A, U);

@@ -108,7 +108,7 @@ function switchTraps(state: Players, selfId: string, world: World, skip: (id: st
 /** bully: extra moves it will take to reach a switch that zaps someone (15a: was 4; it never triggered in the 13b soak). */
 const SWITCH_DETOUR = 8;
 /** Pills (15a): seek takes a good one this close (moves) if it costs at most PILL_EXTRA moves on its way to the goal; */
-const SEEK_PILL_MOVES = 4, PILL_EXTRA = 2;
+const SEEK_PILL_MOVES = 4, PILL_EXTRA = 4; // 15b: was 2
 /** the bully (and any hunter) this close, whatever it costs. */
 const HUNT_PILL_MOVES = 6;
 const GOOD_PILLS: readonly PickupType[] = ['bouncy', 'heavy'];

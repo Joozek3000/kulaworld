@@ -1,7 +1,7 @@
 import { CRUMBLE_REGROW_SEC, PICKUP_RESPAWN_SEC, HEAT_BURN_TICKS, HEAT_WARN_TICKS, TICK_RATE } from '../constants.ts';
 import { dirVec, parseDir } from '../dir.ts';
 import { add, cellKey, scale, vec, type Vec3 } from '../vec.ts';
-import { BLOCK_TILES, type BlockFlags, type Level, type LevelJson, type Tile, type Vanish } from './types.ts';
+import { BLOCK_TILES, type BlockFlags, type Level, type LevelJson, type PickupType, type Tile, type Vanish } from './types.ts';
 
 const v3 = (a: [number, number, number]): Vec3 => vec(a[0], a[1], a[2]);
 
@@ -86,7 +86,10 @@ export function loadLevel(json: LevelJson): Level {
       cell: v3(p.cell), up: parseDir(p.up), type: p.type, respawnTicks: Math.round((p.respawnSec ?? PICKUP_RESPAWN_SEC) * TICK_RATE),
     })),
     randomPickups: json.randomPickups
-      ? { everyTicks: Math.round(json.randomPickups.everySec * TICK_RATE), types: json.randomPickups.types, maxOnMap: json.randomPickups.maxOnMap }
+      ? {
+        everyTicks: Math.round(json.randomPickups.everySec * TICK_RATE), types: json.randomPickups.types, maxOnMap: json.randomPickups.maxOnMap,
+        weights: pickupWeights(json.randomPickups.types, json.randomPickups.weights ?? { lethargy: 15 }),
+      }
       : null,
     theme: json.theme ?? null,
     notes: json.notes ?? {},
@@ -102,3 +105,11 @@ export function loadLevel(json: LevelJson): Level {
 
 /** A block in the level as authored. The sim asks `isSolid(world, v)` instead, which also sees crumbled blocks. */
 export const levelSolid = (level: Level, v: Vec3): boolean => level.solid.has(cellKey(v));
+
+/** Percent per type (15b): the given ones, and the rest of 100 split equally among the others. A lone type gets it all. */
+function pickupWeights(types: PickupType[], given: Partial<Record<PickupType, number>>): number[] {
+  if (types.length === 1) return [100];
+  const rest = types.filter((t) => given[t] === undefined);
+  const share = rest.length ? (100 - types.reduce((a, t) => a + (given[t] ?? 0), 0)) / rest.length : 0;
+  return types.map((t) => given[t] ?? share);
+}

@@ -349,3 +349,45 @@ describe('§11 checker', () => {
     expect(findings(base({ pickups: [pill([3, 1, 3], 'heavy')] }))).toMatchObject([{ rule: '11.4', error: false }]);
   });
 });
+
+describe('15a follow-ups (15b)', () => {
+  test('random pickup weights: lethargy 15 % by default, the others share the rest; weights can rule a type out', () => {
+    const lvl = (weights?: Partial<Record<PickupType, number>>) =>
+      loadLevel(levelJson(row(0, 12), [east(0)], { randomPickups: { everySec: 1, types: ['bouncy', 'heavy', 'lethargy', 'sunglasses'], maxOnMap: 1, weights } }));
+    expect(lvl().randomPickups!.weights.map((w) => Math.round(w * 100) / 100)).toEqual([28.33, 28.33, 15, 28.33]);
+    expect(lvl({ lethargy: 0, heavy: 40 }).randomPickups!.weights).toEqual([30, 40, 0, 30]);
+    const count = (weights?: Partial<Record<PickupType, number>>) => {
+      const n: Record<string, number> = {};
+      for (let seed = 0; seed < 400; seed++) {
+        const w = createWorld(lvl(weights), seed);
+        w.tick = 19;
+        step(w);
+        for (const k of w.pickups) n[k.type] = (n[k.type] ?? 0) + 1;
+      }
+      return n;
+    };
+    const d = count();
+    expect(d.lethargy / 400).toBeGreaterThan(0.08);
+    expect(d.lethargy / 400).toBeLessThan(0.22);
+    expect(count({ lethargy: 0 }).lethargy).toBeUndefined();
+  });
+
+  test('bouncy on ice: a forward move is a roll, so the slide carries on', () => {
+    const w = world(row(0, 6), [east(1)], { tiles: [1, 2, 3].map((x): TileJson => ({ block: [x, 0, 0], type: 'ice' })) });
+    give(player(w), 'bouncy');
+    press(w, W, 'p0');
+    expect(player(w).action).toBe(Action.Roll);
+    run(w, 3 * ROLL_TICKS + 1);
+    expect([player(w).action, player(w).pose.cell]).toEqual([Action.Idle, vec(4, 1, 0)]);
+  });
+
+  test('a fall onto a heavy ball: the faller rebounds into a hop (no overlap), then stomps once heavy ends', () => {
+    const w = world([...row(0, 2), [4, -2, 0], [5, -2, 0], [3, -2, 0]], [east(2), [[4, -1, 0], '+Y', '-Z']]);
+    player(w, 'p1').effects = [{ type: 'heavy', untilTick: 40 }];
+    const events = [...press(w, JUMP, 'p0'), ...run(w, 15)];
+    expect(of(events, 'bounce').map((e) => e.playerId)).toEqual(['p0']);
+    expect([player(w).action, player(w).pose.cell]).toEqual([Action.Hop, vec(4, -1, 0)]);
+    const later = run(w, 40);
+    expect(of(later, 'stomp')).toEqual([{ type: 'stomp', attackerId: 'p0', victimId: 'p1' }]);
+  });
+});

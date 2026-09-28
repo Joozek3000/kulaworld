@@ -571,10 +571,15 @@ function landStomp(world: World, p: PlayerState, events: SimEvent[]): boolean {
 
 /**
  * A fall lands on a grounded, stompable player (§16): it's knocked one cell, in the first free direction of the
- * faller's fwd, left, right, back. None free: the MVP overlap rule.
+ * faller's fwd, left, right, back. None free: the MVP overlap rule. A heavy one (§21) bounces the faller into a hop.
  */
 function fallStomp(world: World, p: PlayerState, events: SimEvent[]): void {
   const v = standingAt(world, p.pose.cell, p.pose.up, p.id);
+  if (v && hasEffect(v, 'heavy') && pushableState(v, world.tick)) { // heavy (15b): the faller rebounds and re-hops, as a hop does
+    startAction(p, { action: Action.Hop, to: p.pose, ticks: JUMP_TICKS }, world.tick);
+    events.push({ type: 'bounce', playerId: p.id });
+    return;
+  }
   if (!v || !isPushable(v, world.tick)) return;
   const { up, fwd } = p.pose;
   const res = reservations(world);

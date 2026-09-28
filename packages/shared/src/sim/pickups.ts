@@ -59,7 +59,9 @@ export function stepPickups(world: World, events: SimEvent[]): void {
   const a = rngNext(world.pickupRng), b = rngNext(a.state);
   world.pickupRng = b.state;
   const s = open[Math.floor(a.value * open.length)];
-  world.pickups.push({ id: world.nextPickupId++, spot: -1, cell: s.cell, up: s.up, type: r.types[Math.floor(b.value * r.types.length)] });
+  let x = b.value * r.weights.reduce((a, w) => a + w, 0), i = 0; // weighted (15b)
+  while (i < r.types.length - 1 && (x -= r.weights[i]) >= 0) i++;
+  world.pickups.push({ id: world.nextPickupId++, spot: -1, cell: s.cell, up: s.up, type: r.types[i] });
 }
 
 /** A pickup can appear on `s` now: its block is there and not about to go, no pickup or ball is in it, no beam is on. */

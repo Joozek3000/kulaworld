@@ -54,6 +54,7 @@ export function validateLevel(level: Level): string[] {
   if (r && !(r.everyTicks > 0 && Number.isInteger(r.maxOnMap) && r.maxOnMap > 0 && r.types.length && r.types.every((t) => PICKUP_TYPES.includes(t)))) {
     errors.push(`randomPickups needs everySec > 0, maxOnMap > 0 and known types, got ${JSON.stringify(r)}`);
   }
+  if (r && (r.weights.some((w) => !(w >= 0)) || !r.weights.some((w) => w > 0))) errors.push(`randomPickups weights must be ≥ 0 (given ones ≤ 100 in total) with one > 0, got ${r.weights.join(', ')}`);
   if (level.lab && level.pool) errors.push('a lab level is never in the pool');
   if (level.theme !== null && !MODIFIER_TILES.includes(level.theme)) errors.push(`theme must be a non-lethal trap type (${MODIFIER_TILES.join(', ')}), got ${level.theme}`);
   if (typeof level.notes !== 'object' || Array.isArray(level.notes) || Object.values(level.notes).some((n) => typeof n !== 'string')) {
