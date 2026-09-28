@@ -33,10 +33,11 @@ export function islands(solid: ReadonlySet<string>): string[][] {
   return out.sort((a, b) => b.length - a.length);
 }
 const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-/** The largest island keeps the plain glaze; the others get a light hue wash, golden-angle apart. */
+/** The largest island keeps the plain glaze; the others get a pale hue wash, golden-angle apart (halved in 17 follow-ups). */
 export function islandTint(index: number, out: THREE.Color): THREE.Color {
-  return index === 0 ? out.set(0xffffff) : out.setHSL((index * 0.618034 + 0.08) % 1, 0.55, 0.86);
+  return index === 0 ? out.set(0xffffff) : out.setHSL((index * 0.618034 + 0.08) % 1, 0.55, 0.86).lerp(WHITE, 0.5);
 }
+const WHITE = new THREE.Color(0xffffff);
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const fallbackMat = new THREE.MeshStandardMaterial({ roughness: 0.28 });
