@@ -21,6 +21,8 @@ export interface InputHooks {
   onMenuConfirm?(): void;
   /** Lobby vote with the pad: X next option, Y previous (phase 17). */
   onVoteStep?(step: -1 | 1): void;
+  /** Match-length vote with the pad: RB next, LB previous (phase 18b). */
+  onLengthStep?(step: -1 | 1): void;
   /** The device last used changed (the HUD shows pad glyphs). */
   onDevice?(device: 'keyboard' | 'pad'): void;
 }
@@ -160,6 +162,8 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
         if (released('look')) act('look', false, 'pad');
         if (edge(PAD.X)) hooks.onVoteStep?.(1);
         if (edge(PAD.Y)) hooks.onVoteStep?.(-1);
+        if (edge(PAD.RB)) hooks.onLengthStep?.(1);
+        if (edge(PAD.LB)) hooks.onLengthStep?.(-1);
       }
       stickX = sx;
       stickY = sy;

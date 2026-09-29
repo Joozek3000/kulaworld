@@ -2,21 +2,29 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 /**
- * The end-of-match podium (phase 18, §23): three stepped ceramic blocks with the top 3 balls in their colours, names
- * and points above them, and confetti. Level-independent: it lives far above any level, and the camera cuts to it.
+ * The end-of-match podium (phase 18, §23): three stepped ceramic blocks with the top 3 places' balls in their colours,
+ * names and points above them, and confetti. Players sharing a place (18b) stand side by side on a wider step.
+ * Level-independent: it lives far above any level, and the camera cuts to it.
  */
 export const PODIUM_AT = new THREE.Vector3(0, 400, 0);
-const STEPS = [{ x: 0, h: 1.3 }, { x: -1.8, h: 0.9 }, { x: 1.8, h: 0.55 }]; // 1st, 2nd, 3rd
+const HEIGHTS = [1.3, 0.9, 0.55]; // the top step, then the next two
+const BALL_W = 1.1, STEP_PAD = 0.5, GAP = 0.2;
 const CONFETTI = 160;
 const GLAZE = 0xf1e5cc, TRIM = 0xe8b04a;
 const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
 
-export interface PodiumEntry { name: string; color: string; points: number }
+/** `place`: the match place (ties share it: 1, 1, 3). */
+export interface PodiumEntry { name: string; color: string; points: number; place: number }
 
 export class Podium {
   readonly group = new THREE.Group();
-  private readonly balls: THREE.Mesh[] = [];
-  private readonly labels: CSS2DObject[] = [];
+  /** The steps, balls and labels of the current show (rebuilt each time). */
+  private readonly stand = new THREE.Group();
+  private balls: { mesh: THREE.Mesh; h: number }[] = [];
+  private labels: CSS2DObject[] = [];
+  private readonly stepMat = new THREE.MeshStandardMaterial({ color: GLAZE, roughness: 0.3 });
+  private readonly trimMat = new THREE.MeshStandardMaterial({ color: TRIM, roughness: 0.25, metalness: 0.3 });
+  private readonly ballGeo = new THREE.SphereGeometry(0.45, 32, 20);
   private readonly confetti: THREE.InstancedMesh;
   private readonly bits: { pos: THREE.Vector3; vel: THREE.Vector3; spin: THREE.Vector3; rot: THREE.Vector3 }[] = [];
   shown = false;
@@ -24,22 +32,7 @@ export class Podium {
   constructor(scene: THREE.Scene) {
     this.group.position.copy(PODIUM_AT);
     this.group.visible = false;
-    const stepMat = new THREE.MeshStandardMaterial({ color: GLAZE, roughness: 0.3 }), trimMat = new THREE.MeshStandardMaterial({ color: TRIM, roughness: 0.25, metalness: 0.3 });
-    for (const s of STEPS) {
-      const block = new THREE.Mesh(new THREE.BoxGeometry(1.6, s.h, 1.6), stepMat);
-      block.position.set(s.x, s.h / 2, 0);
-      const trim = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.08, 1.64), trimMat);
-      trim.position.set(s.x, s.h - 0.04, 0);
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45, 32, 20), new THREE.MeshStandardMaterial({ roughness: 0.35 }));
-      ball.position.set(s.x, s.h + 0.45, 0);
-      const div = document.createElement('div');
-      div.className = 'podium-label';
-      const label = new CSS2DObject(div);
-      label.position.set(s.x, s.h + 1.25, 0);
-      this.group.add(block, trim, ball, label);
-      this.balls.push(ball);
-      this.labels.push(label);
-    }
+    this.group.add(this.stand);
     const floor = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.4, 0.2, 48), new THREE.MeshStandardMaterial({ color: 0xd9cdef, roughness: 0.5 }));
     floor.position.y = -0.1;
     this.group.add(floor);
@@ -54,18 +47,44 @@ export class Podium {
     scene.add(this.group);
   }
 
-  /** Shows the top 3 (fewer if fewer played) and throws the confetti. */
-  show(top: readonly PodiumEntry[]): void {
-    this.balls.forEach((b, i) => {
-      const t = top[i];
-      b.visible = !!t;
-      this.labels[i].visible = !!t;
-      if (!t) return;
-      (b.material as THREE.MeshStandardMaterial).color.set(t.color);
-      const el = this.labels[i].element;
-      el.innerHTML = `<b>${i + 1}. ${t.name.replace(/[&<>"']/g, '')}</b><br>${t.points} pts`;
-      el.style.borderColor = t.color;
-    });
+  /**
+   * Shows the top 3 places (`entries` sorted by place; fewer steps if fewer played) and throws the confetti. Each
+   * distinct place gets the next step down, so a shared 1st is followed by 3rd on the second step.
+   */
+  show(entries: readonly PodiumEntry[]): void {
+    this.clearStand();
+    const steps: PodiumEntry[][] = [];
+    for (const e of entries) {
+      if (steps.length && steps[steps.length - 1][0].place === e.place) steps[steps.length - 1].push(e);
+      else if (steps.length < HEIGHTS.length) steps.push([e]);
+      else break;
+    }
+    // Left to right: 2nd, 1st, 3rd, each step as wide as its balls.
+    const order = [1, 0, 2].filter((i) => steps[i]), width = (i: number) => steps[i].length * BALL_W + STEP_PAD;
+    let x = -(order.reduce((w, i) => w + width(i), 0) + GAP * (order.length - 1)) / 2;
+    for (const i of order) {
+      const w = width(i), h = HEIGHTS[i], cx = x + w / 2;
+      const block = new THREE.Mesh(new THREE.BoxGeometry(w, h, 1.6), this.stepMat);
+      block.position.set(cx, h / 2, 0);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, 0.08, 1.64), this.trimMat);
+      trim.position.set(cx, h - 0.04, 0);
+      this.stand.add(block, trim);
+      steps[i].forEach((t, k) => {
+        const bx = cx + (k - (steps[i].length - 1) / 2) * BALL_W;
+        const mesh = new THREE.Mesh(this.ballGeo, new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.35 }));
+        mesh.position.set(bx, h + 0.45, 0);
+        const div = document.createElement('div');
+        div.className = 'podium-label';
+        div.innerHTML = `<b>${t.place}. ${t.name.replace(/[&<>"']/g, '')}</b><br>${t.points} pts`;
+        div.style.borderColor = t.color;
+        const label = new CSS2DObject(div);
+        label.position.set(bx, h + 1.25 + (k % 2) * 0.45, 0); // stagger shared labels so they don't overlap
+        this.stand.add(mesh, label);
+        this.balls.push({ mesh, h });
+        this.labels.push(label);
+      });
+      x += w + GAP;
+    }
     for (const b of this.bits) {
       b.pos.set((Math.random() - 0.5) * 6, 4 + Math.random() * 4, (Math.random() - 0.5) * 3);
       b.vel.set((Math.random() - 0.5) * 1.5, -0.5 - Math.random(), (Math.random() - 0.5) * 1.5);
@@ -77,13 +96,23 @@ export class Podium {
 
   /** The names and points above the balls (hidden once the stats card covers the podium). */
   labelsVisible(on: boolean): void {
-    this.labels.forEach((l, i) => { l.visible = on && this.balls[i].visible; });
+    for (const l of this.labels) l.visible = on;
   }
 
   hide(): void {
     if (!this.shown) return;
     this.group.visible = this.shown = false;
-    for (const l of this.labels) l.visible = false;
+    this.clearStand();
+  }
+
+  /** Drops the last show (CSS2D labels take their elements with them when removed). */
+  private clearStand(): void {
+    this.stand.traverse((o) => {
+      if (o instanceof THREE.Mesh) { if (o.geometry !== this.ballGeo) o.geometry.dispose(); if (o.material !== this.stepMat && o.material !== this.trimMat) (o.material as THREE.Material).dispose(); }
+    });
+    this.stand.clear();
+    this.balls = [];
+    this.labels = [];
   }
 
   /** Confetti falls and flutters (per frame, no allocations); the balls bob a little. */
@@ -98,7 +127,7 @@ export class Podium {
       this.confetti.setMatrixAt(i, m4.compose(p.copy(b.pos), q.setFromEuler(e.set(b.rot.x, b.rot.y, b.rot.z)), one));
     });
     this.confetti.instanceMatrix.needsUpdate = true;
-    this.balls.forEach((b, i) => { b.position.y = STEPS[i].h + 0.45 + Math.abs(Math.sin(timeSec * 3 + i)) * 0.12; });
+    this.balls.forEach((b, i) => { b.mesh.position.y = b.h + 0.45 + Math.abs(Math.sin(timeSec * 3 + i)) * 0.12; });
   }
 
   /** The camera looks at the podium from the front, slightly above. */

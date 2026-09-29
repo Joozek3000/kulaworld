@@ -29,8 +29,7 @@ function makeCrown(scene: THREE.Scene): THREE.Group {
     bead.position.set(Math.cos(a) * 0.19, 0.19, Math.sin(a) * 0.19);
     g.add(spike, bead);
   }
-  addXray(g, 0xf2c230); // seen through walls, like the balls
-  g.scale.setScalar(1.7);
+  g.scale.setScalar(2.3); // 18b: must read in line of sight at ~8 cells, with no x-ray
   g.visible = false;
   scene.add(g);
   return g;
@@ -245,7 +244,7 @@ class PlayerView {
       this.body.add(model);
     } else this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
-    addXray(this.body, p.color); // seen through blocks (phase 17)
+    if (local) addXray(this.body, p.color); // only your own ball shows through blocks (18b: no x-ray on others)
     this.ball.visible = false;
     this.shadow.visible = false;
     this.ring.visible = false;
@@ -279,7 +278,13 @@ class PlayerView {
     if (dull) { this.top.color.lerp(GREY, 0.6); this.bottom.color.lerp(GREY, 0.5); }
     if (heavy) { this.top.color.lerp(IRON, 0.7); this.bottom.color.lerp(IRON, 0.8); }
     for (const m of [this.top, this.bottom]) { m.metalness = heavy ? 0.85 : 0; m.roughness = heavy ? 0.3 : m === this.top ? 0.5 : 0.57; }
-    if (this.label) this.label.element.textContent = `${this.name} ${[...this.pills.keys()].map((t) => PILL_ICONS[t] ?? '').join('')}`.trim();
+    this.labelText();
+  }
+
+  /** Crowned (18b): the name label reads 👑 name, since the crown no longer shows through walls. */
+  crowned = false;
+  labelText(): void {
+    if (this.label) this.label.element.textContent = `${this.crowned ? '👑 ' : ''}${this.name} ${[...this.pills.keys()].map((t) => PILL_ICONS[t] ?? '').join('')}`.trim();
   }
 
   /** Bouncy: every squash and stretch is bigger. */
@@ -799,10 +804,11 @@ export class PlayersView {
     for (const [id, v] of this.views) if (v.shown) cb(id, v.ball.position, v.color, v.local, id === this.crownId);
   }
 
-  /** Matches (phase 18): who wears the crown ('' = nobody). It floats above that ball, seen through walls too. */
+  /** Matches (phase 18): who wears the crown ('' = nobody). It floats above that ball (line of sight only, 18b). */
   crownId = '';
   private crown: THREE.Group | null = null;
   private placeCrown(timeSec: number): void {
+    for (const [id, v] of this.views) if (v.crowned !== (id === this.crownId)) { v.crowned = !v.crowned; v.labelText(); }
     const v = this.crownId ? this.views.get(this.crownId) : undefined;
     if (!v?.shown) { if (this.crown) this.crown.visible = false; return; }
     const c = (this.crown ??= makeCrown(this.scene));

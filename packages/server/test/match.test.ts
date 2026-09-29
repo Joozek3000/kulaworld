@@ -27,7 +27,7 @@ async function waitFor<T>(what: string, fn: () => T, timeoutMs = 10000): Promise
 
 type RoomInternals = { world: { result: unknown; players: { id: string; keys: number }[] }; roundEvents: SimEvent[] };
 
-test('a 3-round match: length vote, points, the crown, a late joiner and a leaver, matchEnd, rematch resets', { timeout: 90000 }, async () => {
+test('a 3-round match: length vote, points, the crown, a late joiner and a leaver, matchEnd, a 1–1 rematch resets', { timeout: 90000 }, async () => {
   const client = new Client(`ws://localhost:${PORT}`);
   const a: Room = await client.joinOrCreate('race', { name: 'A' });
   const b: Room = await client.joinOrCreate('race', { name: 'B' });
@@ -83,9 +83,9 @@ test('a 3-round match: length vote, points, the crown, a late joiner and a leave
   await waitFor('C left', () => s().standings.get(c.sessionId)?.left === true);
   expect(points()).toEqual({ A: 5, B: 7, C: 5 });
 
-  // Rematch: both remaining players say yes → a new match, same length, points reset, the leaver gone.
+  // Rematch: 1 yes, 1 no is half the room, enough (18b) → a new match, same length (3, not the default 5), points reset, the leaver gone.
   a.send('rematch', true);
-  b.send('rematch', true);
+  b.send('rematch', false);
   await waitFor('rematch lobby', () => s().phase === 'lobby', 16000);
   expect(points()).toEqual({ A: 0, B: 0 });
   expect([s().matchRound, s().matchRounds, s().crownId]).toEqual([0, 3, '']);

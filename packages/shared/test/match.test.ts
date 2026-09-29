@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { addRoundStats, crownOf, emptyStats, mvps, scoreRound, type MatchStats, type RoundPlayer, type SimEvent } from '../src/index.ts';
+import { addRoundStats, crownOf, emptyStats, matchPlaces, mvps, scoreRound, type MatchStats, type RoundPlayer, type SimEvent } from '../src/index.ts';
 
 // Matches (ARCHITECTURE §23, phase 18): round scoring, the crown, stats.
 const P = (id: string, o: Partial<RoundPlayer> = {}): RoundPlayer => ({ id, keys: 0, lives: 0, knockouts: 0, eliminated: false, eliminatedTick: -1, ...o });
@@ -50,17 +50,17 @@ describe('knockout', () => {
     expect(pts(m)).toEqual({ b: 5, c: 3, a: 2 });
   });
 
-  test('+1 per knockout, capped at +3', () => {
+  test('+1 per knockout, capped at +2 (as race)', () => {
     const events = [ko('a', 'b'), ko('a', 'c'), ko('a', 'd'), ko('a', 'b'), ko('a', 'c')];
     const m = scoreRound('knockout', { winnerId: 'a', reason: 'lastAlive' }, events, [P('a'), P('b', { eliminated: true, eliminatedTick: 5 })]);
-    expect(m.get('a')!).toMatchObject({ points: 5 + 3, breakdown: [{ label: 'Survivor', points: 5 }, { label: 'KO ×3', points: 3 }] });
+    expect(m.get('a')!).toMatchObject({ points: 5 + 2, breakdown: [{ label: 'Survivor', points: 5 }, { label: 'KO ×2', points: 2 }] });
   });
 });
 
 test('knocking out the crowned player: +1 on top of the cap, in either mode', () => {
   const events = [ko('a', 'b'), ko('a', 'c'), ko('a', 'd'), ko('a', 'crown')];
   const m = scoreRound('knockout', { winnerId: 'a', reason: 'lastAlive' }, events, [P('a'), P('crown', { eliminated: true, eliminatedTick: 1 })], 'crown');
-  expect(m.get('a')!.breakdown).toEqual([{ label: 'Survivor', points: 5 }, { label: 'KO ×3', points: 3 }, { label: '👑 KO', points: 1 }]);
+  expect(m.get('a')!.breakdown).toEqual([{ label: 'Survivor', points: 5 }, { label: 'KO ×2', points: 2 }, { label: '👑 KO', points: 1 }]);
   const race = scoreRound('race', { winnerId: 'x', reason: 'exit' }, [ko('b', 'crown')], [P('x'), P('b'), P('crown', { keys: 1 })], 'crown');
   expect(pts(race)).toEqual({ x: 5, b: 1 + 1, crown: 3 });
   // Without a crown there's no bonus; the crown holder knocking someone out isn't a crown KO.
@@ -98,4 +98,15 @@ test('stats from events, and MVP badges (strict leaders; fewest deaths for Survi
   expect(stats.get('a')).toEqual({ points: 0, wins: 1, knockouts: 1, pushes: 2, stomps: 0, deaths: 0, keys: 0 });
   expect(stats.get('b')).toEqual({ points: 0, wins: 0, knockouts: 0, pushes: 0, stomps: 1, deaths: 1, keys: 1 });
   expect(mvps(stats)).toEqual([{ badge: 'Most knockouts', id: 'a' }, { badge: 'Most keys', id: 'b' }, { badge: 'Survivor', id: 'a' }, { badge: 'Bully', id: 'a' }]);
+});
+
+test('match places (18b): points, then round wins, then knockouts, then keys; a full tie shares the place', () => {
+  const S = (id: string, o: Partial<MatchStats>) => ({ id, ...emptyStats(), points: 10, ...o });
+  const placesOf = (list: ReturnType<typeof S>[]) => Object.fromEntries([...matchPlaces(list)].map(([s, n]) => [s.id, n]));
+  expect(placesOf([S('a', { points: 9 }), S('b', {})])).toEqual({ b: 1, a: 2 });
+  expect(placesOf([S('a', { wins: 1 }), S('b', { wins: 2, knockouts: 0 })])).toEqual({ b: 1, a: 2 });
+  expect(placesOf([S('a', { wins: 1, knockouts: 3 }), S('b', { wins: 1, knockouts: 4, keys: 0 })])).toEqual({ b: 1, a: 2 });
+  expect(placesOf([S('a', { wins: 1, knockouts: 3, keys: 5 }), S('b', { wins: 1, knockouts: 3, keys: 2 })])).toEqual({ a: 1, b: 2 });
+  // Still tied: both 1st, and the next one is 3rd.
+  expect(placesOf([S('a', { wins: 1, keys: 2 }), S('b', { wins: 1, keys: 2 }), S('c', { points: 4 })])).toEqual({ a: 1, b: 1, c: 3 });
 });

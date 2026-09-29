@@ -10,6 +10,8 @@
     canvas { display: block; }
     [hidden] { display: none !important; }
     .labels { position: fixed; top: 0; left: 0; pointer-events: none; }
+    /* 18b: HUD panels sit above the 3D name labels (the CSS2D layer is appended after them). */
+    #hud-top, #hud-board, #hud-status, #hud-center, #hud-toasts, #hud-fx, #pad-hint { z-index: 1; }
     .label { color: #fff; font-size: 0.75em; background: #0009; padding: 1px 6px; border-radius: 8px; border: 2px solid; }
     .dot { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; margin-right: 0.5em; vertical-align: -0.05em; box-shadow: 0 0 0 2px #0006; }
     .ok { color: var(--ok); font-weight: 600; }
@@ -117,7 +119,8 @@
     @keyframes pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     .card.len { width: 7em; }
     #hud-center h2 { margin: 0.2em 0 0.3em; font-size: 1.2em; }
-    .podium-title { position: fixed; top: 8vh; left: 0; right: 0; text-align: center; font-size: clamp(28px, 5vh, 56px); font-weight: 800; text-shadow: 0 3px 16px #000a; }
+    .podium-title { position: fixed; top: 8vh; left: 50%; transform: translateX(-50%); max-width: 92vw; text-align: center; font-size: clamp(28px, 5vh, 56px); font-weight: 800;
+      padding: 0.1em 0.6em; border-radius: 14px; background: var(--panel); -webkit-text-stroke: 1.5px #0b0e1a; paint-order: stroke fill; text-shadow: 0 3px 16px #000a; }
     .podium-label { color: #3b2d63; background: #f6f2ffee; border: 2px solid; border-radius: 10px; padding: 2px 10px; text-align: center; font-size: 0.95em; }
     .statcard { border-collapse: collapse; margin: 0.4em auto; font-variant-numeric: tabular-nums; }
     .statcard th { font-size: 0.8em; color: #c8cce0; font-weight: 600; padding: 0 0.5em; }

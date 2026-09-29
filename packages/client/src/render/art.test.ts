@@ -6,9 +6,11 @@ import { ALL_DIRS, crumbleBands, dirVec, loadLevel, spikesUp, type LevelJson } f
 import { art, BALL_MODELS, BLOCK_MODELS, environmentFor, loadArt, MODEL_NAMES } from './art.ts';
 import { findLevel, LevelView } from './level.ts';
 import { ItemsView } from './items.ts';
+import { PlayersView } from './players.ts';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { TrapsView } from './traps.ts';
 import { staticLevel } from './traps2.ts';
-import type { GameState, ItemS } from '../net.ts';
+import type { GameState, ItemS, PlayerS } from '../net.ts';
 
 beforeAll(async () => {
   vi.stubGlobal('self', globalThis);
@@ -193,8 +195,39 @@ test('ceramic gates align on all six faces; key pops keep other keys opaque', ()
     expect(gate.children.map((o) => o.visible)).toEqual([false, true]);
     items.update(state, true, true, 1.2);
     pop.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBeLessThan(1); });
-    remaining.traverse((o) => { if (o instanceof THREE.Mesh && !o.userData.xray) expect(o.material.opacity).toBe(1); });
+    remaining.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBe(1); });
     items.update(state, true, true, 1.4);
     expect(scene.children).not.toContain(pop);
   }
+});
+
+test('x-ray (18b): only your own ball has a silhouette; enemy balls, keys, the exit and the crown have none', () => {
+  // Name labels are CSS2D objects: a stand-in element is enough in node.
+  vi.stubGlobal('document', { createElement: () => ({ style: {}, setAttribute() {}, remove() {} }) });
+  const hasXray = (o: THREE.Object3D) => { let x = false; o.traverse((c) => { if (c.userData.xray) x = true; }); return x; };
+  const scene = new THREE.Scene(), view = new PlayersView(scene);
+  const P = (id: string, x: number) => ({
+    id, name: id, color: '#ff4040', action: 0, fromX: x, fromY: 1, fromZ: 0, fromUp: 2, fromFwd: 0, toX: x, toY: 1, toZ: 0, toUp: 2, toFwd: 0,
+    startTick: 0, endTick: 0, turnFromFwd: 0, turnStartTick: 0, bounce: false, keys: 0, ready: false, spectating: false, lives: 3, eliminated: false,
+    eliminatedTick: -1, eliminatedBy: '', protectedUntil: 0, knockouts: 0, ackSeq: 0, ackTick: 0, fireCount: 0, vote: -1,
+  }) as PlayerS;
+  const state = { phase: 'playing', tick: 10, players: new Map([['me', P('me', 0)], ['foe', P('foe', 3)]]), items: new Map(), pickups: new Map(), hot: new Map() } as unknown as GameState;
+  view.crownId = 'foe';
+  view.update(state, 10, 'me', 10, 0.016, 1000);
+  const before = new Set(scene.children);
+  const balls = scene.children.filter((o) => o.children.length && !(o instanceof THREE.Mesh) && hasXray(o));
+  expect(balls).toHaveLength(1); // the local ball
+  expect(view.positionOf('me')!.distanceTo(balls[0].position)).toBeLessThan(1e-6);
+  const crown = scene.children.find((o) => o instanceof THREE.Group && o.visible && o.position.distanceTo(view.positionOf('foe')!) > 0.5
+    && o.position.distanceTo(view.positionOf('foe')!) < 2);
+  expect(crown).toBeDefined();
+  expect(hasXray(crown!)).toBe(false);
+  expect(scene.children.find((o) => o instanceof CSS2DObject)?.element.textContent).toBe('👑 foe'); // the crowned player's label
+  const items = new ItemsView(scene);
+  const key: ItemS = { id: 'k', kind: 'key', x: 0, y: 0, z: 0, up: 2 }, exit: ItemS = { ...key, id: 'exit', kind: 'exit' };
+  items.update({ phase: 'playing', items: new Map([['k', key], ['exit', exit]]) } as unknown as GameState, true, false, 0);
+  const added = scene.children.filter((o) => !before.has(o));
+  expect(added.length).toBeGreaterThanOrEqual(2);
+  for (const o of added) expect(hasXray(o)).toBe(false);
+  vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
 });

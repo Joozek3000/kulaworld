@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { Action, campaignLevels, isTimingName, newCampaign, TICK_RATE, type Campaign, type TimingName, type InputMsg, type Level, type SimEvent } from '@kula/shared';
+import { Action, campaignLevels, isTimingName, matchPlaces, MATCH_LENGTHS, newCampaign, TICK_RATE, type Campaign, type TimingName, type InputMsg, type Level, type SimEvent } from '@kula/shared';
 import { setupInput } from './input.ts';
 import { ACTION_LABELS, ACTIONS, keyLabel, loadBindings, PAD_GLYPHS, rebind, resetBindings, saveBindings, type BindAction } from './bindings.ts';
-import { connect, playerName, serverUrl, type GameSource, type Net } from './net.ts';
+import { connect, playerName, serverUrl, type GameSource, type Net, type StandingS } from './net.ts';
 import { campaignFrom, loadSave, resetSave, SinglePlayer, type Outcome } from './campaign.ts';
 import { SingleTilesView } from './render/single.ts';
 import { Podium, PODIUM_AT, type PodiumEntry } from './render/podium.ts';
@@ -166,6 +166,10 @@ const input = setupInput({
   onVoteStep: (step) => {
     const me = online?.state.players.get(online.sessionId);
     if (online?.state.phase === 'lobby' && me) online.sendVote(((me.vote < 0 ? (step > 0 ? -1 : 0) : me.vote) + step + 4) % 4);
+  },
+  onLengthStep: (step) => { // the server only takes it before round 1
+    const me = online?.state.players.get(online.sessionId), n = MATCH_LENGTHS.length, v = me?.lengthVote ?? -1;
+    if (online?.state.phase === 'lobby' && me) online.sendLength(v < 0 ? (step > 0 ? 0 : n - 1) : (v + step + n) % n);
   },
   onDevice: (d) => hud.padHint(d === 'pad'),
   onKey: (key, at) => {
@@ -557,9 +561,10 @@ view.renderer.setAnimationLoop((now: number) => {
   }
   if (s.phase === 'matchEnd') {
     if (!podium.shown) {
-      const top: PodiumEntry[] = [];
-      s.standings?.forEach((st) => top.push({ name: st.name, color: st.color, points: st.points }));
-      podium.show(top.sort((a, b) => b.points - a.points).slice(0, 3));
+      const list: StandingS[] = [];
+      s.standings?.forEach((st) => list.push(st));
+      const top: PodiumEntry[] = [...matchPlaces(list)].map(([st, place]) => ({ name: st.name, color: st.color, points: st.points, place }));
+      podium.show(top.sort((a, b) => a.place - b.place || a.name.localeCompare(b.name)));
       audio.play('win', {}, 'ui');
     }
     podium.update(dtMs / 1000, now / 1000);

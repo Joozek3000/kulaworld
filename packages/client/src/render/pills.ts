@@ -1,8 +1,6 @@
 import * as THREE from 'three';
-import { addXray } from './xray.ts';
 
 /** X-ray silhouette colours (phase 17). */
-const PILL_XRAY: Record<string, number> = { bouncy: 0xff6fb5, lethargy: 0xe63946, heavy: 0x9aa3ad, sunglasses: 0xffd166 };
 import { dirVec, type Dir } from '@kula/shared';
 import type { GameState, ItemS } from '../net.ts';
 
@@ -118,7 +116,6 @@ export class PillsView {
   private create(k: ItemS): { root: THREE.Group; spin: THREE.Group; type: string } {
     const root = new THREE.Group(), spin = new THREE.Group();
     spin.add(k.kind === 'sunglasses' ? glasses() : capsule(k.kind));
-    addXray(spin, PILL_XRAY[k.kind] ?? 0xffffff); // phase 17
     root.add(spin);
     up.copy(dirVec(k.up as Dir) as THREE.Vector3Like);
     root.position.set(k.x, k.y, k.z).addScaledVector(up, -0.15);

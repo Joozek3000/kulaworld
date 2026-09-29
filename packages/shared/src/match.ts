@@ -10,7 +10,7 @@ import type { RaceResult, SimEvent } from './sim/world.ts';
 export const PLACE_POINTS = [5, 3, 2] as const;
 export const PLACE_REST = 1;
 /** Knockout credit bonus caps per round: knockout mode, and race with push. */
-export const KO_CAP_KNOCKOUT = 3;
+export const KO_CAP_KNOCKOUT = 2;
 export const KO_CAP_RACE = 2;
 /** Knocking out the crowned player. */
 export const CROWN_KO_BONUS = 1;
@@ -40,7 +40,7 @@ function places<T>(list: readonly T[], cmp: (a: T, b: T) => number): Map<T, numb
  *   ranks everyone by keys. A non-winner scores place points only with ≥ 1 key. +1 per knockout credited, cap +2.
  * - Knockout: by elimination order (the survivor 1st; those still alive at a timeout by lives, then knockouts; the
  *   eliminated by how late they went out, the same tick sharing a place). Everyone placed scores. +1 per knockout,
- *   cap +3.
+ *   cap +2.
  * - Either mode: knocking out the crowned player +1 (outside the cap).
  */
 export function scoreRound(
@@ -86,6 +86,15 @@ export function crownOf(points: ReadonlyMap<string, number>): string | null {
 
 /** A player's match stats (§23), for the stats card and MVP badges. */
 export interface MatchStats { points: number; wins: number; knockouts: number; pushes: number; stomps: number; deaths: number; keys: number }
+
+/** The match order (§23, phase 18b): points, then round wins, then knockouts, then keys (< 0: a is ahead). */
+export const matchOrder = (a: MatchStats, b: MatchStats) =>
+  b.points - a.points || b.wins - a.wins || b.knockouts - a.knockouts || b.keys - a.keys;
+
+/** Final match places by `matchOrder`; players still tied share the place (1, 1, 3). */
+export function matchPlaces<T extends MatchStats>(list: readonly T[]): Map<T, number> {
+  return places(list, matchOrder);
+}
 export const emptyStats = (): MatchStats => ({ points: 0, wins: 0, knockouts: 0, pushes: 0, stomps: 0, deaths: 0, keys: 0 });
 
 /** Adds one round's events to the stats of the players in `stats` (others are ignored). Keys are keys picked up. */

@@ -1,6 +1,6 @@
 import { EFFECT_TICKS, RANDOM_VOTE, TICK_RATE, tileKey, type Dir, type Level, type PickupType, type TileType } from '@kula/shared';
 import type { GameState, PlayerS, StandingS } from '../net.ts';
-import { MATCH_LENGTHS, mvps, type MatchStats } from '@kula/shared';
+import { matchOrder, matchPlaces, MATCH_LENGTHS, mvps, type MatchStats } from '@kula/shared';
 import { PILL_ICONS } from '../render/players.ts';
 import type { LocalState } from '../local.ts';
 import { fruitSlots } from './menu.ts';
@@ -68,12 +68,14 @@ export interface LobbyHooks {
   onRematch?(yes: boolean): void;
 }
 
-/** Match board lines (phase 18), most points first; players who left sort by points too, drawn greyed. */
+/** Match board lines (phase 18), in match order (points, then wins, KOs, keys: 18b); players who left too, drawn greyed. */
 function boardOf(s: GameState): StandingS[] {
   const list: StandingS[] = [];
   s.standings?.forEach((st) => list.push(st));
-  return list.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  return list.sort((a, b) => matchOrder(a, b) || a.name.localeCompare(b.name));
 }
+/** "A", "A and B", "A, B and C". */
+const names = (list: string[]) => (list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
 /** Seconds into the matchEnd phase before the stats card replaces the podium names. */
 export const PODIUM_SEC = 5;
 
@@ -90,7 +92,7 @@ export function createHud(lobby: LobbyHooks) {
   });
   top.textContent = 'connecting…';
   const padHint = div('pad-hint');
-  padHint.innerHTML = '🎮 ▲/stick roll · ◀▶ turn · Ⓐ jump · R-stick look · Ⓑ ready · Ⓧ/Ⓨ vote · Start pause';
+  padHint.innerHTML = '🎮 ▲/stick roll · ◀▶ turn · Ⓐ jump · R-stick look · Ⓑ ready · Ⓧ/Ⓨ vote · LB/RB length · Start pause';
   padHint.hidden = true;
   const cache = new Map<HTMLElement, string>();
   const set = (el: HTMLElement, html: string) => {
@@ -197,7 +199,7 @@ export function createHud(lobby: LobbyHooks) {
           let match = '';
           if (s.standings && round === 0) {
             const lv = mine?.lengthVote ?? -1;
-            match = `<h2>Match length</h2><div class="cards lengths">${MATCH_LENGTHS.map((n, i) => {
+            match = `<h2>Match length <small class="dim">(🎮 LB/RB)</small></h2><div class="cards lengths">${MATCH_LENGTHS.map((n, i) => {
               const c = s.lengthVotes?.[i] ?? 0;
               return `<button class="card len${lv === i ? ' mine' : ''}" data-length="${i}"><div class="cname">${n} rounds</div>`
                 + `<div class="votes">${c ? `${'●'.repeat(c)} ${c}` : '<span class="dim">no votes</span>'}</div></button>`;
@@ -243,12 +245,14 @@ export function createHud(lobby: LobbyHooks) {
         }
         case 'matchEnd': {
           // The podium (phase 18): names float above the balls in 3D; after PODIUM_SEC, the stats card and rematch vote.
-          const list = boardOf(s), champ = list[0];
+          const list = boardOf(s), place = matchPlaces(list), champs = list.filter((st) => place.get(st) === 1);
           set(top, `${GAME_NAME} · Match over${sound}`);
           set(board, '');
           set(status, '');
           if (s.tick < PODIUM_SEC * TICK_RATE) {
-            set(center, champ ? `<div class="podium-title" style="color:${esc(champ.color)}">🏆 ${esc(champ.name)} wins the match!</div>` : '');
+            // A tie after every tie-break (18b): they share the match.
+            const title = champs.length > 1 ? `🏆 ${esc(names(champs.map((c) => c.name)))} share the match!` : `🏆 ${esc(champs[0]?.name ?? '')} wins the match!`;
+            set(center, champs.length ? `<div class="podium-title" style="color:${esc(champs.length > 1 ? '#fff' : champs[0].color)}">${title}</div>` : '');
             break;
           }
           const stats = new Map<string, MatchStats>(list.map((st) => [st.id, st]));
@@ -257,7 +261,7 @@ export function createHud(lobby: LobbyHooks) {
           const here: PlayerS[] = [];
           s.players.forEach((p) => here.push(p));
           const yes = here.filter((p) => p.rematch).length, mineYes = !!mine?.rematch;
-          const rowsHtml = list.map((st, i) => `<tr class="${st.id === me ? 'me' : ''}${st.left ? ' out' : ''}"><td>${ordinal(i + 1)}</td><td>${dot(st.color)}${esc(st.name)}${st.left ? ' <span class="dim">(left)</span>' : ''}</td>`
+          const rowsHtml = list.map((st) => `<tr class="${st.id === me ? 'me' : ''}${st.left ? ' out' : ''}"><td>${ordinal(place.get(st)!)}</td><td>${dot(st.color)}${esc(st.name)}${st.left ? ' <span class="dim">(left)</span>' : ''}</td>`
             + `<td><b>${st.points}</b></td><td>${st.wins}</td><td>${st.knockouts}</td><td>${st.pushes}</td><td>${st.stomps}</td><td>${st.deaths}</td><td>${st.keys}</td>`
             + `<td>${(badges.get(st.id) ?? []).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}</td></tr>`).join('');
           set(center, `<div class="panel stats"><h1>Match stats</h1><table class="statcard"><tr><th></th><th></th><th>Pts</th><th>Wins</th><th>KOs</th><th>Pushes</th><th>Stomps</th><th>Deaths</th><th>Keys</th><th></th></tr>${rowsHtml}</table>`

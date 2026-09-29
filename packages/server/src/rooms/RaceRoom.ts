@@ -301,7 +301,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
       case 'matchEnd':
         if (++s.tick >= s.phaseEndTick) {
           const here = [...s.players.values()], yes = here.filter((p) => p.rematch).length;
-          const rematch = here.length > 0 && yes * 2 > here.length;
+          const rematch = here.length > 0 && yes * 2 >= here.length;
           console.log(`match over: rematch ${yes}/${here.length} → ${rematch ? 'rematch' : 'fresh lobby'}`);
           this.resetMatch(rematch);
           this.setPhase('lobby');
