@@ -48,6 +48,7 @@ export class Traps2View {
   private readonly buttons: Button[] = [];
   private readonly beams: Beam[] = [];
   private readonly blocks: Block[] = [];
+  private readonly blockAt = new Map<string, Block>();
   private readonly owned: { dispose(): void }[] = [];
   private renderTick = 0;
 
@@ -138,7 +139,9 @@ export class Traps2View {
     mesh.position.set(x, y, z);
     edges.position.set(x, y, z);
     this.group.add(mesh, edges);
-    this.blocks.push({ key, mesh, mat, edges, edgeMat, vanish });
+    const b: Block = { key, mesh, mat, edges, edgeMat, vanish };
+    this.blocks.push(b);
+    this.blockAt.set(key, b);
   }
 
   /** A switch of `group` was pressed: its buttons push down with a click (main.ts plays it). */
@@ -190,6 +193,15 @@ export class Traps2View {
   solid = (x: number, y: number, z: number): boolean => {
     const k = cellKey({ x, y, z }), v = this.level.vanish.get(k);
     return v ? vanishOn(v, Math.floor(this.renderTick)) : this.level.invisible.has(k);
+  };
+
+  /**
+   * What the camera can't see through right now (18c line of sight): vanishing blocks while they're there, and
+   * invisible blocks only while they're drawn (near the local ball, or with sunglasses).
+   */
+  opaque = (x: number, y: number, z: number): boolean => {
+    const b = this.blockAt.get(cellKey({ x, y, z }));
+    return !!b && (b.vanish ? vanishOn(b.vanish, Math.floor(this.renderTick)) : b.mesh.visible);
   };
 
   /** The nearest point on an active beam to `p`, or null (the positional buzz). */

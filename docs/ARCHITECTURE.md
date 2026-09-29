@@ -604,7 +604,8 @@ Multiplayer rounds are grouped into a **match**, so there's something at stake b
   - **Race:** exit winner 5. Everyone else is ranked by keys held at the end (ties share the higher place): 2nd 3, 3rd 2, 4th+ 1 if they hold ≥ 1 key, else 0. A timeout with no exit ranks everyone by keys.
   - **Knockout:** by elimination order: last alive 5, 2nd 3, 3rd 2, others 1. Plus **+1 per knockout** credited that round (cap +2, same as race, so knockout rounds don't outweigh races).
   - **Race with push:** +1 per knockout credited (cap +2), so fighting pays in races too.
-- **Crown:** the match leader (most points; ties → nobody) wears a crown. It's only seen in line of sight (no x-ray, see 18b), but their name label and board line show 👑, and their off-screen arrow gets a crown icon.
+- **Crown:** the match leader (most points; ties → nobody) wears a crown. It's only seen in line of sight (no x-ray, see 18b). Their name label and board line show 👑, and their off-screen arrow gets a crown icon.
+  - **Line of sight rule (18c):** nothing about another player shows through blocks: no silhouette, and no name label. A label shows only while its ball is visible from the camera.
   - Knocking out the crowned player gives **+1 bonus**, so the leader is a target.
 - **End of match:** a podium scene (the top 3 balls on stepped blocks, confetti, a stinger), then a stats card per player (points, wins, knockouts, pushes, stomps, deaths, keys) and "MVP" badges (most knockouts, most keys, fewest deaths). Then back to a fresh lobby, with a Rematch vote (same players, points reset). The rematch passes with **at least half** of the connected players (1–1 → rematch).
 - **Match tie:** broken by round wins, then knockouts, then keys. Still tied → they share the place (same number, both on that step of the podium, side by side), and the title reads "X and Y share the match!".

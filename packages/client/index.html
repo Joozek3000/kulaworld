@@ -12,7 +12,7 @@
     .labels { position: fixed; top: 0; left: 0; pointer-events: none; }
     /* 18b: HUD panels sit above the 3D name labels (the CSS2D layer is appended after them). */
     #hud-top, #hud-board, #hud-status, #hud-center, #hud-toasts, #hud-fx, #pad-hint { z-index: 1; }
-    .label { color: #fff; font-size: 0.75em; background: #0009; padding: 1px 6px; border-radius: 8px; border: 2px solid; }
+    .label { color: #fff; font-size: 0.75em; background: #0009; padding: 1px 6px; border-radius: 8px; border: 2px solid; transition: opacity 0.15s; }
     .dot { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; margin-right: 0.5em; vertical-align: -0.05em; box-shadow: 0 0 0 2px #0006; }
     .ok { color: var(--ok); font-weight: 600; }
     .dim { color: #9aa0b8; }

@@ -231,3 +231,33 @@ test('x-ray (18b): only your own ball has a silhouette; enemy balls, keys, the e
   for (const o of added) expect(hasXray(o)).toBe(false);
   vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
 });
+
+test('line of sight (18c): an occluded ball\'s label and crown hide; a visible one\'s label shows', () => {
+  vi.stubGlobal('document', { createElement: () => ({ style: {}, setAttribute() {}, remove() {} }) });
+  const scene = new THREE.Scene(), view = new PlayersView(scene);
+  const P = (id: string, x: number) => ({
+    id, name: id, color: '#ff4040', action: 0, fromX: x, fromY: 1, fromZ: 0, fromUp: 2, fromFwd: 0, toX: x, toY: 1, toZ: 0, toUp: 2, toFwd: 0,
+    startTick: 0, endTick: 0, turnFromFwd: 0, turnStartTick: 0, bounce: false, keys: 0, ready: false, spectating: false, lives: 3, eliminated: false,
+    eliminatedTick: -1, eliminatedBy: '', protectedUntil: 0, knockouts: 0, ackSeq: 0, ackTick: 0, fireCount: 0, vote: -1,
+  }) as PlayerS;
+  const state = { phase: 'playing', tick: 10, players: new Map([['me', P('me', 0)], ['foe', P('foe', 6)]]), items: new Map(), pickups: new Map(), hot: new Map() } as unknown as GameState;
+  view.crownId = 'foe';
+  const label = () => scene.children.find((o) => o instanceof CSS2DObject)!.element.style.opacity;
+  const crown = () => scene.children.find((o) => o instanceof THREE.Group && o.children.length === 11)!;
+  const camera = new THREE.Vector3(6, -5, 0); // under the floor
+  const floor = (x: number, y: number, z: number) => y === 0 && z === 0 && x >= -2 && x <= 8;
+  view.update(state, 10, 'me', 10, 0.016, 1000);
+  expect(label()).toBe('0'); // hidden until the first check
+  view.updateSight(camera, 1000, floor);
+  expect(label()).toBe('0');
+  expect(crown().visible).toBe(false);
+  // Checked again only after ~100 ms: the camera comes up over the floor and the label fades back in.
+  camera.set(6, 5, 4);
+  view.updateSight(camera, 1050, floor);
+  expect(label()).toBe('0');
+  view.update(state, 10, 'me', 10, 0.016, 1200);
+  view.updateSight(camera, 1200, floor);
+  expect(label()).toBe('1');
+  expect(crown().visible).toBe(true);
+  vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
+});

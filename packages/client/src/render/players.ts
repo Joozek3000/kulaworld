@@ -10,6 +10,7 @@ import { tuning } from '../tuning.ts';
 import { applySquash, Spring } from './squash.ts';
 import { art, BALL_MODELS } from './art.ts';
 import { addXray } from './xray.ts';
+import { lineClear } from './los.ts';
 
 /** The match leader's crown (phase 18): gold ceramic, floating CROWN_LIFT above the ball, turning slowly. */
 const CROWN_LIFT = 0.85;
@@ -203,6 +204,12 @@ class PlayerView {
   });
   readonly shadow = new THREE.Mesh(shadowGeo, this.shadowMat);
   readonly label: CSS2DObject | null;
+  /**
+   * Line of sight (18c): whether the camera saw the ball at the last check, and when the next one is due
+   * (performance.now ms). Other players' labels fade out while their ball is hidden; your own is always seen.
+   */
+  seen: boolean;
+  sightAt = 0;
   private readonly ring = new THREE.Mesh(ringGeo, ringMat);
   shown = false;
   action: number = Action.Idle;
@@ -249,6 +256,7 @@ class PlayerView {
     this.shadow.visible = false;
     this.ring.visible = false;
     scene.add(this.ball, this.shadow, this.ring);
+    this.seen = local;
     if (local) {
       this.label = null;
     } else {
@@ -256,6 +264,7 @@ class PlayerView {
       div.className = 'label';
       div.textContent = p.name;
       div.style.borderColor = p.color;
+      div.style.opacity = '0'; // until the first line of sight check
       this.label = new CSS2DObject(div);
       this.label.visible = false;
       scene.add(this.label);
@@ -695,6 +704,9 @@ class PlayerView {
 }
 
 const ACTIVE = new Set(['countdown', 'playing', 'results']);
+/** Line of sight (18c): check interval per ball, and the extra test points along its up (top and bottom). */
+const SIGHT_MS = 100, SIGHT_SPAN = 0.4;
+const sightUp = new THREE.Vector3(), sightAt = new THREE.Vector3();
 const cellOf = (p: Pose) => `${p.cell.x},${p.cell.y},${p.cell.z}`;
 
 export class PlayersView {
@@ -802,6 +814,31 @@ export class PlayersView {
   /** Every ball on screen (phase 17 off-screen arrows): id, position, colour, local, crowned. No allocations. */
   eachBall(cb: (id: string, at: THREE.Vector3, color: string, local: boolean, crowned: boolean) => void): void {
     for (const [id, v] of this.views) if (v.shown) cb(id, v.ball.position, v.color, v.local, id === this.crownId);
+  }
+
+  /**
+   * Line of sight (18c): about every SIGHT_MS per other player (staggered), a grid ray from the camera to the ball's
+   * centre and ±SIGHT_SPAN along its up; any clear ray means seen. A hidden ball's label fades out (CSS, 150 ms) and
+   * its crown is hidden, so nothing about another player shows through blocks. Call after the camera is placed.
+   * `opaque` is what the camera can't see through right now; null (no level) sees everything.
+   */
+  updateSight(camera: THREE.Vector3, nowMs: number, opaque: SolidFn | null): void {
+    let n = 0;
+    for (const v of this.views.values()) {
+      if (v.local) continue;
+      n++;
+      if (nowMs < v.sightAt) continue;
+      // First check at once; after that every SIGHT_MS, offset per ball so they don't all land on one frame.
+      v.sightAt = nowMs + SIGHT_MS + (v.sightAt ? 0 : (n * 37) % SIGHT_MS);
+      let seen = !opaque;
+      if (opaque) {
+        sightUp.fromArray(v.pose.up);
+        for (let k = -1; k <= 1 && !seen; k++) seen = lineClear(opaque, camera, sightAt.copy(v.ball.position).addScaledVector(sightUp, k * SIGHT_SPAN));
+      }
+      if (seen !== v.seen && v.label) v.label.element.style.opacity = seen ? '1' : '0';
+      v.seen = seen;
+    }
+    if (this.crown?.visible && !this.views.get(this.crownId)?.seen) this.crown.visible = false;
   }
 
   /** Matches (phase 18): who wears the crown ('' = nobody). It floats above that ball (line of sight only, 18b). */

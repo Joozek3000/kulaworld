@@ -40,6 +40,7 @@ Workflow:
 | 17 | Polish & readability | Flipside rename, fog fix, gentler early game, level fly-over, free look + x-ray outlines (reverted in 18b), off-screen arrows, island tints, gamepad + remapping, music system, timing presets |
 | 18 | Matches | Multi-round matches with points, crown on leader, podium; rival bot |
 | 18b | Remove x-ray + match follow-ups | No silhouettes through walls except your own ball; KO cap +2, match tie-break, rematch ≥ half, pad length vote, crown label |
+| 18c | Labels in line of sight | Remote name labels (and 👑) hide when the ball is behind blocks |
 | 19 | Online hosting (planned) | Deploy the server so friends can join over the internet; client pointed at it |
 | 20 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button; validation live |
 | 21 | Campaign worlds 2–3 (planned) | ~20 more single-player levels built with the editor, world themes |

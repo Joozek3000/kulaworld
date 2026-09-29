@@ -381,6 +381,7 @@ let level: Level | null = null;
 let levelView: LevelView | null = null;
 let trapsView: TrapsView | null = null;
 let traps2View: Traps2View | null = null;
+let opaque: ((x: number, y: number, z: number) => boolean) | null = null;
 let singleView: SingleTilesView | null = null;
 let nextBuzz = 0;
 let bounds = { center: new THREE.Vector3(), radius: 5 };
@@ -426,6 +427,11 @@ function showLevel(want: string, now: number): void {
     players.setLevel(level);
     const lv = levelView, t2 = traps2View;
     const solid = lv && t2 ? (x: number, y: number, z: number) => lv.solid(x, y, z) || t2.solid(x, y, z) : null;
+    // Line of sight (18c): what's drawn right now; cells outside the level's box are skipped before any key is built.
+    // ponytail: string-keyed lookups inside the box (a few hundred strings/s at 8 players); a packed grid if it shows up.
+    const lo = level?.min, hi = level?.max;
+    opaque = lv && t2 && lo && hi ? (x: number, y: number, z: number) => x >= lo.x && x <= hi.x && y >= lo.y && y <= hi.y && z >= lo.z && z <= hi.z
+      && (lv.solid(x, y, z) || t2.opaque(x, y, z)) : null;
     players.setSolid(solid);
     players.heat = level?.heat ?? null;
     rig.setSolid(solid);
@@ -577,6 +583,7 @@ view.renderer.setAnimationLoop((now: number) => {
     else rig.update(dtMs / 1000, mode, pose, bounds.center, bounds.radius);
     view.fitFog(bounds.center, bounds.radius);
   }
+  if (s.phase !== 'matchEnd') players.updateSight(view.camera.position, now, opaque); // labels in line of sight (18c)
   // Off-screen enemy arrows (multiplayer only; phase 17).
   offscreen.begin(view.camera, !sp && active && !!mine && !mine.spectating ? players.positionOf(me) : null);
   if (!sp && active) players.eachBall(offscreenBall);
