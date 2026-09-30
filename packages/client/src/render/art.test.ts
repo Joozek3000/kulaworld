@@ -2,11 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { ALL_DIRS, crumbleBands, dirVec, loadLevel, spikesUp, type LevelJson } from '@kula/shared';
+import { ALL_DIRS, BALL_RADIUS, crumbleBands, dirVec, loadLevel, spikesUp, type LevelJson } from '@kula/shared';
 import { art, BALL_MODELS, BLOCK_MODELS, environmentFor, loadArt, MODEL_NAMES } from './art.ts';
 import { findLevel, LevelView } from './level.ts';
 import { ItemsView } from './items.ts';
-import { PlayersView, crownScale } from './players.ts';
+import { PlayersView, crownScale, CROWN_BOB, CROWN_GAP } from './players.ts';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { TrapsView } from './traps.ts';
 import { staticLevel } from './traps2.ts';
@@ -218,8 +218,7 @@ test('x-ray (18b): only your own ball has a silhouette; enemy balls, keys, the e
   const balls = scene.children.filter((o) => o.children.length && !(o instanceof THREE.Mesh) && hasXray(o));
   expect(balls).toHaveLength(1); // the local ball
   expect(view.positionOf('me')!.distanceTo(balls[0].position)).toBeLessThan(1e-6);
-  const crown = scene.children.find((o) => o instanceof THREE.Group && o.visible && o.position.distanceTo(view.positionOf('foe')!) > 0.5
-    && o.position.distanceTo(view.positionOf('foe')!) < 2);
+  const crown = scene.children.find((o) => o instanceof THREE.Group && o.visible && o.children.length === 11);
   expect(crown).toBeDefined();
   expect(hasXray(crown!)).toBe(false);
   expect(scene.children.find((o) => o instanceof CSS2DObject)?.element.textContent).toBe('👑 foe'); // the crowned player's label
@@ -276,4 +275,91 @@ test('crown scale (phase 19): 1.2× within 3 cells, 2.3× from 8, smooth between
   expect(crownScale(8)).toBeCloseTo(2.3);
   expect(crownScale(20)).toBeCloseTo(2.3);
   for (let d = 0; d < 10; d += 0.25) expect(crownScale(d + 0.25)).toBeGreaterThanOrEqual(crownScale(d));
+});
+
+/** Phase 19b: a stand-in PlayerS on cell (x, 1, z), standing on +Y. */
+const P19 = (id: string, x: number, z = 0, protectedUntil = 0) => ({
+  id, name: id, color: '#ff4040', action: 0, fromX: x, fromY: 1, fromZ: z, fromUp: 2, fromFwd: 0, toX: x, toY: 1, toZ: z, toUp: 2, toFwd: 0,
+  startTick: 0, endTick: 0, turnFromFwd: 0, turnStartTick: 0, bounce: false, keys: 0, ready: false, spectating: false, lives: 3, eliminated: false,
+  eliminatedTick: -1, eliminatedBy: '', protectedUntil, knockouts: 0, ackSeq: 0, ackTick: 0, fireCount: 0, vote: -1,
+}) as PlayerS;
+const state19 = (...ps: PlayerS[]) => ({ phase: 'playing', tick: 10, players: new Map(ps.map((p) => [p.id, p])), items: new Map(), pickups: new Map(), hot: new Map() }) as unknown as GameState;
+
+test('crown (19b): seated on the ball, a gap of at most 0.15 ball radius, at every distance scale', () => {
+  vi.stubGlobal('document', { createElement: () => ({ style: {}, setAttribute() {}, remove() {} }) });
+  const scene = new THREE.Scene(), view = new PlayersView(scene);
+  view.crownId = 'foe';
+  const crown = () => scene.children.find((o) => o instanceof THREE.Group && o.children.length === 11)!;
+  const box = new THREE.Box3();
+  expect(CROWN_GAP + CROWN_BOB).toBeLessThanOrEqual(0.15 * BALL_RADIUS);
+  for (const t of [1000, 1250, 1500, 1750, 2000]) { // through the bob
+    view.update(state19(P19('me', 0), P19('foe', 3)), 10, 'me', 10, 0.016, t);
+    const top = view.positionOf('foe')!.y + BALL_RADIUS;
+    for (const dist of [1, 5, 12]) {
+      crown().scale.setScalar(crownScale(dist));
+      crown().updateMatrixWorld(true);
+      const gap = box.setFromObject(crown()).min.y - top;
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThanOrEqual(0.15 * BALL_RADIUS + 1e-6);
+    }
+  }
+  vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
+});
+
+/**
+ * Software raster of one pixel (19b render test), with the real meshes and materials: three's draw order (opaque by
+ * renderOrder then near to far, then transparent by renderOrder then far to near), LessEqual depth, stencil Replace on
+ * a z-pass. True if the local ball's silhouette draws on the ray from `from` to `to`.
+ */
+function silhouetteAt(scene: THREE.Scene, from: THREE.Vector3, to: THREE.Vector3): boolean {
+  scene.updateMatrixWorld(true);
+  const shown = (o: THREE.Object3D | null): boolean => !o || (o.visible && shown(o.parent));
+  const hits = new Map<THREE.Mesh, number>();
+  for (const h of new THREE.Raycaster(from, to.clone().sub(from).normalize()).intersectObjects(scene.children, true)) {
+    if (h.object instanceof THREE.Mesh && shown(h.object) && !hits.has(h.object)) hits.set(h.object, h.distance);
+  }
+  const ball = [...hits.keys()].find((m) => m.children.some((c) => c.userData.xray));
+  if (!ball) return false;
+  const xray = ball.children.find((c) => c.userData.xray) as THREE.Mesh;
+  hits.set(xray, hits.get(ball)!);
+  const mat = (m: THREE.Mesh) => m.material as THREE.Material;
+  const order = [...hits].sort(([a, da], [b, db]) => (mat(a).transparent !== mat(b).transparent ? (mat(a).transparent ? 1 : -1)
+    : a.renderOrder - b.renderOrder || (mat(a).transparent ? db - da : da - db)));
+  let depth = Infinity, stencil = 0;
+  for (const [m, d] of order) {
+    const M = mat(m);
+    if (m === xray) return d > depth && (!M.stencilWrite || M.stencilFunc !== THREE.EqualStencilFunc || stencil === M.stencilRef);
+    if (M.stencilWrite && M.stencilFunc !== THREE.AlwaysStencilFunc) continue; // not used by anything else here
+    if (d > depth) continue;
+    if (M.depthWrite) depth = d;
+    if (M.stencilWrite && M.stencilZPass === THREE.ReplaceStencilOp) stencil = M.stencilRef;
+  }
+  return false;
+}
+
+test('own-ball silhouette (19b): only through level blocks, never over an enemy ball, a ghost ball or the crown', () => {
+  vi.stubGlobal('document', { createElement: () => ({ style: {}, setAttribute() {}, remove() {} }) });
+  // A floor, and a wall block at x=2 between the camera (x=7) and your ball (x=0).
+  const json = { id: 'xray-19b', name: 'x', version: 1, boxes: [{ min: [-1, 0, -1], max: [6, 0, 6] }], blocks: [[2, 1, 0]],
+    spawns: [{ cell: [0, 1, 0], up: '+Y', fwd: '+X' }] } as unknown as LevelJson;
+  const setup = (foe: PlayerS, crowned = false) => { // a fresh view per case: a segment with the same ticks isn't re-read
+    const scene = new THREE.Scene(), view = new PlayersView(scene);
+    scene.add(new LevelView(staticLevel(loadLevel(json))).group);
+    if (crowned) view.crownId = 'foe';
+    view.update(state19(P19('me', 0), foe), 10, 'me', 10, 0.016, 1000);
+    return { scene, me: view.positionOf('me')!.clone() };
+  };
+  const eye = new THREE.Vector3(7, 0.9, 0);
+  let { scene, me } = setup(P19('foe', 4, 5));
+  expect(silhouetteAt(scene, eye, me)).toBe(true); // hidden by the wall only
+  expect(silhouetteAt(scene, new THREE.Vector3(0, 6, 0), me)).toBe(false); // in plain view
+  ({ scene, me } = setup(P19('foe', 4, 0)));
+  expect(silhouetteAt(scene, eye, me)).toBe(false); // the enemy ball is in front of the wall
+  ({ scene, me } = setup(P19('foe', 4, 0, 99)));
+  expect(silhouetteAt(scene, eye, me)).toBe(false); // a ghost (transparent) enemy ball, too
+  ({ scene, me } = setup(P19('foe', 4, 0), true));
+  const crown = scene.children.find((o) => o instanceof THREE.Group && o.children.length === 11)!;
+  const c = new THREE.Box3().setFromObject(crown).getCenter(new THREE.Vector3());
+  expect(silhouetteAt(scene, c.clone().addScaledVector(c.clone().sub(me).normalize(), 3), me)).toBe(false); // through the crown
+  vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
 });

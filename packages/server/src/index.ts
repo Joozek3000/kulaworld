@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { defineServer, defineRoom, matchMaker } from 'colyseus';
+import { defineServer, defineRoom, matchMaker, WebSocketTransport } from 'colyseus';
 import { GAME_VERSION } from '@kula/shared';
 import { config } from './config.ts';
 import { levelPool, RaceRoom, roomCodes } from './rooms/RaceRoom.ts';
@@ -12,6 +12,8 @@ const DIST = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
 const server = defineServer({
   greet: false,
+  // Explicit, not Colyseus's default dynamic import of @colyseus/ws-transport, so the esbuild bundle has it (phase 19b).
+  transport: new WebSocketTransport(),
   // Quick Play (§24): a public room in its lobby first, then the fullest.
   rooms: { race: defineRoom(RaceRoom).sortBy({ lobby: -1, clients: -1 } as never) },
   express: (app) => {

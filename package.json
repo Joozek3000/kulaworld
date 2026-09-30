@@ -11,8 +11,8 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm run dev -w packages/server\" \"npm run dev -w packages/client\"",
-    "build": "npm run typecheck && npm run build -w packages/client",
-    "start:prod": "node --import tsx packages/server/src/index.ts --prod",
+    "build": "npm run typecheck && npm run build -w packages/client && npm run build -w packages/server",
+    "start:prod": "node packages/server/dist/server.js --prod",
     "fly": "node scripts/fly.mjs",
     "deploy": "npm run fly -- deploy",
     "test": "vitest run",
@@ -26,6 +26,7 @@
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^5.0.1",
     "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"

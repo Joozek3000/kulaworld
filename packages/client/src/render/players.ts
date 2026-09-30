@@ -9,11 +9,14 @@ import type { GameState, PlayerS } from '../net.ts';
 import { tuning } from '../tuning.ts';
 import { applySquash, Spring } from './squash.ts';
 import { art, BALL_MODELS, contactShadowTexture } from './art.ts';
-import { addXray } from './xray.ts';
+import { addXray, clearsMark } from './xray.ts';
 import { lineClear } from './los.ts';
 
-/** The match leader's crown (phase 18): gold ceramic, floating CROWN_LIFT above the ball, turning slowly. */
-const CROWN_LIFT = 0.85;
+/**
+ * The match leader's crown (phase 18): gold ceramic, turning slowly. 19b: seated on the ball's top (its origin is the
+ * band's base, so scaling keeps it seated), CROWN_GAP ± CROWN_BOB above it (≤ 0.15 ball radius at the peak).
+ */
+export const CROWN_GAP = 0.03, CROWN_BOB = 0.02;
 /** The crown's scale at `dist` cells from the camera: 1.2× up to 3 cells, easing to 2.3× at 8 and beyond (phase 19). */
 export const crownScale = (dist: number) => 1.2 + 1.1 * THREE.MathUtils.smoothstep(dist, 3, 8);
 const crownUp = new THREE.Vector3(), crownY = new THREE.Vector3(0, 1, 0), crownSpin = new THREE.Quaternion();
@@ -23,13 +26,14 @@ function makeCrown(scene: THREE.Scene): THREE.Group {
   const g = new THREE.Group();
   const band = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.1, 24, 1, true), gold);
   band.material.side = THREE.DoubleSide;
+  band.position.y = 0.05; // the group's origin is the band's base
   g.add(band);
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 8), gold);
-    spike.position.set(Math.cos(a) * 0.19, 0.11, Math.sin(a) * 0.19);
+    spike.position.set(Math.cos(a) * 0.19, 0.16, Math.sin(a) * 0.19);
     const bead = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), pearl);
-    bead.position.set(Math.cos(a) * 0.19, 0.19, Math.sin(a) * 0.19);
+    bead.position.set(Math.cos(a) * 0.19, 0.24, Math.sin(a) * 0.19);
     g.add(spike, bead);
   }
   g.scale.setScalar(2.3); // 18b: must read in line of sight at ~8 cells, with no x-ray
@@ -165,6 +169,8 @@ class PlayerView {
   /** World axis the spring's stretch applies along. */
   private readonly squashAxis = new THREE.Vector3(0, 1, 0);
   private shadowWidth = 1;
+  /** The drawn ball's half-height along its up (squash and fire swell included): where its top is, for the crown (19b). */
+  halfUp = BALL_RADIUS;
   private fallCells = 0;
   /** A knock started on screen; contact (squash, THWACK, hit-stop) fires when its hold ends and the slide begins. */
   private contactPending = false;
@@ -256,6 +262,8 @@ class PlayerView {
     this.ball.add(this.body);
     this.body.traverse((object) => { if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = true; });
     if (local) addXray(this.body, p.color); // only your own ball shows through blocks (18b: no x-ray on others)
+    clearsMark(this.top);
+    clearsMark(this.bottom);
     this.ball.visible = false;
     this.shadow.visible = false;
     this.ring.visible = false;
@@ -633,6 +641,7 @@ class PlayerView {
     this.ball.position.addScaledVector(tmpUp, BALL_RADIUS * (along * k + (1 - along) * side - 1));
     // Shadow width: the ball's footprint on the ground plane (wide when squashed along up).
     this.shadowWidth = along * side + ((1 - along) * (k + side)) / 2;
+    this.halfUp = BALL_RADIUS * (along * k + (1 - along) * side) * (1 + FIRE_SWELL * this.fireCount);
   }
 
   /** Wobble, the flashing ring, and for a bounce the lunge into the blocked push and back. Ball only, not the camera. */
@@ -857,7 +866,7 @@ export class PlayersView {
     const c = (this.crown ??= makeCrown(this.scene));
     c.visible = true;
     crownUp.fromArray(v.pose.up);
-    c.position.copy(v.ball.position).addScaledVector(crownUp, CROWN_LIFT + Math.sin(timeSec * 2.4) * 0.04);
+    c.position.copy(v.ball.position).addScaledVector(crownUp, v.halfUp + CROWN_GAP + Math.sin(timeSec * 2.4) * CROWN_BOB);
     c.quaternion.setFromUnitVectors(crownY, crownUp).multiply(crownSpin.setFromAxisAngle(crownY, timeSec * 1.2));
   }
 

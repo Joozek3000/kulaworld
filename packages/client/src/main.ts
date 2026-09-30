@@ -426,7 +426,7 @@ hud.clear();
 if (normalizeCode(inviteCode)) showMulti(undefined, normalizeCode(inviteCode));
 else menu.show({ kind: 'main' });
 
-if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, camera: view.camera, get predict() { return predict; }, debug, latency } }); // console/automation access
+if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, camera: view.camera, view, get predict() { return predict; }, debug, latency } }); // console/automation access
 
 let level: Level | null = null;
 let levelView: LevelView | null = null;

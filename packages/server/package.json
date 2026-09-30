@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/server.js --log-level=warning --banner:js=\"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\"",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
@@ -14,8 +15,7 @@
     "@kula/bots": "*",
     "@kula/shared": "*",
     "colyseus": "^0.18.8",
-    "express": "^5.2.1",
-    "tsx": "^4.23.15"
+    "express": "^5.2.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6"

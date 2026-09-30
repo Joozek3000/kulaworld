@@ -88,7 +88,7 @@ function createSky() {
 }
 
 export function createScene() {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true }); // stencil: the silhouette's block mark (19b)
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   document.body.appendChild(renderer.domElement);
 

@@ -101,7 +101,7 @@ Then `sudo systemctl reload caddy`. On SIGTERM (`docker stop`, which waits 10 s 
 ## Running the production server locally
 
 ```powershell
-npm run build         # typecheck + client build (packages/client/dist)
+npm run build         # typecheck, client build (packages/client/dist), server bundle (packages/server/dist/server.js)
 npm run start:prod    # the server on :2567, serving the client: open http://localhost:2567
 ```
 

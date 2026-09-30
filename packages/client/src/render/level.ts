@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { crumbleBands, loadLevel, type Level, type LevelJson } from '@kula/shared';
 import { art, environmentFor, type ModelName } from './art.ts';
+import { markOccluder } from './xray.ts';
 
 const files = import.meta.glob<LevelJson>('../../../../levels/*.json', { eager: true, import: 'default' });
 
@@ -98,6 +99,7 @@ export class LevelView {
           mesh.castShadow = mesh.receiveShadow = true;
           mesh.name = name;
           mesh.userData.cells = cells.map((i) => keys[i]);
+          markOccluder(mesh); // your ball's silhouette shows through blocks only (19b)
           this.meshes.push(mesh);
           this.group.add(mesh);
           return mesh;

@@ -1,7 +1,9 @@
 import { isTimingName, type TimingName } from '@kula/shared';
 
 // All server settings, read once from the repo-root .env (if present) and the process env.
+// Paths resolve from this file's folder, which is also the bundle's (packages/server/dist/server.js, phase 19b).
 try { process.loadEnvFile(new URL('../../../.env', import.meta.url)); } catch { /* no .env */ }
+export const LEVELS_DIR = new URL('../../../levels/', import.meta.url);
 
 const env = process.env;
 /** Production (phase 19): the Docker image sets NODE_ENV; `npm run start:prod` passes --prod (no cross-env on Windows). */

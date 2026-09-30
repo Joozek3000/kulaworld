@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { cellKey, dirVec, vanishOn, type Dir, type Level, type Tile, type Vanish } from '@kula/shared';
 import { onFace } from './traps.ts';
 import { art, environmentFor } from './art.ts';
+import { markOccluder } from './xray.ts';
 
 /**
  * Phase 13b traps, procedural, in the ceramic/lavender look: teleporter ring pads (pair colour, a turning swirl), laser
@@ -143,6 +144,7 @@ export class Traps2View {
     const mesh = new THREE.Mesh(tile?.geometry ?? boxGeo, mat), edges = new THREE.LineSegments(edgesGeo, edgeMat);
     mesh.position.set(x, y, z);
     edges.position.set(x, y, z);
+    if (vanish) markOccluder(mesh); // a vanishing block hides your ball like any block; an invisible one doesn't (19b)
     this.group.add(mesh, edges);
     const b: Block = { key, mesh, mat, edges, edgeMat, vanish };
     this.blocks.push(b);

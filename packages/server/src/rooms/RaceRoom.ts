@@ -8,7 +8,7 @@ import {
   Action, addPlayer, cleanName, GAME_VERSION, JOIN_ERROR, newRoomCode, addRoundStats, createWorld, crownOf, emptyStats, InputQueue, loadLevel, MATCH_LENGTHS, mulberry32, pickCandidates, removePlayer,
   scoreRound, setInput, step, tallyVotes, TICK_RATE, validateLevel, validVote, voteCounts, type InputMsg, type Level, type MatchStats, type SimEvent, type World,
 } from '@kula/shared';
-import { config } from '../config.ts';
+import { config, LEVELS_DIR } from '../config.ts';
 import { GameState, PlayerS, StandingS, syncSchema } from '../schema/State.ts';
 
 const COUNTDOWN_TICKS = 3 * TICK_RATE;
@@ -55,8 +55,6 @@ class StalemateMeter {
     if (still.some((a, i) => still.some((b, j) => j > i && near(a, b)))) this.ticks++;
   }
 }
-
-const LEVELS_DIR = new URL('../../../../levels/', import.meta.url);
 
 /** Loads and validates levels/<id>.json. Throws on invalid levels, so a room never starts with one. */
 export function loadLevelFile(id: string): Level {

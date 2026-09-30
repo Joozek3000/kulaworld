@@ -3,6 +3,20 @@
 Read first: `CLAUDE.md` (commit **and push**), `docs/ARCHITECTURE.md` §25 (new: this phase's spec), §5, §6, §11, `packages/client/src/input.ts` and `bindings.ts`.
 **Start only after `phase 19: online hosting` is committed.** If you already began touch controls as a side quest in phase 19, move that work here and finish it to this spec.
 
+## Task 0: Phase 19 follow-ups (decisions)
+1. **Bundle the server** at image build with esbuild (approved as a dev dependency). The runtime runs plain `node dist/server.js`, with no tsx at runtime.
+   - Target: `/health` answering within ~4 s of a cold start (it's ~10 s now).
+   - Report before/after cold-start times, and the image size.
+   - `npm run start:prod` uses the bundle too.
+2. **"Fill with bots" stays at 4 players.** The host can still add more with +.
+3. **Crown position:** it floats about a ball-height above the ball, so up close it reads as belonging to whatever is behind (`19-crown-near.jpg`).
+   - Seat it just above the ball's top (a gap ≤ 0.15 ball radius), and scale it from its base so it stays seated at every distance scale.
+4. **Own-ball silhouette only through blocks:** in `19-crown-near.jpg`, your hidden ball draws its red silhouette over the enemy ball in front of you, which looks like the enemy's colour.
+   - The silhouette should show only where level blocks hide your ball, not other balls, the crown or items.
+   - Add a render test.
+
+Commit these separately: `phase 19 follow-ups`, then push. Deploy once at the end of 19b (not twice).
+
 ## Tasks
 1. **`input/touch.ts`:** a third input source next to the keyboard and the pad.
    - It feeds the same held/pulse state that `setupInput` sends, so there's no new message type and the "sends only on change" rule still holds.
@@ -44,7 +58,7 @@ Test on the deployed site: after tests pass, run `npm run deploy`, then use `htt
 - [ ] **Jakub on his phone** (stop and ask, like the 19 phone check):
   - Complete single-player levels 1–3.
   - Play one multiplayer match against server bots.
-  - Report whether turning mid-roll, held-jump bounce and jump-forward feel right, and the FPS shown in F3 (add a small on-screen FPS toggle in touch settings, since there's no F3 key).
+  - Report whether turning mid-roll, held-jump bounce and jump-forward feel right, the FPS and ping (add a small on-screen FPS/ping toggle in touch settings, since there's no F3 key), and the airplane-mode reconnect (10 s off, then back: same seat).
 - [ ] If Jakub has a tablet: the same quick check.
 - [ ] Keyboard and gamepad still work on desktop, and the touch UI never shows there unless forced On.
 - [ ] typecheck, test, level:check pass.
