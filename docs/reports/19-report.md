@@ -150,3 +150,4 @@
 - **Unused screenshot:** `img/19-private-round.jpg` is a round in progress from the local check, kept for reference.
 
 ## CI
+- I can't see CI from here: `gh` isn't installed and the repo is private. Check the Actions tab for commit `afdc99c`. The new `docker` job builds the image, prints its size (Fly's remote builder reported 133 MB for the same Dockerfile), and checks `/health` in a container.
