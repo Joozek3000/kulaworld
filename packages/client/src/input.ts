@@ -23,29 +23,31 @@ export interface InputHooks {
   onVoteStep?(step: -1 | 1): void;
   /** Match-length vote with the pad: RB next, LB previous (phase 18b). */
   onLengthStep?(step: -1 | 1): void;
-  /** The device last used changed (the HUD shows pad glyphs). */
-  onDevice?(device: 'keyboard' | 'pad'): void;
+  /** The device last used changed (the HUD shows pad glyphs; touch shows the touch controls, phase 19b). */
+  onDevice?(device: Device): void;
 }
 
 type Sender = Pick<GameSource, 'sendInput' | 'sendReady' | 'sendVote'>;
+export type Device = 'keyboard' | 'pad' | 'touch';
 type Captured = { code: string } | { button: number };
 const DEAD = 0.5, RELEASE = 0.3, LOOK_DEAD = 0.2;
 
 /**
- * Keyboard and gamepad per ARCHITECTURE §6/§11, through rebindable actions (phase 17). Sends only on change. Turn
- * and jump fire a pulse once per physical press; forward and jump are also held states (holding jump keeps
- * bouncing). The keyboard and the pad each hold their own state; the ball gets their union.
+ * Keyboard and gamepad per ARCHITECTURE §6/§11, through rebindable actions (phase 17), and touch (phase 19b, fed by
+ * input/touch.ts through `feed`). Sends only on change. Turn and jump fire a pulse once per physical press; forward
+ * and jump are also held states (holding jump keeps bouncing). Each device holds its own state; the ball gets their
+ * union. `device` starts as `initial` (touch on a coarse-pointer screen).
  */
-export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
-  const held = { key: { fwd: false, jump: false }, pad: { fwd: false, jump: false } };
+export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings, initial: Device = 'keyboard') {
+  const held = { key: { fwd: false, jump: false }, pad: { fwd: false, jump: false }, touch: { fwd: false, jump: false } };
   let fwdHeld = false, jumpHeld = false, seq = 0;
-  let device: 'keyboard' | 'pad' = 'keyboard';
+  let device: Device = initial;
   let capture: ((c: Captured) => void) | null = null;
   const send = (turn: -1 | 0 | 1, jump: boolean) => net.sendInput({ seq: ++seq, fwdHeld, turn, jump, jumpHeld });
-  const use = (d: 'keyboard' | 'pad') => { if (d !== device) { device = d; hooks.onDevice?.(d); } };
+  const use = (d: Device) => { if (d !== device) { device = d; hooks.onDevice?.(d); } };
   /** Recomputes the held union; sends when it changed (a new jump hold also carries the jump pulse). */
   const sync = () => {
-    const f = held.key.fwd || held.pad.fwd, j = held.key.jump || held.pad.jump;
+    const f = held.key.fwd || held.pad.fwd || held.touch.fwd, j = held.key.jump || held.pad.jump || held.touch.jump;
     if (f === fwdHeld && j === jumpHeld) return;
     const pulse = j && !jumpHeld;
     if ((f && !fwdHeld) || pulse) hooks.onPress();
@@ -55,7 +57,7 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
   };
   const turn = (t: -1 | 1) => { send(t, false); hooks.onPress(); };
   /** An action pressed (`down`) or released on a device. */
-  const act = (a: BindAction, down: boolean, src: 'key' | 'pad') => {
+  const act = (a: BindAction, down: boolean, src: 'key' | 'pad' | 'touch') => {
     switch (a) {
       case 'fwd': held[src].fwd = down; sync(); break;
       case 'jump': held[src].jump = down; sync(); break;
@@ -68,7 +70,11 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
     }
   };
   const actionOfKey = (code: string) => ACTIONS.find((a) => bindings.keys[a].includes(code));
-  const releaseAll = () => { held.key.fwd = held.key.jump = held.pad.fwd = held.pad.jump = false; sync(); hooks.onLook?.(false); };
+  const releaseAll = () => {
+    held.key.fwd = held.key.jump = held.pad.fwd = held.pad.jump = held.touch.fwd = held.touch.jump = false;
+    sync();
+    hooks.onLook?.(false);
+  };
 
   const LABELS: Record<string, string> = { fwd: 'W', left: 'A', right: 'D', jump: 'Space' };
   addEventListener('keydown', (e) => {
@@ -101,6 +107,8 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
     if (a === 'fwd' || a === 'jump' || a === 'look') act(a, false, 'key');
   });
   addEventListener('blur', releaseAll);
+  // Any touch (a menu tap too) makes touch the device: Auto shows the touch controls on the first touch (§25).
+  addEventListener('touchstart', () => use('touch'), { capture: true, passive: true });
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 
   // Gamepad (phase 17): polled once per frame. Buttons and the left stick are edge-detected against last frame.
@@ -125,6 +133,8 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings) {
   return {
     get fwdHeld() { return fwdHeld; },
     get device() { return device; },
+    /** Touch (phase 19b): an action from the touch layer, held or pressed like a key. */
+    feed(a: 'fwd' | 'jump' | 'left' | 'right', down: boolean): void { use('touch'); act(a, down, 'touch'); },
     /** Rebinding (phase 17): the next key or pad button goes to `cb` instead of the game ({ code: '' }: cancelled with Esc). */
     captureNext(cb: (c: Captured) => void) { capture = cb; },
     /** Once per frame: reads the pad, if any. */

@@ -7,6 +7,9 @@ const FADE_SEC = 0.6;
 export class Fx {
   private live: { mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>; start: number }[] = [];
 
+  /** Low graphics (19b): fewer particles. */
+  low = false;
+
   constructor(private scene: THREE.Scene) {}
 
   vanish(at: THREE.Vector3, color: string, timeSec: number): void {
@@ -18,7 +21,7 @@ export class Fx {
 
   /** A small grey puff (a burnt ball, phase 12): a few spheres drifting up and fading. */
   puff(at: THREE.Vector3, timeSec: number): void {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < (this.low ? 2 : 5); i++) {
       const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x9a9a9a, transparent: true, opacity: 0.6, depthWrite: false }));
       mesh.position.copy(at).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.3, (Math.random() - 0.5) * 0.6));
       mesh.scale.setScalar(0.3 + Math.random() * 0.3);

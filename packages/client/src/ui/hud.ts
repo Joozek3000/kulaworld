@@ -108,6 +108,8 @@ export function createHud(lobby: LobbyHooks) {
   });
   /** When the host became a lone human in a public lobby (0 = not alone). */
   let aloneSince = 0;
+  /** Touch controls showing (19b): tap hints instead of keys. */
+  let touch = false;
   top.textContent = 'connecting…';
   const padHint = div('pad-hint');
   padHint.innerHTML = '🎮 ▲/stick roll · ◀▶ turn · Ⓐ jump · R-stick look · Ⓑ ready · Ⓧ/Ⓨ vote · LB/RB length · Start pause';
@@ -164,6 +166,9 @@ export function createHud(lobby: LobbyHooks) {
     padHint(on: boolean) {
       padHint.hidden = !on;
     },
+
+    /** Touch controls showing (19b): hints say tap, not keys. */
+    set touch(on: boolean) { touch = on; },
 
     /** Hides every HUD panel (the main menu). */
     clear() { for (const el of [top, center, board, status, fx]) set(el, ''); },
@@ -236,13 +241,14 @@ export function createHud(lobby: LobbyHooks) {
               + `<div class="cmode">${l.mode === 'knockout' ? 'Knockout' : 'Race'} ${trapIcons(l)}</div>`);
           });
           cards.push(card(RANDOM_VOTE, '<div class="random">?</div><div class="cname">Random</div><div class="cmode dim">any level</div>'));
-          const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : myVote < 0 ? 'Vote for the next level, then press <kbd>R</kbd>' : 'Press <kbd>R</kbd> to ready';
-          set(top, `${GAME_NAME} · Lobby${sound}`);
+          const r = touch ? 'tap <b>Ready</b>' : 'press <kbd>R</kbd>';
+          const hint = mine?.ready ? `Ready. Waiting for others (${ready}/${s.players.size})` : myVote < 0 ? `Vote for the next level, then ${r}` : `${r[0].toUpperCase()}${r.slice(1)} to ready`;
+          set(top, touch ? '' : `${GAME_NAME} · Lobby${sound}`); // touch: the panel needs the room (19b)
           const round = s.matchRound ?? 0, rounds = s.matchRounds ?? 0;
           let match = '';
           if (s.standings && round === 0) {
             const lv = mine?.lengthVote ?? -1;
-            match = `<h2>Match length <small class="dim">(🎮 LB/RB)</small></h2><div class="cards lengths">${MATCH_LENGTHS.map((n, i) => {
+            match = `<h2>Match length ${touch ? '' : '<small class="dim">(🎮 LB/RB)</small>'}</h2><div class="cards lengths">${MATCH_LENGTHS.map((n, i) => {
               const c = s.lengthVotes?.[i] ?? 0;
               return `<button class="card len${lv === i ? ' mine' : ''}" data-length="${i}"><div class="cname">${n} rounds</div>`
                 + `<div class="votes">${c ? `${'●'.repeat(c)} ${c}` : '<span class="dim">no votes</span>'}</div></button>`;
@@ -252,7 +258,7 @@ export function createHud(lobby: LobbyHooks) {
           }
           set(center, `<div class="panel lobby">${s.hostId !== undefined ? roomBar(s, me) : ''}${match}<h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
-          set(status, LOBBY_CONTROLS);
+          set(status, touch ? '' : LOBBY_CONTROLS);
           break;
         }
         case 'countdown':

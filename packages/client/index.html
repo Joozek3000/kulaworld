@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1d2b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Flipside" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
   <title>Flipside</title>
   <style>
     :root { --fs: clamp(13px, 0.95vw + 4px, 20px); --panel: #0b0e1acc; --ok: #3ddc6f; --warn: #ff6b5b; }
@@ -24,17 +32,17 @@
     kbd { background: #fff2; border: 1px solid #fff5; border-radius: 4px; padding: 0 0.35em; font: inherit; }
 
     #hud-top, #hud-board, #hud-status, #hud-center .panel { background: var(--panel); border-radius: 10px; backdrop-filter: blur(4px); }
-    #hud-top { position: fixed; top: 12px; left: 12px; padding: 0.4em 0.8em; font-size: 1.05em; }
+    #hud-top { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); padding: 0.4em 0.8em; font-size: 1.05em; }
     #hud-top .timer { font-variant-numeric: tabular-nums; font-size: 1.5em; font-weight: 700; }
     #hud-top .timer.warn { color: var(--warn); }
-    #hud-board { position: fixed; top: 12px; right: 12px; padding: 0.4em 0.8em; min-width: 12em; }
+    #hud-board { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); padding: 0.4em 0.8em; min-width: 12em; }
     #hud-fx { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
     #hud-fx .pill { position: relative; display: grid; place-items: center; width: 2.6em; height: 2.6em; border-radius: 50%;
       background: conic-gradient(var(--ring, #fff) calc(var(--p) * 1turn), #fff3 0); }
     #hud-fx .pill i { display: grid; place-items: center; width: 2.1em; height: 2.1em; border-radius: 50%; background: var(--panel); font-style: normal; }
     #hud-fx .pill b { position: absolute; bottom: -1.3em; font-size: 0.75em; font-weight: normal; }
     #hud-fx .bouncy { --ring: #ff6fb5; } #hud-fx .lethargy { --ring: #e63946; } #hud-fx .heavy { --ring: #9aa3ad; } #hud-fx .sunglasses { --ring: #ffd166; }
-    #hud-status { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 0.5em 1.1em; font-size: 1.1em; white-space: nowrap; }
+    #hud-status { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); padding: 0.5em 1.1em; font-size: 1.1em; white-space: nowrap; }
     #hud-center { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; }
     #hud-center .panel { padding: 1em 1.6em; min-width: 18em; max-width: 90vw; text-align: center; }
     #hud-center h1 { margin: 0 0 0.2em; font-size: 2em; }
@@ -140,9 +148,72 @@
     .host { color: #ffd166; font-size: 0.85em; }
     #reconnecting { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0e1acc; font-size: 2em; font-weight: 700; z-index: 20; }
     #debug { position: fixed; bottom: 12px; right: 12px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
+    /* Phase 19b: phones and tablets. No zoom, selection, long-press menu or overscroll; safe areas; the touch layer. */
+    html, body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    input { -webkit-user-select: text; user-select: text; }
+    canvas { touch-action: none; }
+    #menu-code { text-transform: uppercase; }
+    .mpanel.touch .grid .mbtn { text-align: center; }
+    .mpanel { max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; }
+    @media (pointer: coarse) {
+      .mbtn, .mini, .card { min-height: 44px; }
+      .mini { min-width: 44px; padding: 0.3em 0.9em; }
+      .mpanel input:not([type]) { font-size: 16px; } /* iOS zooms into smaller inputs */
+      .mpanel input[type=range] { height: 44px; }
+    }
+    #touch { position: fixed; inset: 0; z-index: 2; pointer-events: none; touch-action: none; --k: 1; --touch-opacity: 0.6;
+      --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+      --jump: calc(clamp(72px, 24vmin, 150px) * var(--k)); --ring: calc(clamp(110px, 34vmin, 220px) * var(--k)); }
+    #touch > * { pointer-events: auto; touch-action: none; }
+    #touch .t-zone, #touch .t-pad, #touch .t-jump { display: none; }
+    #touch.play .t-zone, #touch.play .t-pad, #touch.play .t-jump { display: block; }
+    #touch .t-zone { position: absolute; top: 0; bottom: 0; width: 50%; }
+    #touch .t-zone[data-zone=dpad], #touch.lefty .t-zone[data-zone=look] { left: 0; }
+    #touch .t-zone[data-zone=look], #touch.lefty .t-zone[data-zone=dpad] { left: 50%; }
+    #touch .t-pad { position: absolute; width: 0; height: 0; pointer-events: none; opacity: var(--touch-opacity);
+      left: calc(var(--sl) + 5vmin + var(--ring) / 2); top: calc(100% - var(--sb) - 5vmin - var(--ring) / 2); }
+    #touch.lefty .t-pad { left: calc(100% - var(--sr) - 5vmin - var(--ring) / 2); }
+    #touch .t-pad.live { opacity: min(1, calc(var(--touch-opacity) + 0.3)); }
+    .t-ring { position: absolute; width: var(--ring); height: var(--ring); left: calc(var(--ring) / -2); top: calc(var(--ring) / -2); box-sizing: border-box;
+      border-radius: 50%; border: 3px solid #fffc; background: radial-gradient(#0b0e1a33, #0b0e1a88); }
+    .t-ring b { position: absolute; color: #fffb; font-size: calc(var(--ring) * 0.15); line-height: 1; transform: translate(-50%, -50%); }
+    .t-ring .t-n { left: 50%; top: 17%; } .t-ring .t-w { left: 17%; top: 50%; } .t-ring .t-e { left: 83%; top: 50%; }
+    .t-ring b.on { color: #ffd166; text-shadow: 0 0 12px #ffd166; }
+    .t-thumb { position: absolute; width: calc(var(--ring) * 0.36); height: calc(var(--ring) * 0.36); left: calc(var(--ring) * -0.18); top: calc(var(--ring) * -0.18);
+      border-radius: 50%; background: #fffd; box-shadow: 0 2px 8px #0008; }
+    #touch .t-jump { position: absolute; right: calc(var(--sr) + 5vmin); bottom: calc(var(--sb) + 5vmin); width: var(--jump); height: var(--jump); border-radius: 50%;
+      border: 3px solid #fffc; background: #ff6a1e99; color: #fff; font: 800 calc(var(--jump) * 0.2) system-ui, sans-serif; opacity: var(--touch-opacity); }
+    #touch.lefty .t-jump { right: auto; left: calc(var(--sl) + 5vmin); }
+    #touch .t-jump.on { background: #ff6a1e; transform: scale(0.94); }
+    #touch .t-pause { position: absolute; top: calc(var(--st) + 10px); left: calc(var(--sl) + 10px); width: 44px; height: 44px; border-radius: 12px;
+      border: 2px solid #fff8; background: var(--panel); color: #fff; font: 700 15px system-ui, sans-serif; opacity: max(0.75, var(--touch-opacity)); }
+    #touch .t-ready { position: absolute; left: 50%; bottom: calc(var(--sb) + 12px); transform: translateX(-50%); min-height: 56px; padding: 0 2.4em; border-radius: 28px;
+      border: 2px solid #fff8; background: linear-gradient(#8f78e0, #6b4fc8); color: #fff; font: 800 1.3em system-ui, sans-serif; box-shadow: 0 4px 16px #0008; }
+    #touch .t-ready.on { background: linear-gradient(#5be38a, #2fbf62); }
+    #touch .t-stats { position: absolute; top: calc(var(--st) + 2px); left: 50%; transform: translateX(-50%); pointer-events: none;
+      font: 11px ui-monospace, monospace; background: #0009; padding: 1px 6px; border-radius: 6px; }
+    body.show-stats #hud-toasts { top: calc(30px + env(safe-area-inset-top, 0px)); }
+    body.touch-ui #hud-top { left: calc(64px + env(safe-area-inset-left, 0px)); }
+    body.touch-ui #hud-center { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+    body.touch-ui #pad-hint { display: none; }
+    #rotate { display: none; position: fixed; inset: 0; z-index: 30; place-items: center; background: #120d24f2; color: #fff; font-size: 1.4em; text-align: center; }
+    #rotate b { display: block; font-size: 3em; margin-bottom: 0.2em; }
+    @media (orientation: portrait) { body.touch-ui #rotate { display: grid; } }
+    /* Small screens: a compact scoreboard, smaller lobby cards, and panels that scroll instead of spilling. */
+    @media (max-height: 520px), (max-width: 720px) {
+      #hud-board { min-width: 0; padding: 0.25em 0.6em; font-size: 0.85em; }
+      #hud-board .list li { padding: 0; }
+      #hud-board .round { margin-bottom: 0; }
+      #hud-center .panel { padding: 0.6em 1em; max-height: calc(100% - 16px); overflow-y: auto; box-sizing: border-box; pointer-events: auto; }
+      #hud-center h1 { font-size: 1.5em; }
+      .cards { margin: 0.2em 0 0.4em; }
+      .card { width: 8.5em; } .card.len { width: 6em; }
+      #hud-fx { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    }
   </style>
 </head>
 <body>
+  <div id="rotate"><div><b>⟳</b>Rotate your device</div></div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

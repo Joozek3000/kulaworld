@@ -29,6 +29,8 @@ import { Music, type MusicSlot } from './audio/music.ts';
 import { latency } from './ui/latency.ts';
 import { LocalPrediction } from './predict/local.ts';
 import { loadArt } from './render/art.ts';
+import { createTouchUI, loadTouchSettings, saveTouchSettings, touchShown, type TouchSettings } from './input/touch.ts';
+import { applyGraphics, FpsGuard, loadGraphics, saveGraphics, type GraphicsMode } from './render/graphics.ts';
 
 /** Render this many ticks behind the estimated server tick, so the current action has always arrived. */
 const INTERP_TICKS = 2;
@@ -186,15 +188,15 @@ const offscreenBall = offscreen.ball;
 let screenshot = false;
 let frozen = false;
 const bindings = loadBindings();
-const input = setupInput({
-  sendInput: (i) => net?.sendInput(i), sendVote: (o) => net?.sendVote(o),
-  // Ready doubles as the rematch vote at the end of a match (phase 18).
-  sendReady: () => {
-    const me = net?.state.players.get(net.sessionId);
-    if (net?.state.phase === 'matchEnd') net.sendRematch?.(!me?.rematch);
-    else net?.sendReady();
-  },
-}, {
+// Ready doubles as the rematch vote at the end of a match (phase 18).
+const sendReady = () => {
+  const me = net?.state.players.get(net.sessionId);
+  if (net?.state.phase === 'matchEnd') net.sendRematch?.(!me?.rematch);
+  else net?.sendReady();
+};
+/** A phone or tablet (19b): touch is the device from the start, so Auto shows the touch controls before any touch. */
+const coarse = matchMedia('(pointer: coarse)').matches;
+const input = setupInput({ sendInput: (i) => net?.sendInput(i), sendVote: (o) => net?.sendVote(o), sendReady }, {
   onPress: debug.press,
   onDebug: debug.toggle,
   onScreenshot: () => { screenshot = true; },
@@ -222,7 +224,53 @@ const input = setupInput({
     const p = online?.state.players.get(online.sessionId);
     if (online) latency.press(key, at, !!p && p.action === Action.Idle && players.localAction(online.sessionId) === Action.Idle, !!predict?.predicting);
   },
-}, bindings);
+}, bindings, coarse ? 'touch' : 'keyboard');
+
+// Touch controls (phase 19b, §25): the d-pad and Jump feed the input like keys; a right-half drag looks around.
+const touchSettings = loadTouchSettings();
+const touch = createTouchUI({
+  act: (a, down) => { input.feed(a, down); if (a === 'jump' && down) haptic(8); },
+  look: (dx, dy) => {
+    lookHeld = true;
+    rig.lookYaw = Math.max(-LOOK_YAW_MAX, Math.min(LOOK_YAW_MAX, -dx * 0.008));
+    rig.lookPitch = Math.max(-LOOK_PITCH_MAX, Math.min(LOOK_PITCH_MAX, dy * 0.006));
+  },
+  lookEnd: () => { lookHeld = false; rig.lookYaw = rig.lookPitch = 0; },
+  pause: () => togglePause(),
+  ready: sendReady,
+});
+touch.apply(touchSettings);
+const touchOn = () => touchShown(touchSettings.mode, input.device);
+/** Vibration (§25: jump, knockout, key) while the touch controls are up and haptics are on. */
+function haptic(ms: number): void {
+  if (touchSettings.haptics && touchOn()) navigator.vibrate?.(ms);
+}
+function setTouch(change: Partial<TouchSettings>): void {
+  Object.assign(touchSettings, change);
+  saveTouchSettings(touchSettings);
+  touch.apply(touchSettings);
+}
+/** Fullscreen and landscape on the first Play tap (19b); either may be refused (iOS Safari), and that's fine. */
+let wentFullscreen = false;
+function goFullscreen(): void {
+  if (wentFullscreen || !touchOn()) return;
+  wentFullscreen = true;
+  try {
+    const orientation = screen.orientation as ScreenOrientation & { lock?(o: string): Promise<void> };
+    document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).then(() => orientation.lock?.('landscape')).catch(() => {});
+  } catch { /* not supported */ }
+}
+
+// Graphics (19b): High, Low, or Auto (High until the frame rate stays under 45 for 5 s).
+let graphics: GraphicsMode = loadGraphics();
+let lowGraphics = false;
+const fpsGuard = new FpsGuard();
+function setLow(low: boolean): void {
+  lowGraphics = low;
+  fx.low = low;
+  applyGraphics(view.renderer, view.scene, low);
+}
+if (graphics === 'low') setLow(true);
 
 /** F3: the last few measured presses, ms after keydown (sent / stamp ahead / predicted start / visible). */
 const latencyLines = () => ['press→ (ms)   key  mode    sent  stamp  start  visible',
@@ -247,6 +295,8 @@ function onEvent(e: SimEvent): void {
     case 'stomp': if (e.victimId === me || e.attackerId === me) input.rumble(e.victimId === me ? 1 : 0.5, 180); break;
     case 'bounce': if (e.playerId === me) input.rumble(0.3, 80); break;
     case 'death': if (e.playerId === me) input.rumble(1, 350); break;
+    case 'knockout': if (e.victimId === me || e.pusherId === me) haptic(e.victimId === me ? 60 : 30); break; // touch (19b)
+    case 'key': if (e.playerId === me) haptic(20); break;
   }
   switch (e.type) {
     case 'knockout': clearTimeout(pendingFall.get(e.victimId)); pendingFall.delete(e.victimId); break;
@@ -323,13 +373,14 @@ const menu = createMenu((act, arg) => {
       return menu.show({ kind: 'single', canContinue: c ? `Level ${c.level} · ${c.score}` : null, highest: save.highest, names: CAMPAIGN.main.map((l) => l.name) });
     }
     case 'levels': return menu.show({ kind: 'levels', highest: save.highest, names: CAMPAIGN.main.map((l) => l.name), best: CAMPAIGN.main.map((l) => save.best[l.id] ?? null) });
-    case 'continue': return startSingle(save.campaign!);
-    case 'new': return startSingle(newCampaign());
-    case 'play': return startSingle(campaignFrom(Number(arg), save.campaign?.fruits ?? 0));
+    case 'continue': goFullscreen(); return startSingle(save.campaign!);
+    case 'new': goFullscreen(); return startSingle(newCampaign());
+    case 'play': goFullscreen(); return startSingle(campaignFrom(Number(arg), save.campaign?.fruits ?? 0));
     case 'multi': return showMulti();
-    case 'quick': return join({ quick: true });
-    case 'create': return join({ create: true });
+    case 'quick': goFullscreen(); return join({ quick: true });
+    case 'create': goFullscreen(); return join({ create: true });
     case 'joinCode': {
+      goFullscreen();
       const code = normalizeCode(arg ?? menu.code);
       myName = menu.name || myName;
       return code ? join({ code }) : showMulti('A room code is 4 letters, like KQRT');
@@ -339,6 +390,22 @@ const menu = createMenu((act, arg) => {
     case 'volume': audio.setVolume(Number(arg)); return;
     case 'music': audio.setMusicVolume(Number(arg)); return;
     case 'controls': return showControls(null);
+    case 'graphics': { // Auto → High → Low
+      graphics = graphics === 'auto' ? 'high' : graphics === 'high' ? 'low' : 'auto';
+      saveGraphics(graphics);
+      setLow(graphics === 'low');
+      return showSettings();
+    }
+    case 'touchSettings': return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchMode':
+      setTouch({ mode: touchSettings.mode === 'auto' ? 'on' : touchSettings.mode === 'on' ? 'off' : 'auto' });
+      return menu.screen === 'controls' ? showControls(null) : menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchSize': setTouch({ size: touchSettings.size === 'S' ? 'M' : touchSettings.size === 'M' ? 'L' : 'S' }); return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchLefty': setTouch({ lefty: !touchSettings.lefty }); return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchHaptics': setTouch({ haptics: !touchSettings.haptics }); haptic(30); return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchStats': setTouch({ stats: !touchSettings.stats }); return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchOpacity': setTouch({ opacity: Number(arg) }); return;
+    case 'mute': audio.toggleMute(); return menu.show({ kind: 'pause', muted: audio.muted, online: !sp });
     case 'bindKey': case 'bindPad': {
       const action = arg as BindAction;
       showControls(`${act === 'bindKey' ? 'key' : 'pad'}:${action}`);
@@ -359,7 +426,9 @@ const menu = createMenu((act, arg) => {
     case 'restart': return outcome(sp!.restart());
     case 'next': menu.hide(); sp?.next(); return;
     case 'finish': return menu.show({ kind: 'done', score: sp!.campaign.score });
-    case 'quit': return quitToMenu();
+    case 'quit':
+      if (online) { menu.hide(); void online.room.leave(); return; } // onLeave shows the Multiplayer menu
+      return quitToMenu();
   }
 });
 
@@ -367,11 +436,11 @@ const menu = createMenu((act, arg) => {
 let spTiming: TimingName = 'classic';
 try { const t = localStorage.getItem('kula.timing'); if (import.meta.env.DEV && isTimingName(t)) spTiming = t; } catch { /* storage unavailable */ }
 function showSettings(): void {
-  menu.show({ kind: 'settings', volume: audio.volume, music: audio.musicVolume, timing: import.meta.env.DEV ? spTiming : null });
+  menu.show({ kind: 'settings', volume: audio.volume, music: audio.musicVolume, timing: import.meta.env.DEV ? spTiming : null, graphics, touch: touchOn() });
 }
 function showControls(waiting: string | null): void {
   menu.show({
-    kind: 'controls', waiting,
+    kind: 'controls', waiting, touchMode: touchSettings.mode,
     rows: ACTIONS.map((a) => ({ action: a, label: ACTION_LABELS[a], keys: bindings.keys[a].map(keyLabel).join(' / '), pad: bindings.pad[a].map((b) => PAD_GLYPHS[b] ?? `#${b}`).join(' / ') })),
   });
 }
@@ -406,13 +475,22 @@ function outcome(o: Outcome): void {
   }
 }
 
-/** Esc in single player: pause (the local clock stops) or resume. */
+/**
+ * Esc (or the touch Pause button): in single player, pause (the local clock stops) or resume. Multiplayer (19b) gets
+ * the same menu over the running round, for Mute and Leave.
+ */
 function togglePause(): void {
-  if (!sp || !net) return;
-  const game = sp.game;
-  if (menu.screen === 'pause') { menu.hide(); game.paused = false; }
-  else if (!menu.screen && game.state.phase !== 'results') { game.paused = true; menu.show({ kind: 'pause' }); }
+  if (!net) return;
+  if (menu.screen === 'pause') { menu.hide(); if (sp) sp.game.paused = false; }
+  else if (!menu.screen && !(sp && sp.game.state.phase === 'results')) {
+    if (sp) sp.game.paused = true;
+    menu.show({ kind: 'pause', muted: audio.muted, online: !sp });
+  }
 }
+// Turned to portrait mid-level (19b): the "Rotate your device" overlay covers the game, so single player pauses too.
+matchMedia('(orientation: portrait)').addEventListener('change', (e) => {
+  if (e.matches && touchOn() && sp && !menu.screen && sp.game.state.phase === 'playing') togglePause();
+});
 
 function quitToMenu(): void {
   if (sp) menuLevelId = sp.level.id;
@@ -504,11 +582,13 @@ function flyProgress(s: GameSource['state'], renderTick: number): number {
   if (Number.isNaN(flyFrom)) flyFrom = s.tick;
   return flyFrom < 0 ? Math.min(1, Math.max(0, 1 - renderTick / flyFrom)) : -1;
 }
-addEventListener('keydown', (e) => {
+const skipFly = (e: { repeat?: boolean }) => {
   if (e.repeat || net?.state.phase !== 'countdown' || flySkipped) return;
   flySkipped = true;
   sp?.game.skipReady();
-});
+};
+addEventListener('keydown', skipFly);
+addEventListener('touchstart', () => skipFly({}), { capture: true, passive: true }); // a tap skips it too (19b)
 
 /** The music slot(s) for what's on screen (phase 17), best first. */
 const SLOTS: Record<string, MusicSlot[]> = { menu: ['menu'], results: ['results'], race: ['race'], knockout: ['knockout'] };
@@ -546,12 +626,35 @@ function menuBackdrop(now: number, dtMs: number): void {
   view.render();
 }
 const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** Per frame (19b): which touch controls show, the portrait overlay's in-game flag, the FPS/ping readout. */
+let statsAt = 0;
+function updateTouch(): void {
+  const shown = touchOn(), s = net?.state, me = net && s?.players ? s.players.get(net.sessionId) : undefined;
+  const inGame = !!s && !menu.screen;
+  const statsUp = s?.phase === 'matchEnd' && s.tick >= PODIUM_SEC * TICK_RATE; // the rematch vote is up
+  touch.update({
+    shown: shown && inGame,
+    play: s?.phase === 'countdown' || s?.phase === 'playing',
+    ready: sp || !s ? null : s.phase === 'lobby' ? 'ready' : statsUp ? 'rematch' : null,
+    readyOn: !!(s?.phase === 'lobby' ? me?.ready : me?.rematch),
+  });
+  hud.touch = shown;
+  document.body.classList.toggle('in-game', inGame);
+  const now = performance.now();
+  if (touchSettings.stats && now - statsAt > 500) {
+    statsAt = now;
+    touch.stats(`${Math.round(fpsGuard.fps)} fps${online ? ` · ${online.ping} ms` : ''}${lowGraphics ? ' · low' : ''}`);
+  }
+}
 const spHud: SingleHud = { score: 0, fruits: 0, label: '' };
 
 view.renderer.setAnimationLoop((now: number) => {
-  const dtMs = Math.min(now - last, 100);
+  const rawDt = now - last, dtMs = Math.min(rawDt, 100);
   last = now;
   if (frozen) return;
+  if (fpsGuard.frame(rawDt) && graphics === 'auto' && !lowGraphics) { setLow(true); hud.toast('Graphics set to Low for a smoother game', '#fff'); }
+  updateTouch();
   input.poll(); // the gamepad (phase 17)
   music.play(musicSlots());
   if (!net) { menuBackdrop(now, dtMs); return; }

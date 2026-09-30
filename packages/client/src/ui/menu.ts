@@ -1,5 +1,6 @@
 import { FRUITS, type LevelCard } from '@kula/shared';
 import { GAME_NAME, GAME_VERSION } from '../config.ts';
+import type { TouchSettings } from '../input/touch.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -10,17 +11,21 @@ export const fruitSlots = (bits: number) => FRUITS.map((_, i) => `<span class="f
 const btn = (label: string, act: string, o: { arg?: string | number; primary?: boolean; disabled?: boolean } = {}) =>
   `<button class="mbtn${o.primary ? ' primary' : ''}" data-act="${act}"${o.arg !== undefined ? ` data-arg="${o.arg}"` : ''}${o.disabled ? ' disabled' : ''}>${label}</button>`;
 
+const GRAPHICS: Record<string, string> = { auto: 'Auto', high: 'High', low: 'Low' };
+const TOUCH_MODES = { auto: 'Auto', on: 'On', off: 'Off' };
+
 export type Screen =
   | { kind: 'main' }
   | { kind: 'single'; canContinue: string | null; highest: number; names: string[] }
   | { kind: 'levels'; highest: number; names: string[]; best: (number | null)[] }
   | { kind: 'multi'; name: string; error?: string; code?: string; busy?: boolean }
   | { kind: 'update' }
-  | { kind: 'settings'; volume: number; music: number; timing: string | null }
-  | { kind: 'controls'; rows: { action: string; label: string; keys: string; pad: string }[]; waiting: string | null }
+  | { kind: 'settings'; volume: number; music: number; timing: string | null; graphics: string; touch: boolean }
+  | { kind: 'touch'; s: TouchSettings }
+  | { kind: 'controls'; rows: { action: string; label: string; keys: string; pad: string }[]; waiting: string | null; touchMode: 'auto' | 'on' | 'off' }
   | { kind: 'credits'; rows: { slot: string; track: string; artist: string; source: string; licence: string }[] }
   | { kind: 'reset' }
-  | { kind: 'pause' }
+  | { kind: 'pause'; muted: boolean; online: boolean }
   | { kind: 'card'; name: string; card: LevelCard; bonus: boolean; painted: boolean; par: number; best: number | null; score: number; finished: boolean }
   | { kind: 'gameOver'; checkpoint: number; name: string; score: number }
   | { kind: 'done'; score: number };
@@ -66,8 +71,8 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
         const join = s.code
           ? `<div class="col">${btn(`Join room <b>${esc(s.code)}</b>`, 'joinCode', { arg: s.code, primary: true, ...busy })}${btn('Other rooms…', 'multi', busy)}</div>`
           : `<div class="col">${btn('Quick Play <small>a public room</small>', 'quick', { primary: true, ...busy })}${btn('Create private room <small>invite friends with a code</small>', 'create', busy)}</div>`
-            + `<div class="field"><input id="menu-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" size="5">${btn('Join with code', 'joinCode', busy)}</div>`;
-        return `<h2>Multiplayer</h2><label class="field">Name <input id="menu-name" maxlength="16" value="${esc(s.name)}"></label>`
+            + `<div class="field"><input id="menu-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" size="5">${btn('Join with code', 'joinCode', busy)}</div>`;
+        return `<h2>Multiplayer</h2><label class="field">Name <input id="menu-name" maxlength="16" value="${esc(s.name)}" autocomplete="nickname" autocorrect="off" spellcheck="false" enterkeyhint="go"></label>`
           + `${s.busy ? '<div class="sub">Connecting…</div>' : s.error ? `<div class="err">${esc(s.error)}</div>` : ''}${join}<div class="col">${btn('Back', 'main', busy)}</div>`;
       }
       case 'update': // not 'version': the panel's class would pick up #menu .version (the corner label)
@@ -75,22 +80,33 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
       case 'settings':
         return `<h2>Settings</h2><label class="field">Volume <input type="range" min="0" max="1" step="0.05" value="${s.volume}" data-act="volume"></label>`
           + `<label class="field">Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" data-act="music"></label>`
-          + `<div class="col">${btn('Controls…', 'controls')}${btn('Sounds &amp; feel… <small>F4</small>', 'tuning')}${btn('Credits', 'credits')}`
+          + `<div class="col">${btn(`Graphics: ${GRAPHICS[s.graphics]}`, 'graphics')}`
+          + `${s.touch ? btn('Touch controls…', 'touchSettings') : btn('Controls…', 'controls')}${btn('Sounds &amp; feel… <small>F4</small>', 'tuning')}${btn('Credits', 'credits')}`
           + `${s.timing ? btn(`Timing: ${esc(s.timing)} <small>dev · single player</small>`, 'timing') : ''}${btn('Back', 'main', { primary: true })}</div>`;
       case 'controls':
         return `<h2>Controls</h2><table class="binds"><tr><th></th><th>Keyboard</th><th>Pad</th></tr>${s.rows.map((r) => `<tr><td>${esc(r.label)}</td>`
           + `<td>${btn(s.waiting === `key:${r.action}` ? '<i>press a key…</i>' : esc(r.keys) || '—', 'bindKey', { arg: r.action })}</td>`
           + `<td>${btn(s.waiting === `pad:${r.action}` ? '<i>press a button…</i>' : esc(r.pad) || '—', 'bindPad', { arg: r.action })}</td></tr>`).join('')}</table>`
           + `<div class="sub">Esc cancels a rebind. The left stick always rolls and turns, the right stick always looks.</div>`
-          + `<div class="row">${btn('Reset to defaults', 'bindReset')}${btn('Back', 'settings', { primary: true })}</div>`;
+          + `<div class="row">${btn(`Touch controls: ${TOUCH_MODES[s.touchMode]}`, 'touchMode')}${btn('Reset to defaults', 'bindReset')}${btn('Back', 'settings', { primary: true })}</div>`;
       case 'credits':
         return `<h2>Credits</h2>${s.rows.length ? `<table class="binds"><tr><th>Slot</th><th>Track</th><th>Artist</th><th>Licence</th></tr>${s.rows.map((r) =>
           `<tr><td>${esc(r.slot)}</td><td>${r.source ? `<a href="${esc(r.source)}" target="_blank" rel="noopener">${esc(r.track)}</a>` : esc(r.track)}</td><td>${esc(r.artist)}</td><td>${esc(r.licence)}</td></tr>`).join('')}</table>`
           : '<p>No music yet.</p>'}<p class="sub">${GAME_NAME} v${GAME_VERSION} · made with Three.js and Colyseus</p><div class="col">${btn('Back', 'settings', { primary: true })}</div>`;
+      case 'touch': { // phase 19b: replaces the rebinding screen while touch is in use
+        const t = s.s, on = (b: boolean) => (b ? 'On' : 'Off');
+        return `<h2>Touch controls</h2><div class="grid">${btn(`Show: ${TOUCH_MODES[t.mode]}`, 'touchMode')}${btn(`Button size: ${t.size}`, 'touchSize')}`
+          + `${btn(`Left-handed: ${on(t.lefty)}`, 'touchLefty')}${btn(`Vibration: ${on(t.haptics)}`, 'touchHaptics')}${btn(`FPS &amp; ping: ${on(t.stats)}`, 'touchStats')}</div>`
+          + `<label class="field">Opacity <input type="range" min="0.2" max="1" step="0.05" value="${t.opacity}" data-act="touchOpacity"></label>`
+          + `<div class="sub">Left thumb: slide to roll and turn. Right thumb: Jump (hold to bounce), drag to look.</div>`
+          + `<div class="col">${btn('Back', 'settings', { primary: true })}</div>`;
+      }
       case 'reset':
         return `<h2>Reset progress?</h2><p>Your campaign, level select and best times are deleted.</p><div class="row">${btn('Reset', 'resetYes')}${btn('Cancel', 'main', { primary: true })}</div>`;
       case 'pause':
-        return `<h2>Paused</h2><div class="col">${btn('Resume', 'resume', { primary: true })}${btn('Restart Level <small>costs a death</small>', 'restart')}${btn('Quit to Menu', 'quit')}</div>`;
+        // Multiplayer (19b): the game goes on underneath; the touch Pause button is the way to mute or leave mid-round.
+        return `<h2>${s.online ? 'Menu' : 'Paused'}</h2><div class="col">${btn('Resume', 'resume', { primary: true })}${s.online ? '' : btn('Restart Level <small>costs a death</small>', 'restart')}`
+          + `${btn(s.muted ? 'Unmute' : 'Mute', 'mute')}${btn(s.online ? 'Leave room' : 'Quit to Menu', 'quit')}</div>`;
       case 'card': {
         const c = s.card;
         const head = s.bonus ? (s.painted ? 'All painted!' : 'Bonus over') : 'Level complete!';
@@ -118,7 +134,8 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
       current = s.kind;
       root.innerHTML = `<div class="mpanel ${s.kind}">${html(s)}</div><div class="version">${GAME_NAME} v${GAME_VERSION}</div>`;
       root.hidden = false;
-      root.querySelector<HTMLInputElement>('#menu-name')?.focus();
+      // On a touch screen the on-screen keyboard would pop up over the menu: the name field waits for a tap (19b).
+      if (!matchMedia('(pointer: coarse)').matches) root.querySelector<HTMLInputElement>('#menu-name')?.focus();
     },
     hide() { current = null; root.hidden = true; root.innerHTML = ''; },
     /** Gamepad (phase 17): move the focus ring through the enabled buttons, wrapping. */

@@ -51,6 +51,8 @@ export class AudioEngine {
     // Browsers only allow audio after a user gesture: the first key press creates (or resumes) the context.
     addEventListener('keydown', () => this.start(), { capture: true });
     addEventListener('pointerdown', () => this.start(), { capture: true }); // menus are clicked too (phase 17)
+    // Touch (19b): mobile browsers (iOS Safari too) count a touch as a gesture on its end, not its start.
+    addEventListener('touchend', () => this.start(), { capture: true });
   }
 
   private start(): void {
