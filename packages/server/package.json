@@ -9,8 +9,15 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@colyseus/schema": "^5.0.34",
+    "@colyseus/sdk": "^0.18.4",
+    "@kula/bots": "*",
     "@kula/shared": "*",
     "colyseus": "^0.18.8",
-    "@colyseus/schema": "^5.0.34"
+    "express": "^5.2.1",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
   }
 }

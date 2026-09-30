@@ -8,6 +8,19 @@ export const BLOCK_MODELS = ['tile-celadon', 'tile-limestone', 'tile-basalt', 't
 const ENVIRONMENT_MODELS = [...BLOCK_MODELS, 'block-crumble-fragments', 'trap-spikes-raised', 'trap-spikes-retracted', 'tile-arrow', 'pad-boost-far', 'pad-boost-high'] as const;
 export const MODEL_NAMES = [...CERAMIC_MODELS, ...ENVIRONMENT_MODELS] as const;
 export type ModelName = typeof MODEL_NAMES[number];
+/** Soft contact footprint, shared by all balls; alpha fades to zero before the disc edge. */
+export function contactShadowTexture(): THREE.DataTexture {
+  const size = 64, pixels = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const radius = Math.hypot((x + 0.5) / size * 2 - 1, (y + 0.5) / size * 2 - 1);
+    const alpha = Math.max(0, 1 - radius * radius);
+    pixels.set([255, 255, 255, Math.round(255 * alpha * alpha * alpha)], (y * size + x) * 4);
+  }
+  const texture = new THREE.DataTexture(pixels, size, size);
+  texture.magFilter = texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
 export const ENVIRONMENTS = [
   { id: 'peach-dawn', tile: 'tile-celadon', fog: 0xdac6bd, key: 0xffe0be, fill: 0xb7d6ee, rim: 0xffd6bd, ground: 0x757185, exposure: 1.0 },
   { id: 'teal-moon', tile: 'tile-basalt', fog: 0x475f77, key: 0xb9dfed, fill: 0xabc8cd, rim: 0x77d9c8, ground: 0x566779, exposure: 1.1 },
@@ -36,7 +49,11 @@ export async function loadArt(): Promise<void> {
     ...MODEL_NAMES.map(async (name) => {
       try {
         const kit = (CERAMIC_MODELS as readonly string[]).includes(name) ? 'ceramic-kit-v01' : 'environment-kit-v02';
-        art.models[name] = (await loader.loadAsync(`${base}models/${kit}/${name}.glb`)).scene;
+        const model = (await loader.loadAsync(`${base}models/${kit}/${name}.glb`)).scene;
+        model.traverse((object) => {
+          if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = true;
+        });
+        art.models[name] = model;
       } catch (error) { console.warn(`Art fallback: ${name}`, error); }
     }),
     (async () => {

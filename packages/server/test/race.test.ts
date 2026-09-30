@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { defineRoom, defineServer, matchMaker } from 'colyseus';
 import { Client, type Room } from '@colyseus/sdk';
-import { Action, ROLL_TICKS } from '@kula/shared';
+import { Action, GAME_VERSION, ROLL_TICKS } from '@kula/shared';
 import { config } from '../src/config.ts';
 import { parseInput, RaceRoom } from '../src/rooms/RaceRoom.ts';
 
@@ -35,8 +35,8 @@ test('parseInput rejects malformed messages', () => {
 
 test('2 clients join, ready, round starts, inputs move the player in the schema', { timeout: 15000 }, async () => {
   const client = new Client(`ws://localhost:${PORT}`);
-  const a: Room = await client.joinOrCreate('race', { name: 'A' });
-  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  const a: Room = await client.joinOrCreate('race', { name: 'A', version: GAME_VERSION });
+  const b: Room = await client.joinOrCreate('race', { name: 'B', version: GAME_VERSION });
   expect(b.roomId).toBe(a.roomId);
   await waitFor('2 players', () => a.state.players?.size === 2);
   expect(a.state.phase).toBe('lobby');
@@ -76,8 +76,8 @@ test('2 clients join, ready, round starts, inputs move the player in the schema'
 
 test('stamped inputs (§17): a future tick applies exactly then, a late one at the next tick', { timeout: 15000 }, async () => {
   const client = new Client(`ws://localhost:${PORT}`);
-  const a: Room = await client.joinOrCreate('race', { name: 'A' });
-  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  const a: Room = await client.joinOrCreate('race', { name: 'A', version: GAME_VERSION });
+  const b: Room = await client.joinOrCreate('race', { name: 'B', version: GAME_VERSION });
   await waitFor('2 players', () => a.state.players?.size === 2);
   a.send('ready');
   b.send('ready');
@@ -106,8 +106,8 @@ test('stamped inputs (§17): a future tick applies exactly then, a late one at t
 test('lobby vote (phase 14): counts, a leaver vote removed, the winner loads, votes cleared on the next lobby', { timeout: 20000 }, async () => {
   Object.assign(config, { level: 'test-flat,test-cube' });
   const client = new Client(`ws://localhost:${PORT}`);
-  const a: Room = await client.joinOrCreate('race', { name: 'A' });
-  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  const a: Room = await client.joinOrCreate('race', { name: 'A', version: GAME_VERSION });
+  const b: Room = await client.joinOrCreate('race', { name: 'B', version: GAME_VERSION });
   await waitFor('2 players', () => a.state.players?.size === 2 && a.state.candidates?.length === 2);
   const candidates = [...a.state.candidates];
   expect(candidates.sort()).toEqual(['test-cube', 'test-flat']);
@@ -116,7 +116,7 @@ test('lobby vote (phase 14): counts, a leaver vote removed, the winner loads, vo
   a.send('vote', 1);
   b.send('vote', 3);
   await waitFor('votes', () => counts() === '0,1,0,1');
-  const c: Room = await client.joinOrCreate('race', { name: 'C' });
+  const c: Room = await client.joinOrCreate('race', { name: 'C', version: GAME_VERSION });
   c.send('vote', 0);
   await waitFor('C voted', () => counts() === '1,1,0,1');
   await c.leave();

@@ -1,31 +1,61 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { art, environmentFor } from './art.ts';
 
 const DEFAULT_SKY: [string, string] = ['#1a1d2b', '#1a1d2b'];
 /** Fog (phase 17): nothing fades within this many cells of the camera; fading then takes FOG_DEPTH cells. */
 const FOG_NEAR = 14, FOG_DEPTH = 40;
+const studioMaps = new WeakMap<THREE.WebGLRenderer, THREE.WebGLRenderTarget>();
+const KEY_DIRECTION = new THREE.Vector3(-8, 12, 8).normalize();
+
+/** Fit the shadow to the displayed level, including distant fly-overs and every camera/gravity orientation. */
+export function fitKeyShadow(key: THREE.DirectionalLight, camera: THREE.Camera, center: THREE.Vector3, radius: number): void {
+  const extent = Math.max(6, radius * 1.8);
+  camera.updateWorldMatrix(true, false);
+  camera.worldToLocal(key.target.position.copy(center));
+  key.position.copy(key.target.position).addScaledVector(KEY_DIRECTION, extent * 2);
+  Object.assign(key.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 0.1, far: extent * 6 });
+  key.shadow.camera.updateProjectionMatrix();
+}
 
 /** Shared by gameplay and lobby cards. Camera fill keeps every gravity face readable. */
 export function createEnvironment(scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer) {
-  // Phase 17 readability: Neutral keeps glaze colours and contrast (AgX washed them out and lifted the blacks), and a
-  // lower fill with a stronger key gives the block faces distinct shading again.
+  // Keep the readable palette, but give the glaze broad HDR highlights instead of reflecting the flat JPEG sky.
   renderer.toneMapping = THREE.NeutralToneMapping;
-  const fill = new THREE.HemisphereLight(0xffffff, 0x777777, 1.0);
-  const key = new THREE.DirectionalLight(0xffffff, 3.0);
-  const rim = new THREE.DirectionalLight(0xffffff, 1.0);
-  key.position.set(2, 4, 1);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  let studio = studioMaps.get(renderer);
+  if (!studio) {
+    const room = new RoomEnvironment(), pmrem = new THREE.PMREMGenerator(renderer);
+    studio = pmrem.fromScene(room, 0.04);
+    studioMaps.set(renderer, studio);
+    room.dispose();
+    pmrem.dispose();
+  }
+  const fill = new THREE.HemisphereLight(0xffffff, 0x777777, 0.4);
+  const key = new THREE.DirectionalLight(0xffffff, 2.0);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.8);
+  key.position.set(-8, 12, 8);
   rim.position.set(-4, 1, -3);
   key.target.position.set(0, 0, -4);
   rim.target.position.set(0, 0, -4);
   camera.add(key, rim, key.target, rim.target);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 0.5, far: 80 });
+  key.shadow.camera.updateProjectionMatrix();
+  key.shadow.normalBias = 0.018;
+  key.shadow.bias = -0.00008;
+  key.shadow.radius = 3;
+  key.shadow.intensity = 0.8;
   scene.add(fill);
-  return (id?: string) => {
+  const set = (id?: string) => {
     const theme = environmentFor(id);
     const texture = art.skies[theme.id] ?? art.sky;
     scene.background = texture ?? new THREE.Color(theme.fog);
-    scene.environment = texture ?? null;
-    scene.environmentIntensity = 0.3;
+    scene.environment = studio.texture;
+    scene.environmentIntensity = 0.45;
     renderer.toneMappingExposure = theme.exposure;
     fill.color.set(theme.fill);
     fill.groundColor.set(theme.ground);
@@ -33,6 +63,7 @@ export function createEnvironment(scene: THREE.Scene, camera: THREE.Camera, rend
     rim.color.set(theme.rim);
     return { theme, texture };
   };
+  return { set, fit: (center: THREE.Vector3, radius: number) => fitKeyShadow(key, camera, center, radius), dispose: () => key.shadow.dispose() };
 }
 
 /** Vertical two-colour gradient on an inverted sphere that rides with the camera (world +Y is "top"). */
@@ -74,7 +105,7 @@ export function createScene() {
 
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
   scene.add(camera);
-  const setEnvironment = createEnvironment(scene, camera, renderer);
+  const environment = createEnvironment(scene, camera, renderer);
 
   const resize = () => {
     renderer.setSize(innerWidth, innerHeight);
@@ -89,7 +120,7 @@ export function createScene() {
     renderer, scene, camera,
     /** Per-map panorama and lighting; gradients remain the missing-asset fallback. */
     setSky([top, bottom]: [string, string] = DEFAULT_SKY, levelId?: string) {
-      const { theme, texture } = setEnvironment(levelId);
+      const { theme, texture } = environment.set(levelId);
       sky.mesh.visible = !texture;
       sky.uniforms.top.value.set(top);
       sky.uniforms.bottom.value.set(bottom);
@@ -101,6 +132,7 @@ export function createScene() {
      * the fog starts there and fades over FOG_DEPTH (or the level's size, if bigger). Per frame, no allocations.
      */
     fitFog(center: THREE.Vector3, radius: number) {
+      environment.fit(center, radius);
       fog.near = Math.max(FOG_NEAR, camera.position.distanceTo(center) - radius);
       fog.far = fog.near + Math.max(FOG_DEPTH, radius * 2);
     },

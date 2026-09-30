@@ -1,8 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
-import { Room, type Client } from 'colyseus';
+import { CloseCode, Room, ServerError, type Client } from 'colyseus';
+import { Client as BotClient, type Room as BotRoom } from '@colyseus/sdk';
+import { runBot, type Behaviour } from '@kula/bots/brain';
 import {
-  Action, addPlayer, addRoundStats, createWorld, crownOf, emptyStats, InputQueue, loadLevel, MATCH_LENGTHS, mulberry32, pickCandidates, removePlayer,
+  Action, addPlayer, cleanName, GAME_VERSION, JOIN_ERROR, newRoomCode, addRoundStats, createWorld, crownOf, emptyStats, InputQueue, loadLevel, MATCH_LENGTHS, mulberry32, pickCandidates, removePlayer,
   scoreRound, setInput, step, tallyVotes, TICK_RATE, validateLevel, validVote, voteCounts, type InputMsg, type Level, type MatchStats, type SimEvent, type World,
 } from '@kula/shared';
 import { config } from '../config.ts';
@@ -16,6 +19,20 @@ const MAX_INPUTS_PER_SEC = 30;
 const PALETTE = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45'];
 
 type Phase = 'lobby' | 'countdown' | 'playing' | 'results' | 'matchEnd';
+
+/** Online (phase 19, §24): every room's code (its roomId), so a code maps to exactly one room; its size is the room count. */
+export const roomCodes = new Set<string>();
+/** Bots join their room as ordinary clients of this server, carrying this key; a client without it is a human. */
+const BOT_KEY = randomUUID();
+/** Bot difficulty (§24): Easy, Normal, Hard. Behaviours are dealt round-robin. */
+export const BOT_LEVELS: { skill: number; mix: Behaviour[] }[] = [
+  { skill: 0.3, mix: ['wander', 'seek'] },
+  { skill: 0.6, mix: ['seek', 'bully'] },
+  { skill: 0.9, mix: ['seek', 'bully', 'rival'] },
+];
+const BOT_NAMES = ['Rolly', 'Bumper', 'Wobble', 'Pebble', 'Marble', 'Zippy', 'Spinner', 'Boing'];
+/** "Fill with bots" tops a public room up to this many players. */
+const FILL_TO = 4;
 
 /**
  * Soak metric (phase 12, logged with each round's result): ticks in which at least two live players have both sat in
@@ -109,10 +126,31 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private roundCrown: string | null = null;
   /** A rematch keeps the match length: no length vote before its first round. */
   private lengthLocked = false;
+  /** Server-side bots (phase 19): their client connections, and the names taken by bots here or joining. */
+  private bots: BotRoom[] = [];
+  private botNames = new Set<string>();
+  private closing = false;
 
-  onCreate() {
+  /** Every join (all but a reconnect) carries the game version; a mismatch is refused (§24). */
+  static async onAuth(_token: string, options: { version?: unknown } | undefined) {
+    if (options?.version !== GAME_VERSION) throw new ServerError(JOIN_ERROR.version, `version mismatch: the server runs ${GAME_VERSION}`);
+    return true;
+  }
+
+  onCreate(options?: { private?: unknown }) {
+    if (roomCodes.size >= config.maxRooms) throw new ServerError(JOIN_ERROR.serverFull, `server full (${config.maxRooms} rooms)`);
     this.pool = levelPool();
-    console.log(`level pool: ${this.pool.map((l) => l.id).join(', ')}`);
+    // Every room's id is a 4-letter code; a private room shows it and is hidden from Quick Play.
+    const code = newRoomCode(roomCodes, Math.random);
+    roomCodes.add(code);
+    this.roomId = code;
+    const priv = options?.private === true;
+    if (priv) { void this.setPrivate(true); this.state.code = code; }
+    console.log(`room ${code} created (${priv ? 'private' : 'public'}), rooms=${roomCodes.size}, level pool: ${this.pool.map((l) => l.id).join(', ')}`);
+    this.onMessage('addBot', (client) => { if (this.isHost(client)) this.addBots(1); });
+    this.onMessage('removeBot', (client) => { if (this.isHost(client)) void this.bots.pop()?.leave(); });
+    this.onMessage('fill', (client) => { if (this.isHost(client) && !this.state.code) this.addBots(FILL_TO - this.state.players.size); });
+    this.onMessage('botLevel', (client, level) => { if (this.isHost(client)) void this.setBotLevel(level); });
     this.onMessage('input', (client, msg) => this.onInput(client, msg));
     this.onMessage('ready', (client) => this.onReady(client));
     this.onMessage('vote', (client, option) => this.onVote(client, option));
@@ -124,21 +162,95 @@ export class RaceRoom extends Room<{ state: GameState }> {
     this.setPhase('lobby');
   }
 
-  onJoin(client: Client, options?: { name?: unknown }) {
-    const name = String(options?.name ?? 'anon').slice(0, 16);
+  onDispose() {
+    roomCodes.delete(this.roomId);
+    console.log(`room ${this.roomId} disposed, rooms=${roomCodes.size}`);
+  }
+
+  onJoin(client: Client, options?: { name?: unknown; bot?: unknown }) {
+    const bot = options?.bot === BOT_KEY;
+    const name = bot ? String(options?.name) : cleanName(options?.name);
     const used = new Set([...this.state.players.values()].map((p) => p.color));
     const color = PALETTE.find((c) => !used.has(c)) ?? PALETTE[0];
     const spectating = this.state.phase !== 'lobby';
-    this.state.players.set(client.sessionId, new PlayerS({ id: client.sessionId, name, color, spectating }));
+    this.state.players.set(client.sessionId, new PlayerS({ id: client.sessionId, name, color, spectating, bot }));
     // Matches (§23): a new player joins the board with 0 points.
     this.state.standings.set(client.sessionId, new StandingS({ id: client.sessionId, name, color }));
-    console.log(`join ${name} (${client.sessionId})${spectating ? ' as spectator' : ''}, players=${this.state.players.size}`);
+    this.syncHost();
+    console.log(`room ${this.roomId}: join ${name} (${client.sessionId})${spectating ? ' as spectator' : ''}, ${this.headcount()}`);
+  }
+
+  /** "players=3 (2 human)". */
+  private headcount(): string {
+    const all = [...this.state.players.values()];
+    return `players=${all.length} (${all.filter((p) => !p.bot).length} human)`;
+  }
+
+  /**
+   * An unexpected drop (§24): the seat is held for config.reconnectSec with the ball idle; the client retries with its
+   * reconnection token. After that it's a normal leave (onLeave).
+   */
+  onDrop(client: Client) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p || p.bot) return;
+    p.away = true;
+    this.queues.delete(client.sessionId);
+    if (this.world?.players.some((w) => w.id === client.sessionId)) setInput(this.world, client.sessionId, { seq: p.ackSeq, fwdHeld: false, turn: 0, jump: false, jumpHeld: false });
+    console.log(`room ${this.roomId}: drop ${p.name} (${client.sessionId}), holding the seat ${config.reconnectSec}s`);
+    this.allowReconnection(client, config.reconnectSec).catch(() => { /* timed out: onLeave follows */ });
+  }
+
+  onReconnect(client: Client) {
+    const p = this.state.players.get(client.sessionId);
+    if (p) p.away = false;
+    console.log(`room ${this.roomId}: reconnect ${this.nameOf(client.sessionId)} (${client.sessionId}), ${this.headcount()}`);
+  }
+
+  /** The host (§24): the longest-connected human (players keep their join order). '' with no humans. */
+  private syncHost() {
+    const host = [...this.state.players.values()].find((p) => !p.bot)?.id ?? '';
+    if (this.state.hostId !== host) this.state.hostId = host;
+  }
+
+  private isHost(client: Client): boolean {
+    return client.sessionId === this.state.hostId && this.state.phase === 'lobby';
+  }
+
+  /** Adds up to `n` bots (never past maxClients), each an in-process client of this server (DECISIONS, phase 19). */
+  private addBots(n: number) {
+    for (let i = 0; i < n && this.state.players.size + this.botNames.size - this.bots.length < this.maxClients; i++) {
+      const level = BOT_LEVELS[this.state.botLevel];
+      const behaviour = level.mix[this.botNames.size % level.mix.length];
+      const name = `🤖 ${BOT_NAMES.find((b) => !this.botNames.has(`🤖 ${b}`)) ?? 'Bot'}`;
+      this.botNames.add(name);
+      new BotClient(`ws://127.0.0.1:${config.port}`).joinById(this.roomId, { name, version: GAME_VERSION, bot: BOT_KEY }).then((room) => {
+        this.bots.push(room);
+        return runBot(room, name, behaviour, { skill: level.skill, lengthVote: -1 }).finally(() => { this.bots = this.bots.filter((b) => b !== room); });
+      }).catch((e) => console.warn(`room ${this.roomId}: bot ${name} failed: ${e?.message ?? e}`))
+        .finally(() => this.botNames.delete(name));
+    }
+  }
+
+  /** Before the match only (bots swap for new ones at the new level, so nobody's points are lost). */
+  private async setBotLevel(level: unknown) {
+    if ((level !== 0 && level !== 1 && level !== 2) || level === this.state.botLevel || this.state.matchRound > 0) return;
+    this.state.botLevel = level;
+    const n = this.bots.length;
+    await Promise.all(this.bots.map((b) => b.leave()));
+    this.addBots(n);
+  }
+
+  /** A deploy (SIGTERM): tell everyone, then close after ~3 s (§24). */
+  onBeforeShutdown() {
+    this.broadcast('notice', 'Server restarting');
+    this.clock.setTimeout(() => void this.disconnect(CloseCode.SERVER_SHUTDOWN), 3000);
   }
 
   onLeave(client: Client) {
     const id = client.sessionId;
-    console.log(`leave ${this.nameOf(id)} (${id}), players=${this.state.players.size - 1}`);
+    const name = this.nameOf(id);
     this.state.players.delete(id);
+    console.log(`room ${this.roomId}: leave ${name} (${id}), ${this.headcount()}`);
     const st = this.state.standings.get(id);
     if (st) st.left = true; // their points stay on the board, greyed (§23)
     this.inputCounts.delete(id);
@@ -149,6 +261,14 @@ export class RaceRoom extends Room<{ state: GameState }> {
       if (this.world.players.length === 0) this.setPhase('lobby');
     }
     if (!this.state.players.size) this.resetMatch(false); // everyone left: the next ones start a fresh match
+    this.syncHost();
+    // No humans left: the room goes, bots included (§24).
+    if (!this.state.hostId && this.bots.length && !this.closing) {
+      this.closing = true;
+      console.log(`room ${this.roomId}: last human left, closing with ${this.bots.length} bot(s)`);
+      void this.disconnect();
+      return;
+    }
     this.syncLengthVotes();
     this.maybeStart();
   }
@@ -313,6 +433,7 @@ export class RaceRoom extends Room<{ state: GameState }> {
   private setPhase(phase: Phase) {
     const s = this.state;
     s.phase = phase;
+    void this.setMetadata({ lobby: phase === 'lobby' }); // Quick Play prefers a room in its lobby
     switch (phase) {
       case 'lobby':
         this.world = null;

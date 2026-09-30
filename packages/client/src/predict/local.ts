@@ -85,6 +85,12 @@ export class LocalPrediction {
     if (this.enabled) net.onPatch(() => this.onPatch());
   }
 
+  /** After a reconnect (phase 19): drop the predicted timeline; the next patch starts a fresh one from the server. */
+  reset(): void {
+    this.pred = null;
+    this.unstamped = [];
+  }
+
   private get me(): PlayerS | undefined { return this.net.state.players.get(this.net.sessionId); }
 
   private onPatch(): void {

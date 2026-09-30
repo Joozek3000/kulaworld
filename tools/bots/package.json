@@ -3,9 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc -p ." },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
   "dependencies": {
     "@kula/shared": "*",
     "@colyseus/sdk": "^0.18.4"
+  },
+  "exports": {
+    "./brain": "./src/brain.ts"
   }
 }

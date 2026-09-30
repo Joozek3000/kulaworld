@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { defineRoom, defineServer, matchMaker } from 'colyseus';
 import { Client, type Room } from '@colyseus/sdk';
-import type { SimEvent } from '@kula/shared';
+import { GAME_VERSION, type SimEvent } from '@kula/shared';
 import { config } from '../src/config.ts';
 import { RaceRoom } from '../src/rooms/RaceRoom.ts';
 
@@ -29,8 +29,8 @@ type RoomInternals = { world: { result: unknown; players: { id: string; keys: nu
 
 test('a 3-round match: length vote, points, the crown, a late joiner and a leaver, matchEnd, a 1–1 rematch resets', { timeout: 90000 }, async () => {
   const client = new Client(`ws://localhost:${PORT}`);
-  const a: Room = await client.joinOrCreate('race', { name: 'A' });
-  const b: Room = await client.joinOrCreate('race', { name: 'B' });
+  const a: Room = await client.joinOrCreate('race', { name: 'A', version: GAME_VERSION });
+  const b: Room = await client.joinOrCreate('race', { name: 'B', version: GAME_VERSION });
   const room = () => matchMaker.getLocalRoomById(a.roomId) as unknown as RoomInternals;
   const s = () => a.state;
   const points = () => Object.fromEntries([...s().standings.values()].map((st: { name: string; points: number }) => [st.name, st.points]));
@@ -70,7 +70,7 @@ test('a 3-round match: length vote, points, the crown, a late joiner and a leave
   expect(nameOf(s().crownId)).toBe('B');
 
   // A latecomer joins mid-match with 0 points, and plays round 3 from the lobby.
-  const c: Room = await client.joinOrCreate('race', { name: 'C' });
+  const c: Room = await client.joinOrCreate('race', { name: 'C', version: GAME_VERSION });
   await waitFor('C on the board', () => s().standings.get(c.sessionId)?.points === 0);
   await waitFor('lobby 3', () => s().phase === 'lobby', 8000);
   await round(3, c, [], [c]);

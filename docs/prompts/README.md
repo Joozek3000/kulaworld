@@ -41,7 +41,8 @@ Workflow:
 | 18 | Matches | Multi-round matches with points, crown on leader, podium; rival bot |
 | 18b | Remove x-ray + match follow-ups | No silhouettes through walls except your own ball; KO cap +2, match tie-break, rematch ≥ half, pad length vote, crown label |
 | 18c | Labels in line of sight | Remote name labels (and 👑) hide when the ball is behind blocks |
-| 19 | Online hosting (planned) | Deploy the server so friends can join over the internet; client pointed at it |
+| 19 | Online hosting | Fly.io (lhr, one machine), same-origin client, Quick Play + private codes/invite links, server-side bots with difficulty, reconnection, version check |
+| 19b | Touch controls | Phones/tablets in landscape: floating 8-way d-pad, Jump, look drag, Ready/Pause buttons, rotate overlay, fullscreen/manifest, touch + graphics settings |
 | 20 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button; validation live |
 | 21 | Campaign worlds 2–3 (planned) | ~20 more single-player levels built with the editor, world themes |
 | — | itch build (LAST) | `docs/prompts/itch-build.md`: web build zip, iframe-safe, feedback hooks, page kit |

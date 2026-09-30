@@ -95,6 +95,7 @@ export class LevelView {
       const meshes = (parts ?? [art.block ?? new THREE.Mesh(boxGeo, fallbackMat)])
         .map((part) => {
           const mesh = new THREE.InstancedMesh(part.geometry, part.material.clone(), cells.length);
+          mesh.castShadow = mesh.receiveShadow = true;
           mesh.name = name;
           mesh.userData.cells = cells.map((i) => keys[i]);
           this.meshes.push(mesh);

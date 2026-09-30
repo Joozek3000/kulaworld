@@ -612,3 +612,71 @@ Multiplayer rounds are grouped into a **match**, so there's something at stake b
 - **Joining mid-match:** a new player joins with 0 points and spectates until the next round's lobby, as now. **Leaving:** their points stay on the board, greyed.
 - Match state lives in the room (server), not the sim. Scoring is a pure function in shared (`scoreRound(result, events) → points`) so it's testable.
 
+
+## 24. Online hosting (phase 19)
+
+One game server on the internet that serves both the client and the rooms, so a friend only needs a link.
+
+- **Host:** Fly.io, one machine in London (`lhr`), built from a Dockerfile, so it can move to any VPS later. **Exactly one machine:** rooms live in memory, and two machines would split players. The machine may stop when nobody is connected and starts on the next request (a few seconds' cold start). It never stops while a room has a connection.
+- **Same origin:** the server serves the built client (`packages/client/dist`) and the WebSocket on one HTTPS host.
+  - The client connects to `wss://<same host>` in production builds.
+  - `?server=` still overrides, and a build-time `VITE_SERVER_URL` is used for the itch build (client hosted elsewhere).
+  - Dev is unchanged (`ws://<hostname>:2567`).
+- **Version check:** the client sends `GAME_VERSION` when joining. On a mismatch the server refuses the join, and the client shows "A new version is out, refresh the page".
+- **Rooms:**
+  - **Quick Play** joins a public room, preferring one in the lobby, or creates one. 8 players max.
+  - **Private room:** "Create private room" gives a 4-letter code (no I, O or 0/1 lookalikes) and an invite link `?room=CODE`. Private rooms never appear in Quick Play. "Join with code" on the Multiplayer menu.
+  - The **host** is the room's creator (for a public room, its first player), handed to the longest-connected human when they leave.
+  - `MAX_ROOMS` (default 20) caps rooms; beyond it the client shows "Server full, try again soon".
+- **Bots on the server:**
+  - The host can add and remove bots in the lobby (up to the room's 8), with a difficulty setting:
+    - Easy: skill 0.3, wander + seek
+    - Normal: skill 0.6, seek + bully
+    - Hard: skill 0.9, seek + bully + rival
+  - Bots run in the server process, with the same code as `tools/bots`. Their names carry 🤖, and they count toward `MIN_PLAYERS`.
+  - A room with no humans left is disposed, bots included.
+  - In a public room where one human has waited 30 s, the host gets a "Fill with bots" prompt.
+- **Reconnection:** on an unexpected drop the server holds the seat for 20 s (`allowReconnection`). The ball is idle meanwhile (no input). The client retries with the reconnection token behind a "Reconnecting…" overlay. After 20 s it is a normal leave.
+- **Hygiene:**
+  - Names are trimmed, capped at 16 characters and stripped of control characters, and always rendered as text.
+  - Input rate limits are as §3.
+  - `LATENCY_MS` is ignored in production.
+  - `/health` returns `{ version, rooms, players }`.
+  - On SIGTERM (a deploy), rooms get a "Server restarting" toast, then close.
+- **No accounts, no database, no analytics** in this phase.
+
+## 25. Touch controls (phase 19b)
+
+Phones and tablets, landscape. The touch layer is a third input source next to the keyboard and the pad. It produces the same held/pulse input (§6), so prediction, the sim and the server don't change.
+
+- **When shown:** on the first touch, or when `(pointer: coarse)` matches at start. Hidden again on any keyboard or pad input. Settings → Touch controls: Auto / On / Off.
+- **Left thumb: the d-pad.** One touch zone, read as 8 directions from the thumb's position relative to where it went down (a floating centre, re-centred on each new touch):
+  - **N:** forward, held while the thumb stays there.
+  - **E / W:** one turn pulse on entering the sector. No repeat while holding; leave and re-enter for another.
+  - **NE / NW:** forward held, plus one turn pulse on entering.
+  - **S:** nothing.
+  - **Dead zone:** ~12 % of the pad radius.
+  - Sliding between sectors works without lifting the thumb, like rolling the thumb on a PS1 d-pad.
+- **Right thumb:**
+  - A big **Jump** button: held = continuous bounce, as Space (§5).
+  - A drag on the empty right half = **free look** while the finger is down (it springs back on release, like Q + mouse).
+- **Other buttons:**
+  - Pause (top-left, replaces Esc).
+  - A large **Ready** button in the lobby and on results.
+  - Match-length and level votes and rematch stay as tappable HTML buttons.
+  - Mute lives in the pause menu.
+- **Portrait:** menus work, but gameplay shows "Rotate your device". Fullscreen + landscape lock are requested on the first Play tap where the browser supports it. A web-app manifest (`orientation: landscape`, `display: fullscreen`) makes Add to Home Screen launch fullscreen.
+- **Settings (saved per device):**
+  - button size S / M / L (scaled by screen size so a button is ~12 mm or more)
+  - opacity
+  - left-handed swap
+  - haptics on/off (`navigator.vibrate` where supported: jump, knockout, key)
+- **Browser hygiene:**
+  - `touch-action: none` on the game and the controls
+  - no pinch or double-tap zoom, no long-press menu or text selection, `overscroll-behavior: none`
+  - safe-area insets (`viewport-fit=cover`)
+  - audio unlocked on the first touch
+  - all touches released on `touchcancel`, blur and `visibilitychange`
+- **Mobile performance:**
+  - Pixel ratio capped at 2.
+  - Graphics setting: Auto / High / Low. Auto drops to Low if FPS stays under 45 for 5 s. Low means pixel ratio 1, no shadows and fewer particles.

@@ -1,4 +1,4 @@
-export const VERSION = '0.0.2';
+export * from './online.ts';
 
 export * from './vec.ts';
 export * from './dir.ts';

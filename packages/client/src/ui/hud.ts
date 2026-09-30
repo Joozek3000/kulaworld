@@ -66,7 +66,18 @@ export interface LobbyHooks {
   /** Matches (phase 18): a match-length card (0..2) or a rematch button was clicked. */
   onLength?(option: number): void;
   onRematch?(yes: boolean): void;
+  /** Online rooms (phase 19): the host's bot buttons and difficulty (0..2), the invite link, the Leave button. */
+  onBot?(what: 'addBot' | 'removeBot' | 'fill'): void;
+  onBotLevel?(level: number): void;
+  onCopy?(link: string): void;
+  onLeave?(): void;
 }
+
+const BOT_LEVELS = ['Easy', 'Normal', 'Hard'];
+/** A lone human in a public lobby this long (ms) gets the host's "Fill with bots" prompt (§24). */
+const FILL_PROMPT_MS = 30_000;
+/** The invite link for a private room's code (§24). */
+export const inviteLink = (code: string) => `${location.origin}${location.pathname}?room=${code}`;
 
 /** Match board lines (phase 18), in match order (points, then wins, KOs, keys: 18b); players who left too, drawn greyed. */
 function boardOf(s: GameState): StandingS[] {
@@ -89,7 +100,14 @@ export function createHud(lobby: LobbyHooks) {
     if (len) lobby.onLength?.(Number(len.dataset.length));
     const re = (e.target as HTMLElement).closest<HTMLElement>('[data-rematch]');
     if (re) lobby.onRematch?.(re.dataset.rematch === 'yes');
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-bot],[data-level],[data-copy],[data-leave]');
+    if (b?.dataset.bot) lobby.onBot?.(b.dataset.bot as 'addBot');
+    if (b?.dataset.level) lobby.onBotLevel?.(Number(b.dataset.level));
+    if (b?.dataset.copy) lobby.onCopy?.(inviteLink(b.dataset.copy));
+    if (b && 'leave' in b.dataset) lobby.onLeave?.();
   });
+  /** When the host became a lone human in a public lobby (0 = not alone). */
+  let aloneSince = 0;
   top.textContent = 'connecting…';
   const padHint = div('pad-hint');
   padHint.innerHTML = '🎮 ▲/stick roll · ◀▶ turn · Ⓐ jump · R-stick look · Ⓑ ready · Ⓧ/Ⓨ vote · LB/RB length · Start pause';
@@ -114,8 +132,30 @@ export function createHud(lobby: LobbyHooks) {
     return list.sort((a, b) => Number(a.eliminated) - Number(b.eliminated) || b.lives - a.lives || b.knockouts - a.knockouts
       || b.eliminatedTick - a.eliminatedTick || a.name.localeCompare(b.name));
   };
+  /** The host (phase 19): a small ★ on their line. */
+  let hostId = '';
   const row = (p: PlayerS, me: string, right: string) =>
-    `<li class="${p.id === me ? 'me' : ''}${p.eliminated ? ' out' : ''}">${dot(p.color)}<span class="name">${esc(p.name)}${p.id === me ? ' (you)' : ''}</span><span class="val">${right}</span></li>`;
+    `<li class="${p.id === me ? 'me' : ''}${p.eliminated || p.away ? ' out' : ''}">${dot(p.color)}<span class="name">${esc(p.name)}${p.id === me ? ' (you)' : ''}`
+    + `${p.id === hostId ? ' <span class="host" title="host">★</span>' : ''}${p.away ? ' <span class="dim">reconnecting…</span>' : ''}</span><span class="val">${right}</span></li>`;
+  /**
+   * The room bar over the lobby (phase 19): a private room's code with its invite link, the host's bot controls
+   * (difficulty before the match only), Leave; and after 30 s alone in a public room, the host's "Fill with bots".
+   */
+  const roomBar = (s: GameState, me: string): string => {
+    const list: PlayerS[] = [];
+    s.players.forEach((p) => list.push(p));
+    const bots = list.filter((p) => p.bot).length, humans = list.length - bots, host = s.hostId === me;
+    const alone = host && !s.code && humans === 1 && bots === 0;
+    if (!alone) aloneSince = 0;
+    else if (!aloneSince) aloneSince = performance.now();
+    const code = s.code ? `<span class="dim">Room code</span> <b class="code">${esc(s.code)}</b> <button class="mini" data-copy="${esc(s.code)}">Copy invite link</button>` : '';
+    const level = s.botLevel ?? 1;
+    const levels = (s.matchRound ?? 0) === 0 ? BOT_LEVELS.map((n, i) => `<button class="mini${i === level ? ' on' : ''}" data-level="${i}">${n}</button>`).join('') : `<span class="dim">${BOT_LEVELS[level]}</span>`;
+    const botCtl = host ? `<span class="bots">🤖 <button class="mini" data-bot="removeBot"${bots ? '' : ' disabled'}>−</button> ${bots} <button class="mini" data-bot="addBot"${list.length < 8 ? '' : ' disabled'}>+</button> ${levels}</span>` : '';
+    const fill = alone && performance.now() - aloneSince >= FILL_PROMPT_MS
+      ? '<div class="fill">Nobody else here yet. <button class="mini on" data-bot="fill">Fill with bots</button></div>' : '';
+    return `<div class="roombar">${code}${botCtl}<button class="mini" data-leave>Leave</button></div>${fill}`;
+  };
 
   return {
     error(text: string) { set(top, esc(text)); },
@@ -146,9 +186,11 @@ export function createHud(lobby: LobbyHooks) {
     },
 
     toast(text: string, color: string) {
-      const el = document.createElement('div');
+      const el = document.createElement('div'), d = document.createElement('span');
       el.className = 'toast';
-      el.innerHTML = `${dot(color)}${esc(text)}`;
+      d.className = 'dot';
+      d.style.background = color;
+      el.append(d, text); // names go in as text (phase 19)
       toasts.appendChild(el);
       setTimeout(() => el.classList.add('out'), TOAST_MS - 400);
       setTimeout(() => el.remove(), TOAST_MS);
@@ -158,6 +200,7 @@ export function createHud(lobby: LobbyHooks) {
       if (sp && 'single' in s) { this.single(s as LocalState, me, sp, muted); return; }
       const MOVE = '<div class="big move">MOVE!</div>';
       const mine = s.players.get(me);
+      hostId = s.hostId ?? '';
       const required = level?.keysRequired ?? 0;
       const secs = Math.max(0, Math.ceil((s.phaseEndTick - s.tick) / TICK_RATE));
       const name = (id: string) => s.players.get(id)?.name ?? '?';
@@ -207,7 +250,7 @@ export function createHud(lobby: LobbyHooks) {
           } else if (s.standings && rounds) {
             match = `<h2>Round ${round + 1} of ${rounds}</h2><ul class="list board">${boardOf(s).map((st) => standingRow(st, me, s.crownId ?? '')).join('')}</ul>`;
           }
-          set(center, `<div class="panel lobby">${match}<h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
+          set(center, `<div class="panel lobby">${s.hostId !== undefined ? roomBar(s, me) : ''}${match}<h1>Next level</h1><div class="cards">${cards.join('')}</div><ul class="list">${rows.join('')}</ul><div class="hint">${hint}</div></div>`);
           set(board, '');
           set(status, LOBBY_CONTROLS);
           break;

@@ -8,12 +8,14 @@ import {
 import type { GameState, PlayerS } from '../net.ts';
 import { tuning } from '../tuning.ts';
 import { applySquash, Spring } from './squash.ts';
-import { art, BALL_MODELS } from './art.ts';
+import { art, BALL_MODELS, contactShadowTexture } from './art.ts';
 import { addXray } from './xray.ts';
 import { lineClear } from './los.ts';
 
 /** The match leader's crown (phase 18): gold ceramic, floating CROWN_LIFT above the ball, turning slowly. */
 const CROWN_LIFT = 0.85;
+/** The crown's scale at `dist` cells from the camera: 1.2× up to 3 cells, easing to 2.3× at 8 and beyond (phase 19). */
+export const crownScale = (dist: number) => 1.2 + 1.1 * THREE.MathUtils.smoothstep(dist, 3, 8);
 const crownUp = new THREE.Vector3(), crownY = new THREE.Vector3(0, 1, 0), crownSpin = new THREE.Quaternion();
 function makeCrown(scene: THREE.Scene): THREE.Group {
   const gold = new THREE.MeshStandardMaterial({ color: 0xf2c230, emissive: 0x4a3500, roughness: 0.25, metalness: 0.5 });
@@ -95,7 +97,8 @@ const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
 
 // Blob shadow: a dark disc on the first block below the ball (along its up axis), fading with height.
 const shadowGeo = new THREE.CircleGeometry(0.34, 24);
-const SHADOW_OPACITY = 0.45;
+const shadowTexture = contactShadowTexture();
+const SHADOW_OPACITY = 0.32;
 const SHADOW_REACH = 3; // cells
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ground = new THREE.Vector3(), axis = new THREE.Vector3(), probe = new THREE.Vector3();
@@ -199,7 +202,7 @@ class PlayerView {
   /** Blend from the currently drawn pose to wherever the next update puts the ball (no teleport). */
   requestBlend(): void { this.blendRequested = true; }
   private readonly shadowMat = new THREE.MeshBasicMaterial({
-    color: 0x000000, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
+    color: 0x000000, map: shadowTexture, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
   });
   readonly shadow = new THREE.Mesh(shadowGeo, this.shadowMat);
@@ -251,6 +254,7 @@ class PlayerView {
       this.body.add(model);
     } else this.body.add(new THREE.Mesh(topGeo, this.top), new THREE.Mesh(bottomGeo, this.bottom));
     this.ball.add(this.body);
+    this.body.traverse((object) => { if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = true; });
     if (local) addXray(this.body, p.color); // only your own ball shows through blocks (18b: no x-ray on others)
     this.ball.visible = false;
     this.shadow.visible = false;
@@ -839,6 +843,8 @@ export class PlayersView {
       v.seen = seen;
     }
     if (this.crown?.visible && !this.views.get(this.crownId)?.seen) this.crown.visible = false;
+    // 19: 2.3× reads at ~8 cells but dwarfs the ball up close, so it grows with distance (1.2× within 3 cells).
+    if (this.crown?.visible) this.crown.scale.setScalar(crownScale(this.crown.position.distanceTo(camera)));
   }
 
   /** Matches (phase 18): who wears the crown ('' = nobody). It floats above that ball (line of sight only, 18b). */

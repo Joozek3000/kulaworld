@@ -75,7 +75,9 @@ export class Podium {
         mesh.position.set(bx, h + 0.45, 0);
         const div = document.createElement('div');
         div.className = 'podium-label';
-        div.innerHTML = `<b>${t.place}. ${t.name.replace(/[&<>"']/g, '')}</b><br>${t.points} pts`;
+        const b = document.createElement('b');
+        b.textContent = `${t.place}. ${t.name}`; // names as text (phase 19)
+        div.append(b, document.createElement('br'), `${t.points} pts`);
         div.style.borderColor = t.color;
         const label = new CSS2DObject(div);
         label.position.set(bx, h + 1.25 + (k % 2) * 0.45, 0); // stagger shared labels so they don't overlap

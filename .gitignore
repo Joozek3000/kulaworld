@@ -8,3 +8,6 @@ assets/audio/temporary-bounce/decoded-source.wav
 .DS_Store
 Thumbs.db
 .vscode/
+
+# flyctl (downloaded locally, phase 19)
+.fly/

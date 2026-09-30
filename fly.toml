@@ -1,0 +1,40 @@
+# Flipside on Fly.io (phase 19, docs/HOSTING.md). The Dockerfile builds the client and runs the server; one origin serves both.
+#
+# Keep this app at exactly ONE machine (`fly scale count 1`): rooms live in the server's memory, so a second machine
+# would split players between two sets of rooms. It may stop when idle and starts again on the next request.
+app = "flipside-game"
+primary_region = "lhr"
+# A deploy sends SIGTERM: rooms get a "Server restarting" toast, then close ~3 s later.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "2567"
+
+[http_service]
+  internal_port = 2567
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # WebSockets are long-lived: count connections, not requests. An open connection keeps the machine up.
+  # 20 rooms x 8 players = 160 sockets (server-side bots connect locally, not through the proxy).
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

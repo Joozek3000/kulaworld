@@ -60,6 +60,11 @@ export class Traps2View {
     }
     for (const l of level.lasers) this.laser(l.group, l.from, l.dir, l.length);
     for (const key of [...level.invisible, ...level.vanish.keys()]) this.block(key, level.vanish.get(key));
+    this.group.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial && !object.material.transparent) {
+        object.castShadow = object.receiveShadow = true;
+      }
+    });
   }
 
   private mat<T extends { dispose(): void }>(m: T): T { this.owned.push(m); return m; }
@@ -178,6 +183,8 @@ export class Traps2View {
         }
         b.mat.opacity = alpha;
         b.mat.transparent = alpha < 1;
+        b.mesh.castShadow = alpha >= 1;
+        b.mesh.receiveShadow = true;
         b.edgeMat.opacity = alpha;
       } else {
         const d = !local ? Infinity : Math.max(Math.abs(b.mesh.position.x - local.x), Math.abs(b.mesh.position.y - local.y), Math.abs(b.mesh.position.z - local.z));

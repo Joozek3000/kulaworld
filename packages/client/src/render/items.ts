@@ -75,8 +75,10 @@ export class ItemsView {
           return material;
         };
         m.traverse((object) => {
-          if (object instanceof THREE.Mesh) object.material = Array.isArray(object.material)
-            ? object.material.map(clone) : clone(object.material);
+          if (object instanceof THREE.Mesh) {
+            object.castShadow = false;
+            object.material = Array.isArray(object.material) ? object.material.map(clone) : clone(object.material);
+          }
         });
         this.popping.push({ mesh: m, materials, start: timeSec });
       } else this.scene.remove(m);
@@ -101,6 +103,7 @@ export class ItemsView {
     else if (!exit && art.models['key-marigold']) m = art.models['key-marigold'].clone(true);
     else m = new THREE.Mesh(exit ? exitGeo : keyGeo, exit ? this.exitMat : keyMat);
     m.userData.kind = item.kind;
+    m.traverse((object) => { if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = true; });
     m.position.set(item.x, item.y, item.z);
     if (exit) {
       const ceramic = m instanceof THREE.Group;

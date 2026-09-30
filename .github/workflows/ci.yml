@@ -19,3 +19,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run level:check
+
+  # Phase 19: the deploy image builds and answers /health. Nothing is pushed or deployed from CI.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t flipside .
+      - run: docker image ls flipside --format 'image size {{.Size}}'
+      - run: |
+          docker run -d --name flipside -p 2567:2567 flipside
+          for i in $(seq 1 30); do curl -fs localhost:2567/health && exit 0; sleep 1; done
+          docker logs flipside; exit 1

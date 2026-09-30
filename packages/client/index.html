@@ -130,6 +130,15 @@
     .rematch { display: flex; gap: 0.6em; justify-content: center; align-items: center; margin-top: 0.6em; }
     .rematch .card { width: auto; padding: 0.5em 1.2em; font-weight: 700; }
     .offscreen-arrow.crowned::after { content: '👑'; position: absolute; left: -34px; top: -12px; font-size: 16px; }
+    /* Phase 19: online rooms. */
+    .roombar { display: flex; flex-wrap: wrap; gap: 0.5em; align-items: center; justify-content: center; margin-bottom: 0.6em; }
+    .roombar .code { font-size: 2em; letter-spacing: 0.15em; color: #ffd166; font-variant-numeric: tabular-nums; }
+    .roombar .bots { display: inline-flex; gap: 0.3em; align-items: center; }
+    .mini { pointer-events: auto; cursor: pointer; font: inherit; font-size: 0.9em; color: inherit; background: #ffffff18; border: 1px solid #ffffff40; border-radius: 8px; padding: 0.2em 0.7em; }
+    .mini:hover:not([disabled]) { border-color: #fffa; } .mini.on { border-color: var(--ok); background: #3ddc6f33; } .mini[disabled] { opacity: 0.4; cursor: default; }
+    .fill { margin-bottom: 0.6em; color: #ffd166; }
+    .host { color: #ffd166; font-size: 0.85em; }
+    #reconnecting { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0e1acc; font-size: 2em; font-weight: 700; z-index: 20; }
     #debug { position: fixed; bottom: 12px; right: 12px; margin: 0; color: #cfe; font: 12px ui-monospace, monospace; background: #000b; padding: 8px; border-radius: 6px; }
   </style>
 </head>

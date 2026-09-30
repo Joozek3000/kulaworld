@@ -37,6 +37,9 @@ export const PlayerS = schema({
   /** Matches (phase 18): the match-length vote (0..2 → 3/5/7 rounds, -1 none) and the rematch vote at matchEnd. */
   lengthVote: t.int8().default(-1),
   rematch: t.boolean().default(false),
+  /** Online (phase 19): a server-side bot; a dropped player whose seat is held for a reconnect. */
+  bot: t.boolean().default(false),
+  away: t.boolean().default(false),
 }, 'PlayerS');
 
 /**
@@ -93,6 +96,10 @@ export const GameState = schema({
   crownId: t.string().default(''),
   standings: t.map(StandingS),
   lengthVotes: t.array('uint8'),
+  /** Online (phase 19, §24): the private room's code ('' = public), the host, and the bot difficulty (0..2). */
+  code: t.string().default(''),
+  hostId: t.string().default(''),
+  botLevel: t.uint8().default(1),
   players: t.map(PlayerS),
   items: t.map(ItemS),
   /** Pickups on the map (phase 15a), by id; `kind` is the pill type. */

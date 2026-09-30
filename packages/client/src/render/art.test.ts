@@ -6,7 +6,7 @@ import { ALL_DIRS, crumbleBands, dirVec, loadLevel, spikesUp, type LevelJson } f
 import { art, BALL_MODELS, BLOCK_MODELS, environmentFor, loadArt, MODEL_NAMES } from './art.ts';
 import { findLevel, LevelView } from './level.ts';
 import { ItemsView } from './items.ts';
-import { PlayersView } from './players.ts';
+import { PlayersView, crownScale } from './players.ts';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { TrapsView } from './traps.ts';
 import { staticLevel } from './traps2.ts';
@@ -259,5 +259,21 @@ test('line of sight (18c): an occluded ball\'s label and crown hide; a visible o
   view.updateSight(camera, 1200, floor);
   expect(label()).toBe('1');
   expect(crown().visible).toBe(true);
+  // Phase 19: the crown grows with the camera's distance (≈6.5 cells here), and is 1.2× close up.
+  expect(crown().scale.x).toBeCloseTo(crownScale(crown().position.distanceTo(camera)));
+  expect(crown().scale.x).toBeGreaterThan(1.2);
+  expect(crown().scale.x).toBeLessThan(2.3);
+  camera.copy(crown().position).add(new THREE.Vector3(0, 1, 2));
+  view.updateSight(camera, 1400, floor);
+  expect(crown().scale.x).toBeCloseTo(1.2);
   vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
+});
+
+test('crown scale (phase 19): 1.2× within 3 cells, 2.3× from 8, smooth between', () => {
+  expect(crownScale(0)).toBe(1.2);
+  expect(crownScale(3)).toBe(1.2);
+  expect(crownScale(5.5)).toBeCloseTo(1.75);
+  expect(crownScale(8)).toBeCloseTo(2.3);
+  expect(crownScale(20)).toBeCloseTo(2.3);
+  for (let d = 0; d < 10; d += 0.25) expect(crownScale(d + 0.25)).toBeGreaterThanOrEqual(crownScale(d));
 });

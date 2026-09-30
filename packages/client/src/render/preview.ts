@@ -28,6 +28,7 @@ export function levelPreview(level: Level): string {
   scene.add(blocks.group, traps.group, traps2.group);
   for (const [p, mat] of [...level.keys.map((k) => [k, keyMat] as const), ...(level.exit ? [[level.exit, exitMat] as const] : [])]) {
     const m = new THREE.Mesh(keyGeo, mat);
+    m.castShadow = m.receiveShadow = true;
     m.position.set(p.cell.x, p.cell.y, p.cell.z);
     scene.add(m);
   }
@@ -37,12 +38,15 @@ export function levelPreview(level: Level): string {
   camera.position.copy(center).add(new THREE.Vector3(1, 0.85, 1.25).normalize().multiplyScalar(radius * 2.5));
   camera.lookAt(center);
   scene.add(camera);
-  createEnvironment(scene, camera, renderer)(level.id);
+  const environment = createEnvironment(scene, camera, renderer);
+  environment.set(level.id);
+  environment.fit(center, radius);
   renderer.render(scene, camera);
   const url = renderer.domElement.toDataURL('image/jpeg', 0.85);
   blocks.dispose();
   traps.dispose();
   traps2.dispose();
+  environment.dispose();
   cache.set(level.id, url);
   return url;
 }

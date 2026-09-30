@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { Action, campaignLevels, isTimingName, matchPlaces, MATCH_LENGTHS, newCampaign, TICK_RATE, type Campaign, type TimingName, type InputMsg, type Level, type SimEvent } from '@kula/shared';
+import { Action, campaignLevels, isTimingName, matchPlaces, MATCH_LENGTHS, newCampaign, normalizeCode, TICK_RATE, type Campaign, type TimingName, type InputMsg, type Level, type SimEvent } from '@kula/shared';
 import { setupInput } from './input.ts';
 import { ACTION_LABELS, ACTIONS, keyLabel, loadBindings, PAD_GLYPHS, rebind, resetBindings, saveBindings, type BindAction } from './bindings.ts';
-import { connect, playerName, serverUrl, type GameSource, type Net, type StandingS } from './net.ts';
+import { connect, inviteCode, joinErrorText, playerName, VERSION_MESSAGE, type GameSource, type JoinHow, type Net, type StandingS } from './net.ts';
 import { campaignFrom, loadSave, resetSave, SinglePlayer, type Outcome } from './campaign.ts';
 import { SingleTilesView } from './render/single.ts';
 import { Podium, PODIUM_AT, type PodiumEntry } from './render/podium.ts';
@@ -47,6 +47,10 @@ let predict: LocalPrediction | null = null;
 const hud = createHud({
   onVote: (i) => net?.sendVote(i), preview: levelPreview, findLevel,
   onLength: (i) => net?.sendLength?.(i), onRematch: (yes) => net?.sendRematch?.(yes), // matches (phase 18)
+  // Online rooms (phase 19): the host's bot controls, the invite link, leaving.
+  onBot: (what) => online?.room.send(what), onBotLevel: (level) => online?.room.send('botLevel', level),
+  onCopy: (link) => navigator.clipboard.writeText(link).then(() => hud.toast('Invite link copied', '#fff'), () => hud.toast(link, '#fff')),
+  onLeave: () => void online?.room.leave(),
 });
 await loadArt();
 const view = createScene();
@@ -103,13 +107,23 @@ function heavyNear(at: THREE.Vector3): boolean {
 }
 const PILL_NAMES: Record<string, string> = { bouncy: 'Bouncy', lethargy: 'Lethargy', heavy: 'Heavy', sunglasses: 'Sunglasses' };
 
-/** Multiplayer (from the menu): join the lobby as `name`. Prediction and the latency audit are network-only. */
-async function joinOnline(name: string): Promise<void> {
-  const n = await connect(name);
+/** Multiplayer (from the menu): join a room as `name`. Prediction and the latency audit are network-only. */
+async function joinOnline(name: string, how: JoinHow): Promise<void> {
+  const n = await connect(name, how);
   online = n;
   net = n;
   n.onEvent(onEvent);
-  n.room.onLeave(() => hud.error('disconnected'));
+  n.onNotice((text) => hud.toast(text, '#ffd166'));
+  // Reconnection (phase 19): an overlay while the SDK retries; prediction starts over once the seat is back.
+  n.room.onDrop(() => { reconnecting.hidden = false; });
+  n.room.onReconnect(() => { reconnecting.hidden = true; predict?.reset(); });
+  n.room.onLeave((code) => {
+    reconnecting.hidden = true;
+    if (online !== n) return;
+    leaveOnline();
+    // 4000: we left (the Leave button); 4001: the server shut down (a deploy).
+    showMulti(code === 4000 ? undefined : code === 4001 ? 'The server restarted. Join again.' : 'Disconnected from the server');
+  });
   const pr = (predict = new LocalPrediction(n, findLevel));
   n.stamp = (i) => {
     const msg: InputMsg = pr.enabled ? pr.stamp(i) : i;
@@ -123,6 +137,38 @@ async function joinOnline(name: string): Promise<void> {
     const p = n.state.players.get(n.sessionId);
     const sig = p ? `${p.action}:${p.startTick}` : '';
     if (sig !== lastServerStart) { lastServerStart = sig; if (p && p.action !== Action.Idle && !pr.predicting) latency.predStart(performance.now()); }
+  });
+}
+
+const reconnecting = document.createElement('div');
+reconnecting.id = 'reconnecting';
+reconnecting.textContent = 'Reconnecting…';
+reconnecting.hidden = true;
+document.body.appendChild(reconnecting);
+
+/** Back to the menu from a room (it's already left or leaving). */
+function leaveOnline(): void {
+  online = null;
+  net = null;
+  predict = null;
+  hud.clear();
+}
+
+/** The player's name (phase 19): ?name=, else the last one used, else a random one. */
+let myName = playerName;
+try { if (!new URLSearchParams(location.search).has('name')) myName = localStorage.getItem('kula.name') || playerName; } catch { /* storage unavailable */ }
+function showMulti(error?: string, code?: string): void {
+  menu.show({ kind: 'multi', name: myName, error, code });
+}
+function join(how: JoinHow): void {
+  myName = menu.name || myName;
+  try { localStorage.setItem('kula.name', myName); } catch { /* storage unavailable */ }
+  const code = 'code' in how && how.code === inviteCode.toUpperCase() ? how.code : undefined;
+  menu.show({ kind: 'multi', name: myName, code, busy: true });
+  joinOnline(myName, how).then(() => menu.hide(), (e) => {
+    const text = joinErrorText(e);
+    if (text === VERSION_MESSAGE) menu.show({ kind: 'update' });
+    else showMulti(text, code);
   });
 }
 
@@ -280,12 +326,15 @@ const menu = createMenu((act, arg) => {
     case 'continue': return startSingle(save.campaign!);
     case 'new': return startSingle(newCampaign());
     case 'play': return startSingle(campaignFrom(Number(arg), save.campaign?.fruits ?? 0));
-    case 'multi': return menu.show({ kind: 'multi', name: playerName });
-    case 'join': {
-      const name = menu.name || playerName;
-      joinOnline(name).then(() => menu.hide(), () => menu.show({ kind: 'multi', name, error: `Can't reach the server (${serverUrl})` }));
-      return;
+    case 'multi': return showMulti();
+    case 'quick': return join({ quick: true });
+    case 'create': return join({ create: true });
+    case 'joinCode': {
+      const code = normalizeCode(arg ?? menu.code);
+      myName = menu.name || myName;
+      return code ? join({ code }) : showMulti('A room code is 4 letters, like KQRT');
     }
+    case 'refresh': location.reload(); return;
     case 'settings': return showSettings();
     case 'volume': audio.setVolume(Number(arg)); return;
     case 'music': audio.setMusicVolume(Number(arg)); return;
@@ -373,7 +422,9 @@ function quitToMenu(): void {
   menu.show({ kind: 'main' });
 }
 hud.clear();
-menu.show({ kind: 'main' });
+// An invite link (?room=CODE) goes straight to the name field, ready to join that room.
+if (normalizeCode(inviteCode)) showMulti(undefined, normalizeCode(inviteCode));
+else menu.show({ kind: 'main' });
 
 if (import.meta.env.DEV) Object.assign(window, { kula: { get net() { return net; }, get sp() { return sp; }, set backdrop(id: string) { menuLevelId = id; }, players, audio, input, music, rig, bindings, camera: view.camera, get predict() { return predict; }, debug, latency } }); // console/automation access
 

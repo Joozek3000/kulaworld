@@ -14,7 +14,8 @@ export type Screen =
   | { kind: 'main' }
   | { kind: 'single'; canContinue: string | null; highest: number; names: string[] }
   | { kind: 'levels'; highest: number; names: string[]; best: (number | null)[] }
-  | { kind: 'multi'; name: string; error?: string }
+  | { kind: 'multi'; name: string; error?: string; code?: string; busy?: boolean }
+  | { kind: 'update' }
   | { kind: 'settings'; volume: number; music: number; timing: string | null }
   | { kind: 'controls'; rows: { action: string; label: string; keys: string; pad: string }[]; waiting: string | null }
   | { kind: 'credits'; rows: { slot: string; track: string; artist: string; source: string; licence: string }[] }
@@ -43,7 +44,9 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
   });
   addEventListener('keydown', (e) => {
     if (root.hidden || e.code !== 'Enter' || e.repeat || e.defaultPrevented) return;
-    const b = root.querySelector<HTMLButtonElement>('button.primary:not([disabled])');
+    // Enter in the code field joins with that code, not the primary button.
+    const inCode = (e.target as HTMLElement).id === 'menu-code';
+    const b = root.querySelector<HTMLButtonElement>(inCode ? 'button[data-act="joinCode"]:not([disabled])' : 'button.primary:not([disabled])');
     if (b) { e.preventDefault(); b.click(); }
   });
   let current: Screen['kind'] | null = null;
@@ -58,9 +61,17 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
       case 'levels':
         return `<h2>Level Select</h2><div class="grid">${s.names.map((n, i) => btn(`<b>${i + 1}</b> ${esc(n)}${s.best[i] !== null ? `<small>best ${clock(s.best[i]!)}</small>` : ''}`, 'play', { arg: i + 1, disabled: i + 1 > s.highest, primary: i + 1 === s.highest })).join('')}</div>`
           + `<div class="col">${btn('Back', 'single')}</div>`;
-      case 'multi':
+      case 'multi': { // phase 19 (§24): Quick Play, a private room, or a room's code (an invite link fills it in)
+        const busy = { disabled: !!s.busy };
+        const join = s.code
+          ? `<div class="col">${btn(`Join room <b>${esc(s.code)}</b>`, 'joinCode', { arg: s.code, primary: true, ...busy })}${btn('Other rooms…', 'multi', busy)}</div>`
+          : `<div class="col">${btn('Quick Play <small>a public room</small>', 'quick', { primary: true, ...busy })}${btn('Create private room <small>invite friends with a code</small>', 'create', busy)}</div>`
+            + `<div class="field"><input id="menu-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" size="5">${btn('Join with code', 'joinCode', busy)}</div>`;
         return `<h2>Multiplayer</h2><label class="field">Name <input id="menu-name" maxlength="16" value="${esc(s.name)}"></label>`
-          + `${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}<div class="col">${btn('Join lobby', 'join', { primary: true })}${btn('Back', 'main')}</div>`;
+          + `${s.busy ? '<div class="sub">Connecting…</div>' : s.error ? `<div class="err">${esc(s.error)}</div>` : ''}${join}<div class="col">${btn('Back', 'main', busy)}</div>`;
+      }
+      case 'update': // not 'version': the panel's class would pick up #menu .version (the corner label)
+        return `<h2>Update</h2><p>A new version is out, refresh the page</p><div class="col">${btn('Refresh', 'refresh', { primary: true })}${btn('Back', 'main')}</div>`;
       case 'settings':
         return `<h2>Settings</h2><label class="field">Volume <input type="range" min="0" max="1" step="0.05" value="${s.volume}" data-act="volume"></label>`
           + `<label class="field">Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" data-act="music"></label>`
@@ -125,5 +136,6 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
       b?.click();
     },
     get name() { return root.querySelector<HTMLInputElement>('#menu-name')?.value.trim() ?? ''; },
+    get code() { return root.querySelector<HTMLInputElement>('#menu-code')?.value ?? ''; },
   };
 }
