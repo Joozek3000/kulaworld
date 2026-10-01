@@ -120,6 +120,7 @@ Server tick is 20 Hz (50 ms). Constants live in `shared/constants.ts`:
 
 - The client sends an `input` message when input changes: `{ seq, fwdHeld: boolean, turn: -1|0|1, jump: boolean }`. `turn` and `jump` are pulses.
 - The server stores `fwdHeld` plus **one buffered pulse** (the latest wins). A pulse expires after `INPUT_BUFFER_TICKS`.
+  - **19c exception:** a turn arriving while the same turn is still buffered queues behind it (`pulseNext`, one deep) instead of replacing it, so two quick same-side turns make a 180°. The queued turn moves up, fresh, when the first is spent. An opposite turn or a jump still replaces both; expiry and a forced move drop both.
 - Input also carries `jumpHeld: boolean`. The server derives the forward latch itself from the `fwdHeld` rising edge while the player is Hopping.
 - Since phase 09 an input may carry `tick`: the tick the client wants it applied at. The server queues it (§17). Without `tick` (bots) it applies on the next tick.
 - When a player is Idle on a tick (including the tick its previous action ended), it picks the next action in this priority order:
@@ -442,7 +443,7 @@ Decided with Jakub: jumping onto an enemy is an attack that **displaces**, and t
   2. Compare the recorded state at T with the server's (action, from, to, start/end ticks).
   3. On a match, drop older history. On a mismatch, reset to the server state at T and re-simulate the logged inputs to the current predicted tick.
      - Held flags come from the log.
-     - The buffered pulse and latch come from our own history, unless the server decided at T (it's Idle, or an action started at T), in which case they were spent.
+     - The buffered pulse and latch come from our own history, unless the server decided at T (it's Idle, or an action started at T), in which case they were spent. A queued second turn (19c) then moved up into the buffer: ours, unless our history decided at T too.
   4. A mismatch counts as a **misprediction**, or as a **deferral** when a held-back move toward a player was involved.
 - **Not predicted**:
   - **Moves toward other players:** a roll, flip or forward jump whose next cell, the one beyond it, or the flip's landing cell is held by another player. The local player holds still and the server decides. That covers pushes, and in phase 10 jumps over or onto players (§16).
@@ -650,13 +651,21 @@ One game server on the internet that serves both the client and the rooms, so a 
 Phones and tablets, landscape. The touch layer is a third input source next to the keyboard and the pad. It produces the same held/pulse input (§6), so prediction, the sim and the server don't change.
 
 - **When shown:** on the first touch, or when `(pointer: coarse)` matches at start. Hidden again on any keyboard or pad input. Settings → Touch controls: Auto / On / Off.
-- **Left thumb: the d-pad.** One touch zone, read as 8 directions from the thumb's position relative to where it went down (a floating centre, re-centred on each new touch):
-  - **N:** forward, held while the thumb stays there.
-  - **E / W:** one turn pulse on entering the sector. No repeat while holding; leave and re-enter for another.
-  - **NE / NW:** forward held, plus one turn pulse on entering.
-  - **S:** nothing.
-  - **Dead zone:** ~12 % of the pad radius.
-  - Sliding between sectors works without lifting the thumb, like rolling the thumb on a PS1 d-pad.
+- **Left thumb: two layouts** (Settings → Touch controls → Layout). **Buttons** is the default; **Stick** is the alternative.
+  - **Buttons (19c):** fixed ◀ ▲ ▶. ▲ is the largest, raised above the two turn buttons, with ~16 px dead gaps between them.
+    - **▲:** forward, held.
+    - **Tapping ◀ or ▶:** one turn pulse, fired on touch-down. Two quick taps on the same side make a 180° turn.
+    - **Sliding a finger that started on ▲ onto ◀ or ▶:** one turn, and forward stays held while that finger is down, exactly like holding W and tapping A. Sliding back onto ▲ doesn't turn.
+    - Thumb drift inside ▲ or the gaps never turns.
+    - **Hit test:** each button's screen rectangle plus 6 px. A finger turns on landing on ◀/▶ or on sliding onto one from another button it was on; going back to the same button through a gap doesn't turn again.
+  - **Stick (19b, fixed in 19c):** the 8-way pad, without its drift problems.
+    - **Forward cone:** ±40° around up.
+    - **Turn zones:** E/W only beyond ±65° from up, with hysteresis. The bands between keep the previous state.
+    - **No diagonal turns:** in the bands, forward stays held and nothing turns.
+    - **S:** a 180° turn, beyond ±150°. A second band (135–150°) keeps a turn or S, otherwise reads as nothing.
+    - **Centre:** fixed by default; floating is an option.
+    - **Dead zone:** 15 %.
+- **Turn around (19c):** keyboard S/↓, pad ▼ (and the left stick pulled down) and Stick S send a 180° turn, as two turn pulses. It's a rebindable action ("Turn around"). The sim queues the second pulse behind the first (§6).
 - **Right thumb:**
   - A big **Jump** button: held = continuous bounce, as Space (§5).
   - A drag on the empty right half = **free look** while the finger is down (it springs back on release, like Q + mouse).
@@ -680,3 +689,5 @@ Phones and tablets, landscape. The touch layer is a third input source next to t
 - **Mobile performance:**
   - Pixel ratio capped at 2.
   - Graphics setting: Auto / High / Low. Auto drops to Low if FPS stays under 45 for 5 s. Low means pixel ratio 1, no shadows and fewer particles.
+- **FPS & ping readout** (19c): top-left under Pause, only during countdown and play (never over the lobby, results or stats).
+- **Pickup pops** (19c): a collected key, score item or pill pops while rising along the tile's up (0.5 → 1 cell), so it bursts above the ball that took it instead of over it.

@@ -43,6 +43,7 @@ Workflow:
 | 18c | Labels in line of sight | Remote name labels (and 👑) hide when the ball is behind blocks |
 | 19 | Online hosting | Fly.io (lhr, one machine), same-origin client, Quick Play + private codes/invite links, server-side bots with difficulty, reconnection, version check |
 | 19b | Touch controls | Phones/tablets in landscape: floating 8-way d-pad, Jump, look drag, Ready/Pause buttons, rotate overlay, fullscreen/manifest, touch + graphics settings |
+| 19c | Touch fixes | Fixed Buttons layout (default), Stick drift fixes, 180° turn, silhouette contact fix, phone lobby fit |
 | 20 | Level editor (planned) | In-browser editor for blocks, items, traps; playtest button; validation live |
 | 21 | Campaign worlds 2–3 (planned) | ~20 more single-player levels built with the editor, world themes |
 | — | itch build (LAST) | `docs/prompts/itch-build.md`: web build zip, iframe-safe, feedback hooks, page kit |

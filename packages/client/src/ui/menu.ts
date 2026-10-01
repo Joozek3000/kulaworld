@@ -95,10 +95,13 @@ export function createMenu(onAction: (act: string, arg: string | undefined, el: 
           : '<p>No music yet.</p>'}<p class="sub">${GAME_NAME} v${GAME_VERSION} · made with Three.js and Colyseus</p><div class="col">${btn('Back', 'settings', { primary: true })}</div>`;
       case 'touch': { // phase 19b: replaces the rebinding screen while touch is in use
         const t = s.s, on = (b: boolean) => (b ? 'On' : 'Off');
-        return `<h2>Touch controls</h2><div class="grid">${btn(`Show: ${TOUCH_MODES[t.mode]}`, 'touchMode')}${btn(`Button size: ${t.size}`, 'touchSize')}`
+        return `<h2>Touch controls</h2><div class="grid">${btn(`Show: ${TOUCH_MODES[t.mode]}`, 'touchMode')}`
+          + `${btn(`Layout: ${t.layout === 'buttons' ? 'Buttons' : 'Stick'}`, 'touchLayout')}${t.layout === 'stick' ? btn(`Floating stick: ${on(t.floating)}`, 'touchFloating') : ''}`
+          + `${btn(`Button size: ${t.size}`, 'touchSize')}`
           + `${btn(`Left-handed: ${on(t.lefty)}`, 'touchLefty')}${btn(`Vibration: ${on(t.haptics)}`, 'touchHaptics')}${btn(`FPS &amp; ping: ${on(t.stats)}`, 'touchStats')}</div>`
           + `<label class="field">Opacity <input type="range" min="0.2" max="1" step="0.05" value="${t.opacity}" data-act="touchOpacity"></label>`
-          + `<div class="sub">Left thumb: slide to roll and turn. Right thumb: Jump (hold to bounce), drag to look.</div>`
+          + `<div class="sub">${t.layout === 'buttons' ? 'Left thumb: hold ▲ to roll, tap ◀ ▶ to turn (twice: turn around), or slide from ▲ to turn while rolling.'
+            : 'Left thumb: push up to roll, left or right to turn, down to turn around.'} Right thumb: Jump (hold to bounce), drag to look.</div>`
           + `<div class="col">${btn('Back', 'settings', { primary: true })}</div>`;
       }
       case 'reset':

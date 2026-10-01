@@ -38,6 +38,8 @@ export interface PlayerState {
   pulse: Pulse | null;
   /** Ticks the buffered pulse has waited, not counting airborne ticks (Hop/Jump/Fall). */
   pulseAge: number;
+  /** A second same-side turn queued behind a buffered turn (19c, turn around = two pulses); it moves up when `pulse` is spent. */
+  pulseNext: Pulse | null;
   /** Last mid-air turn, for rendering: facing before it and the tick it happened. Reset at every action start. */
   turnFromFwd: Dir;
   turnStartTick: number;
@@ -294,7 +296,7 @@ export function addPlayer(world: World, id: string, name: string): PlayerState {
   const p: PlayerState = {
     id, name, pose: spawn, to: clonePose(spawn), action: Action.Dead,
     startTick: world.tick, endTick: world.tick + 1, keys: 0, keyIds: [],
-    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
+    fwdHeld: false, jumpHeld: false, fwdLatch: false, pulse: null, pulseAge: 0, pulseNext: null, turnFromFwd: spawn.fwd, turnStartTick: world.tick,
     bounce: false, lastKnockedBy: null, lastKnockedTick: 0, knockouts: 0,
     lives: world.level.lives, eliminated: false, eliminatedTick: -1, eliminatedBy: null, protectedUntil: 0,
     jumpOver: false, stompBump: null, graceUntil: -1, heat: 0, fireCount: 0, forced: null, staggerOwed: false,
@@ -316,7 +318,16 @@ export function setInput(world: World, id: string, input: Input): void {
   p.fwdHeld = input.fwdHeld;
   p.jumpHeld = input.jumpHeld;
   const pulse: Pulse | null = input.jump ? 'jump' : input.turn < 0 ? 'left' : input.turn > 0 ? 'right' : null;
-  if (pulse) { p.pulse = pulse; p.pulseAge = 0; }
+  if (!pulse) return;
+  if (pulse !== 'jump' && pulse === p.pulse && !p.pulseNext) p.pulseNext = pulse; // a 180°: keep both turns
+  else { p.pulse = pulse; p.pulseAge = 0; p.pulseNext = null; } // otherwise the latest wins
+}
+
+/** The buffered pulse was used (or tried): a queued turn moves up, fresh. */
+export function spendPulse(p: PlayerState): void {
+  p.pulse = p.pulseNext;
+  p.pulseNext = null;
+  p.pulseAge = 0;
 }
 
 /** Cells a player occupies: its cell plus the target (and pass-through) cells of its running action. */

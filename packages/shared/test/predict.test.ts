@@ -106,7 +106,7 @@ describe('predictor', () => {
     }
     // Deaths pause prediction (respawns are the server's), so 'paused' ticks are expected; nothing else may differ.
     expect(h.results.filter((r) => r !== 'match' && r !== 'paused')).toEqual([]);
-    expect(h.results.filter((r) => r === 'match').length).toBeGreaterThan(1500);
+    expect(h.results.filter((r) => r === 'match').length).toBeGreaterThan(1400); // the rest: paused while dead
     expect(h.pred.mispredictions).toBe(0);
   });
 

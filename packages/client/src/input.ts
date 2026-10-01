@@ -33,7 +33,7 @@ type Captured = { code: string } | { button: number };
 const DEAD = 0.5, RELEASE = 0.3, LOOK_DEAD = 0.2;
 
 /**
- * Keyboard and gamepad per ARCHITECTURE §6/§11, through rebindable actions (phase 17), and touch (phase 19b, fed by
+ * Keyboard and gamepad per ARCHITECTURE §6/§11 (19c: plus Turn around, two turn pulses), through rebindable actions (phase 17), and touch (phase 19b, fed by
  * input/touch.ts through `feed`). Sends only on change. Turn and jump fire a pulse once per physical press; forward
  * and jump are also held states (holding jump keeps bouncing). Each device holds its own state; the ball gets their
  * union. `device` starts as `initial` (touch on a coarse-pointer screen).
@@ -56,6 +56,8 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings, i
     send(0, pulse); // the press also carries the jump pulse, so a tap shorter than a tick still bounces once
   };
   const turn = (t: -1 | 1) => { send(t, false); hooks.onPress(); };
+  /** Turn around (19c): two turn pulses (the sim queues the second behind the first). */
+  const back = () => { turn(1); turn(1); };
   /** An action pressed (`down`) or released on a device. */
   const act = (a: BindAction, down: boolean, src: 'key' | 'pad' | 'touch') => {
     switch (a) {
@@ -63,6 +65,7 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings, i
       case 'jump': held[src].jump = down; sync(); break;
       case 'left': if (down) turn(-1); break;
       case 'right': if (down) turn(1); break;
+      case 'back': if (down) back(); break;
       case 'look': hooks.onLook?.(down); break;
       case 'ready': if (down) net.sendReady(); break;
       case 'pause': if (down) hooks.onPause(); break;
@@ -134,7 +137,7 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings, i
     get fwdHeld() { return fwdHeld; },
     get device() { return device; },
     /** Touch (phase 19b): an action from the touch layer, held or pressed like a key. */
-    feed(a: 'fwd' | 'jump' | 'left' | 'right', down: boolean): void { use('touch'); act(a, down, 'touch'); },
+    feed(a: 'fwd' | 'jump' | 'left' | 'right' | 'back', down: boolean): void { use('touch'); act(a, down, 'touch'); },
     /** Rebinding (phase 17): the next key or pad button goes to `cb` instead of the game ({ code: '' }: cancelled with Esc). */
     captureNext(cb: (c: Captured) => void) { capture = cb; },
     /** Once per frame: reads the pad, if any. */
@@ -167,6 +170,7 @@ export function setupInput(net: Sender, hooks: InputHooks, bindings: Bindings, i
         if (j !== held.pad.jump) act('jump', j, 'pad');
         if (pressed('left') || (sx < 0 && stickX >= 0)) act('left', true, 'pad');
         if (pressed('right') || (sx > 0 && stickX <= 0)) act('right', true, 'pad');
+        if (pressed('back') || (sy > 0 && stickY <= 0)) act('back', true, 'pad');
         for (const a of ['ready', 'pause', 'mute'] as const) if (pressed(a)) act(a, true, 'pad');
         if (pressed('look')) act('look', true, 'pad');
         if (released('look')) act('look', false, 'pad');

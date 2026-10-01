@@ -13,7 +13,7 @@ import { landSingle, stepTimer } from './single.ts';
 import { beamAt, beamHit, blockTileAt, faceTileAt, forcedAfter, fwdAllowed, onIce, pathCells, spiked } from './tiles.ts';
 import {
   Action, airHop, hasEffect, isFree, isPushable, occupiedCells, pushableState, isSolid, outOfBounds, reservations, reserve, tileKey, transmits, trySpawn,
-  type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
+  spendPulse, type Cmd, type DeathCause, type PlayerState, type Reservations, type SimEvent, type World,
 } from './world.ts';
 
 /** Advances the world by one tick (ARCHITECTURE §7). Returns the events of this tick. */
@@ -31,7 +31,7 @@ export function step(world: World): SimEvent[] {
       p.turnFromFwd = p.to.fwd;
       p.turnStartTick = tick;
       p.to = { ...p.to, fwd: turnFwd(p.to.up, p.to.fwd, p.pulse === 'left' ? -1 : 1) };
-      p.pulse = null;
+      spendPulse(p); // a queued second turn applies next tick
     }
   }
 
@@ -155,11 +155,11 @@ function commands(world: World, p: PlayerState): Cmd[] {
   if (p.forced) {
     const cmd = p.forced;
     p.forced = null;
-    p.pulse = null;
+    p.pulse = p.pulseNext = null;
     p.fwdLatch = false;
     return [cmd];
   }
-  if (p.pulse && p.pulseAge > INPUT_BUFFER_TICKS) p.pulse = null;
+  if (p.pulse && p.pulseAge > INPUT_BUFFER_TICKS) p.pulse = p.pulseNext = null;
   const cmds: Cmd[] = [];
   const ice = (p.pulse === 'jump' || p.jumpHeld) && onIce(world, p.pose);
   if (p.pulse === 'jump' || p.fwdLatch) cmds.push(...jumpCmds(p.fwdHeld || p.fwdLatch || ice));
@@ -203,7 +203,7 @@ function resolveMoves(world: World, intents: Intent[], arrived: Set<PlayerState>
 
   for (const [p, v] of victimOf) {
     if (victimOf.get(v) !== p || done.has(p)) continue;
-    for (const q of [p, v]) { done.add(q); spendPulse(intents, q); }
+    for (const q of [p, v]) { done.add(q); spendTried(intents, q); }
     if (arrived.has(p) || arrived.has(v)) headOn(world, p, v, res, events);
     else {
       // Heavy (§21): an attacker bounces off a heavy ball; the heavy one just stands (two heavy balls both bounce).
@@ -215,7 +215,7 @@ function resolveMoves(world: World, intents: Intent[], arrived: Set<PlayerState>
   for (const [p, v] of victimOf) {
     if (done.has(p)) continue;
     done.add(p);
-    spendPulse(intents, p);
+    spendTried(intents, p);
     const knocked = edge.has(p) ? edgePush(world, p, v, res, events) : push(world, p, v, res, events);
     if (knocked) done.add(knocked);
   }
@@ -247,8 +247,9 @@ function choose(world: World, p: PlayerState, cmds: Cmd[], res: Reservations): P
 
 /** Starts the first command that isn't blocked. A pulse is spent when tried, even if blocked. */
 function tryCmds(world: World, p: PlayerState, cmds: Cmd[], res: Reservations, events: SimEvent[]): void {
+  let spent = false;
   for (const cmd of cmds) {
-    if (cmd !== 'fwd' && cmd !== 'boost' && cmd !== 'teleport') p.pulse = null;
+    if (cmd !== 'fwd' && cmd !== 'boost' && cmd !== 'teleport' && !spent) { spent = true; spendPulse(p); }
     if (cmd === 'fwd' && world.rules.push && movingHit(world, p, res, events)) return;
     const plan = previewAction(world, p, cmd, res);
     if (!plan) continue;
@@ -369,8 +370,8 @@ function recoil(world: World, q: PlayerState, d: Dir, byId: string, res: Reserva
 }
 
 /** A pusher tried every command before its roll, so any buffered pulse was spent. */
-function spendPulse(intents: Intent[], p: PlayerState): void {
-  if (intents.find((it) => it.p === p)!.cmds.some((c) => c !== 'fwd')) p.pulse = null;
+function spendTried(intents: Intent[], p: PlayerState): void {
+  if (intents.find((it) => it.p === p)!.cmds.some((c) => c !== 'fwd')) spendPulse(p);
 }
 
 function stun(p: PlayerState, tick: number, bounce: boolean): void {

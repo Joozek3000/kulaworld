@@ -108,7 +108,7 @@ export class LocalPrediction {
       // Only the last second counts: older ones were sent in the lobby or countdown, where the server drops input.
       const recent = this.unstamped.filter((u) => performance.now() - u.at < 1000).map((u) => u.input);
       const applied = recent.filter((i) => i.seq <= me.ackSeq).pop();
-      this.pred.reset(s.tick, toServerPlayer(me), applied && { fwdHeld: applied.fwdHeld, jumpHeld: applied.jumpHeld, fwdLatch: false, pulse: null, pulseAge: 0 });
+      this.pred.reset(s.tick, toServerPlayer(me), applied && { fwdHeld: applied.fwdHeld, jumpHeld: applied.jumpHeld, fwdLatch: false, pulse: null, pulseAge: 0, pulseNext: null });
       for (const i of recent) if (i.seq > me.ackSeq) this.pred.unackedInput(i);
       this.unstamped = [];
       this.lead = Math.ceil(this.net.ping / TICK_MS) + this.margin; // a new round starts at the right lead

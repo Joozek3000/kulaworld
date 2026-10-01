@@ -400,6 +400,8 @@ const menu = createMenu((act, arg) => {
     case 'touchMode':
       setTouch({ mode: touchSettings.mode === 'auto' ? 'on' : touchSettings.mode === 'on' ? 'off' : 'auto' });
       return menu.screen === 'controls' ? showControls(null) : menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchLayout': setTouch({ layout: touchSettings.layout === 'buttons' ? 'stick' : 'buttons' }); return menu.show({ kind: 'touch', s: touchSettings });
+    case 'touchFloating': setTouch({ floating: !touchSettings.floating }); return menu.show({ kind: 'touch', s: touchSettings });
     case 'touchSize': setTouch({ size: touchSettings.size === 'S' ? 'M' : touchSettings.size === 'M' ? 'L' : 'S' }); return menu.show({ kind: 'touch', s: touchSettings });
     case 'touchLefty': setTouch({ lefty: !touchSettings.lefty }); return menu.show({ kind: 'touch', s: touchSettings });
     case 'touchHaptics': setTouch({ haptics: !touchSettings.haptics }); haptic(30); return menu.show({ kind: 'touch', s: touchSettings });
@@ -644,7 +646,7 @@ function updateTouch(): void {
   const now = performance.now();
   if (touchSettings.stats && now - statsAt > 500) {
     statsAt = now;
-    touch.stats(`${Math.round(fpsGuard.fps)} fps${online ? ` · ${online.ping} ms` : ''}${lowGraphics ? ' · low' : ''}`);
+    touch.stats(`${Math.round(fpsGuard.fps)} fps${online ? `\n${online.ping} ms` : ''}${lowGraphics ? '\nlow' : ''}`);
   }
 }
 const spHud: SingleHud = { score: 0, fruits: 0, label: '' };

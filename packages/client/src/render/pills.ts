@@ -3,6 +3,7 @@ import * as THREE from 'three';
 /** X-ray silhouette colours (phase 17). */
 import { dirVec, type Dir } from '@kula/shared';
 import type { GameState, ItemS } from '../net.ts';
+import { POP_RISE } from './items.ts';
 
 /**
  * Pills (phase 15a): floating, slowly spinning ceramic capsules, one look and motion per type, and a pop when taken.
@@ -61,7 +62,7 @@ function glasses(): THREE.Group {
 
 export class PillsView {
   private meshes = new Map<string, { root: THREE.Group; spin: THREE.Group; type: string }>();
-  private popping: { root: THREE.Group; materials: THREE.Material[]; start: number }[] = [];
+  private popping: { root: THREE.Group; materials: THREE.Material[]; start: number; lift: number }[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -88,12 +89,14 @@ export class PillsView {
         materials.push(mat);
         o.material = mat;
       });
-      this.popping.push({ root: m.root, materials, start: timeSec });
+      this.popping.push({ root: m.root, materials, start: timeSec, lift: 0 });
     }
-    this.popping = this.popping.filter(({ root, materials, start }) => {
-      const t = (timeSec - start) / POP_SEC;
+    this.popping = this.popping.filter((p) => {
+      const { root, materials, start } = p, t = (timeSec - start) / POP_SEC;
       if (t >= 1) { this.scene.remove(root); materials.forEach((x) => x.dispose()); return false; }
       root.scale.setScalar(1 + t * 2);
+      root.translateY(POP_RISE * (1 + t) - p.lift); // above the ball that took it (19c)
+      p.lift = POP_RISE * (1 + t);
       materials.forEach((x) => { (x as THREE.MeshStandardMaterial).opacity = 1 - t; });
       return true;
     });

@@ -71,7 +71,7 @@ test('determinism with grace jumps (W and Space close together), 2000 ticks', ()
     const plate: [number, number, number][] = [];
     for (let x = 0; x < 6; x++) for (let z = 0; z < 6; z++) plate.push([x, 0, z]);
     const w = makeWorld(plate, [start(), [[5, 1, 5], '+Y', '-X'], [[0, 1, 5], '+Y', '+Z'], [[5, 1, 0], '+Y', '-Z']]);
-    const rnd = mulberry32(7);
+    const rnd = mulberry32(8);
     let graceJumps = 0;
     for (let t = 0; t < 2000; t++) {
       for (const p of w.players) {

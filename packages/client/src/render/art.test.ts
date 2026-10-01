@@ -195,6 +195,13 @@ test('ceramic gates align on all six faces; key pops keep other keys opaque', ()
     expect(gate.children.map((o) => o.visible)).toEqual([false, true]);
     items.update(state, true, true, 1.2);
     pop.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBeLessThan(1); });
+    // 19c: the pop rises clear of the ball that took it (its top is BALL_RADIUS - 0.1 above the cell centre), not over it.
+    for (const t of [1.25, 1.3]) {
+      items.update(state, true, true, t);
+      const box = new THREE.Box3().setFromObject(pop), n = dirVec(direction);
+      const low = Math.min(...[box.min, box.max].map((c) => c.x * n.x + c.y * n.y + c.z * n.z));
+      expect(low, `${direction} at ${t}`).toBeGreaterThan(BALL_RADIUS - 0.1);
+    }
     remaining.traverse((o) => { if (o instanceof THREE.Mesh) expect(o.material.opacity).toBe(1); });
     items.update(state, true, true, 1.4);
     expect(scene.children).not.toContain(pop);
@@ -328,7 +335,7 @@ function silhouetteAt(scene: THREE.Scene, from: THREE.Vector3, to: THREE.Vector3
   let depth = Infinity, stencil = 0;
   for (const [m, d] of order) {
     const M = mat(m);
-    if (m === xray) return d > depth && (!M.stencilWrite || M.stencilFunc !== THREE.EqualStencilFunc || stencil === M.stencilRef);
+    if (m === xray) return d - (M.userData.depthBias ?? 0) > depth && (!M.stencilWrite || M.stencilFunc !== THREE.EqualStencilFunc || stencil === M.stencilRef);
     if (M.stencilWrite && M.stencilFunc !== THREE.AlwaysStencilFunc) continue; // not used by anything else here
     if (d > depth) continue;
     if (M.depthWrite) depth = d;
@@ -361,5 +368,32 @@ test('own-ball silhouette (19b): only through level blocks, never over an enemy 
   const crown = scene.children.find((o) => o instanceof THREE.Group && o.children.length === 11)!;
   const c = new THREE.Box3().setFromObject(crown).getCenter(new THREE.Vector3());
   expect(silhouetteAt(scene, c.clone().addScaledVector(c.clone().sub(me).normalize(), 3), me)).toBe(false); // through the crown
+  vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
+});
+
+test('own-ball silhouette (19c): never from the tile the ball rests on, even dipped into it, on flat ground and on ice', () => {
+  vi.stubGlobal('document', { createElement: () => ({ style: {}, setAttribute() {}, remove() {} }) });
+  for (const ice of [false, true]) {
+    const json = { id: 'xray-19c', name: 'x', version: 1, boxes: [{ min: [-6, 0, -3], max: [6, 0, 3] }], blocks: [[3, 1, 3]],
+      tiles: ice ? [{ block: [0, 0, 0], type: 'ice' }] : [], spawns: [{ cell: [0, 1, 0], up: '+Y', fwd: '+X' }] } as unknown as LevelJson;
+    const scene = new THREE.Scene(), view = new PlayersView(scene), level = loadLevel(json);
+    scene.add(new LevelView(staticLevel(level)).group);
+    const traps = new TrapsView(level);
+    scene.add(traps.group);
+    view.update(state19(P19('me', 0), P19('foe', -5, 3)), 10, 'me', 10, 0.016, 1000);
+    const me = view.positionOf('me')!.clone();
+    const bottom = me.y - BALL_RADIUS;
+    for (const dip of [0, 0.03, 0.08]) { // resting, a squash, a hard landing (mid-bounce the ball is above the tile)
+      const ball = scene.children.find((o) => { let x = false; o.traverse((c) => { if (c.userData.xray) x = true; }); return x; })!;
+      ball.position.y -= dip;
+      for (const [eye, aim] of [[new THREE.Vector3(-6, bottom + 1.3, 0), 0.01], [new THREE.Vector3(-3, bottom + 2, 2), 0.005]] as const) {
+        // aim at the ball just under the tile top: the ray crosses the tile first, then the dipped ball
+        const target = new THREE.Vector3(me.x, bottom - dip + aim, me.z);
+        expect(silhouetteAt(scene, eye, target), `ice ${ice} dip ${dip}`).toBe(false);
+      }
+      ball.position.y += dip;
+    }
+    expect(silhouetteAt(scene, new THREE.Vector3(0, -4, 0), me)).toBe(true); // from under the floor it still shows
+  }
   vi.unstubAllGlobals(); vi.stubGlobal('self', globalThis);
 });

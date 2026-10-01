@@ -3,10 +3,10 @@
  * mapping indices). The left stick always also rolls/turns and the right stick always looks. Saved in localStorage
  * (try/catch: without storage the defaults just stay).
  */
-export const ACTIONS = ['fwd', 'left', 'right', 'jump', 'look', 'ready', 'pause', 'mute'] as const;
+export const ACTIONS = ['fwd', 'left', 'right', 'back', 'jump', 'look', 'ready', 'pause', 'mute'] as const;
 export type BindAction = (typeof ACTIONS)[number];
 export const ACTION_LABELS: Record<BindAction, string> = {
-  fwd: 'Roll forward', left: 'Turn left', right: 'Turn right', jump: 'Jump', look: 'Free look (hold)', ready: 'Ready', pause: 'Pause', mute: 'Mute',
+  fwd: 'Roll forward', left: 'Turn left', right: 'Turn right', back: 'Turn around', jump: 'Jump', look: 'Free look (hold)', ready: 'Ready', pause: 'Pause', mute: 'Mute',
 };
 export interface Bindings { keys: Record<BindAction, string[]>; pad: Record<BindAction, number[]> }
 
@@ -15,8 +15,8 @@ export const PAD = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, BACK: 8, START: 9, L3
 export const PAD_GLYPHS: Record<number, string> = { 0: 'Ⓐ', 1: 'Ⓑ', 2: 'Ⓧ', 3: 'Ⓨ', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Back', 9: 'Start', 10: 'L3', 11: 'R3', 12: '▲', 13: '▼', 14: '◀', 15: '▶' };
 
 export const DEFAULT_BINDINGS: Bindings = {
-  keys: { fwd: ['KeyW', 'ArrowUp'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], jump: ['Space'], look: ['KeyQ'], ready: ['KeyR'], pause: ['Escape'], mute: ['KeyM'] },
-  pad: { fwd: [PAD.UP], left: [PAD.LEFT], right: [PAD.RIGHT], jump: [PAD.A], look: [PAD.R3], ready: [PAD.B], pause: [PAD.START], mute: [PAD.BACK] },
+  keys: { fwd: ['KeyW', 'ArrowUp'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], back: ['KeyS', 'ArrowDown'], jump: ['Space'], look: ['KeyQ'], ready: ['KeyR'], pause: ['Escape'], mute: ['KeyM'] },
+  pad: { fwd: [PAD.UP], left: [PAD.LEFT], right: [PAD.RIGHT], back: [PAD.DOWN], jump: [PAD.A], look: [PAD.R3], ready: [PAD.B], pause: [PAD.START], mute: [PAD.BACK] },
 };
 const KEY = 'kula.bindings';
 
@@ -25,15 +25,24 @@ const copy = (b: Bindings): Bindings => ({
   pad: Object.fromEntries(ACTIONS.map((a) => [a, [...b.pad[a]]])) as Bindings['pad'],
 });
 
+/**
+ * The saved bindings over the defaults. An action added since (19c: Turn around) gets its defaults, minus any key or
+ * button the player has already given to another action.
+ */
 export function loadBindings(): Bindings {
   const b = copy(DEFAULT_BINDINGS);
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Bindings>;
+    const fresh = { keys: new Set<BindAction>(ACTIONS), pad: new Set<BindAction>(ACTIONS) };
     for (const a of ACTIONS) {
       const k = saved.keys?.[a], p = saved.pad?.[a];
-      if (Array.isArray(k) && k.every((x) => typeof x === 'string')) b.keys[a] = k;
-      if (Array.isArray(p) && p.every((x) => Number.isInteger(x))) b.pad[a] = p;
+      if (Array.isArray(k) && k.every((x) => typeof x === 'string')) { b.keys[a] = k; fresh.keys.delete(a); }
+      if (Array.isArray(p) && p.every((x) => Number.isInteger(x))) { b.pad[a] = p; fresh.pad.delete(a); }
     }
+    const taken = <T>(m: Record<BindAction, T[]>, f: Set<BindAction>) => new Set(ACTIONS.filter((a) => !f.has(a)).flatMap((a) => m[a]));
+    const keys = taken(b.keys, fresh.keys), pads = taken(b.pad, fresh.pad);
+    for (const a of fresh.keys) b.keys[a] = b.keys[a].filter((c) => !keys.has(c));
+    for (const a of fresh.pad) b.pad[a] = b.pad[a].filter((c) => !pads.has(c));
   } catch { /* storage unavailable or corrupt: defaults */ }
   return b;
 }

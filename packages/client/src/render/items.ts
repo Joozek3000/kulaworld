@@ -10,6 +10,8 @@ const LOCKED = new THREE.Color(0x70748a), UNLOCKED = new THREE.Color(0x3ddc6f);
 const Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
 const up = new THREE.Vector3(), align = new THREE.Quaternion(), spin = new THREE.Quaternion();
 const POP_SEC = 0.35;
+/** 19c: a pop rises this far along the tile's up (and as far again while it lasts): above the ball that took it, not over it. */
+export const POP_RISE = 0.5;
 // Single-player items (phase 15b, §22): placeholder primitives in flat colours.
 const coinGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 20).rotateX(Math.PI / 2);
 const gemGeo = new THREE.OctahedronGeometry(0.2).scale(1, 1.4, 1);
@@ -37,7 +39,7 @@ function scoreItem(kind: string): THREE.Object3D {
 export class ItemsView {
   /** Keyed by id + cell, so a rotated level's exit (same id, new place) gets a new mesh. */
   private meshes = new Map<string, THREE.Object3D>();
-  private popping: { mesh: THREE.Object3D; materials: THREE.Material[]; start: number }[] = [];
+  private popping: { mesh: THREE.Object3D; materials: THREE.Material[]; start: number; lift: number }[] = [];
   private exitMat = new THREE.MeshStandardMaterial({ color: LOCKED, roughness: 0.4 });
   /** 0..1: keys, the exit and score items grow and bob (the level fly-over, phase 17). */
   highlight = 0;
@@ -80,13 +82,15 @@ export class ItemsView {
             object.material = Array.isArray(object.material) ? object.material.map(clone) : clone(object.material);
           }
         });
-        this.popping.push({ mesh: m, materials, start: timeSec });
+        this.popping.push({ mesh: m, materials, start: timeSec, lift: 0 });
       } else this.scene.remove(m);
     }
-    this.popping = this.popping.filter(({ mesh, materials, start }) => {
-      const t = (timeSec - start) / POP_SEC;
+    this.popping = this.popping.filter((p) => {
+      const { mesh, materials, start } = p, t = (timeSec - start) / POP_SEC;
       if (t >= 1) { this.scene.remove(mesh); materials.forEach((m) => m.dispose()); return false; }
       mesh.scale.setScalar(1 + t * 1.5);
+      mesh.translateY(POP_RISE * (1 + t) - p.lift); // keys and score items: local +Y is the tile's up
+      p.lift = POP_RISE * (1 + t);
       materials.forEach((m) => { m.opacity = 1 - t; });
       return true;
     });

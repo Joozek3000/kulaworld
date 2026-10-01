@@ -163,10 +163,19 @@
     }
     #touch { position: fixed; inset: 0; z-index: 2; pointer-events: none; touch-action: none; --k: 1; --touch-opacity: 0.6;
       --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
-      --jump: calc(clamp(72px, 24vmin, 150px) * var(--k)); --ring: calc(clamp(110px, 34vmin, 220px) * var(--k)); }
+      --jump: calc(clamp(72px, 24vmin, 150px) * var(--k)); --ring: calc(clamp(110px, 34vmin, 220px) * var(--k)); --btn: calc(clamp(72px, 19vmin, 120px) * var(--k)); }
     #touch > * { pointer-events: auto; touch-action: none; }
-    #touch .t-zone, #touch .t-pad, #touch .t-jump { display: none; }
-    #touch.play .t-zone, #touch.play .t-pad, #touch.play .t-jump { display: block; }
+    #touch .t-zone, #touch .t-pad, #touch .t-btns, #touch .t-jump { display: none; }
+    #touch.play .t-zone, #touch.play.stick .t-pad, #touch.play:not(.stick) .t-btns, #touch.play .t-jump { display: block; }
+    /* 19c Buttons: ◀ ▶ side by side, ▲ (the largest) above them; 16 px dead gaps. Touches are hit-tested by touch.ts. */
+    #touch .t-btns { position: absolute; left: calc(var(--sl) + 4vmin); bottom: calc(var(--sb) + 4vmin); width: calc(var(--btn) * 2 + 16px);
+      height: calc(var(--btn) * 2.15 + 16px); pointer-events: none; opacity: var(--touch-opacity); }
+    #touch.lefty .t-btns { left: auto; right: calc(var(--sr) + 4vmin); }
+    .t-btns b { position: absolute; display: grid; place-items: center; box-sizing: border-box; width: var(--btn); height: var(--btn); bottom: 0;
+      border-radius: 22%; border: 3px solid #fffc; background: #0b0e1a66; color: #fffb; font-size: calc(var(--btn) * 0.38); line-height: 1; }
+    .t-btns .t-bl { left: 0; } .t-btns .t-br { right: 0; }
+    .t-btns .t-bf { top: 0; bottom: auto; left: calc(50% - var(--btn) * 0.65); width: calc(var(--btn) * 1.3); height: calc(var(--btn) * 1.15); }
+    .t-btns b.on { color: #ffd166; border-color: #ffd166; background: #ffd16640; box-shadow: 0 0 14px #ffd16688; }
     #touch .t-zone { position: absolute; top: 0; bottom: 0; width: 50%; }
     #touch .t-zone[data-zone=dpad], #touch.lefty .t-zone[data-zone=look] { left: 0; }
     #touch .t-zone[data-zone=look], #touch.lefty .t-zone[data-zone=dpad] { left: 50%; }
@@ -177,7 +186,7 @@
     .t-ring { position: absolute; width: var(--ring); height: var(--ring); left: calc(var(--ring) / -2); top: calc(var(--ring) / -2); box-sizing: border-box;
       border-radius: 50%; border: 3px solid #fffc; background: radial-gradient(#0b0e1a33, #0b0e1a88); }
     .t-ring b { position: absolute; color: #fffb; font-size: calc(var(--ring) * 0.15); line-height: 1; transform: translate(-50%, -50%); }
-    .t-ring .t-n { left: 50%; top: 17%; } .t-ring .t-w { left: 17%; top: 50%; } .t-ring .t-e { left: 83%; top: 50%; }
+    .t-ring .t-n { left: 50%; top: 17%; } .t-ring .t-w { left: 17%; top: 50%; } .t-ring .t-e { left: 83%; top: 50%; } .t-ring .t-s { left: 50%; top: 83%; }
     .t-ring b.on { color: #ffd166; text-shadow: 0 0 12px #ffd166; }
     .t-thumb { position: absolute; width: calc(var(--ring) * 0.36); height: calc(var(--ring) * 0.36); left: calc(var(--ring) * -0.18); top: calc(var(--ring) * -0.18);
       border-radius: 50%; background: #fffd; box-shadow: 0 2px 8px #0008; }
@@ -190,9 +199,10 @@
     #touch .t-ready { position: absolute; left: 50%; bottom: calc(var(--sb) + 12px); transform: translateX(-50%); min-height: 56px; padding: 0 2.4em; border-radius: 28px;
       border: 2px solid #fff8; background: linear-gradient(#8f78e0, #6b4fc8); color: #fff; font: 800 1.3em system-ui, sans-serif; box-shadow: 0 4px 16px #0008; }
     #touch .t-ready.on { background: linear-gradient(#5be38a, #2fbf62); }
-    #touch .t-stats { position: absolute; top: calc(var(--st) + 2px); left: 50%; transform: translateX(-50%); pointer-events: none;
-      font: 11px ui-monospace, monospace; background: #0009; padding: 1px 6px; border-radius: 6px; }
-    body.show-stats #hud-toasts { top: calc(30px + env(safe-area-inset-top, 0px)); }
+    /* 19c: under Pause, and only in play (never over the lobby, results or stats panels). */
+    #touch .t-stats { position: absolute; top: calc(var(--st) + 60px); left: calc(var(--sl) + 6px); width: 52px; text-align: center; pointer-events: none;
+      font: 10px/1.3 ui-monospace, monospace; white-space: pre-line; background: #0009; padding: 2px 0; border-radius: 6px; }
+    #touch:not(.play) .t-stats { display: none; }
     body.touch-ui #hud-top { left: calc(64px + env(safe-area-inset-left, 0px)); }
     body.touch-ui #hud-center { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
     body.touch-ui #pad-hint { display: none; }
@@ -209,6 +219,25 @@
       .cards { margin: 0.2em 0 0.4em; }
       .card { width: 8.5em; } .card.len { width: 6em; }
       #hud-fx { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    }
+    /* 19c: a phone in landscape (844×390): the whole lobby, vote counts and players included, fits above Ready. */
+    @media (max-height: 520px) {
+      .lobby .roombar { margin-bottom: 0.2em; gap: 0.35em; }
+      .lobby .roombar .code { font-size: 1.4em; }
+      .lobby .roombar .mini { min-height: 36px; padding: 0.1em 0.7em; }
+      .lobby h2 { margin: 0.1em 0; font-size: 1em; }
+      .lobby .cards.lengths { margin: 0.1em 0 0.2em; }
+      .lobby .card.len { display: flex; gap: 0.5em; align-items: center; justify-content: center; width: auto; min-height: 36px; padding: 0.1em 0.7em; }
+      .lobby .card.len .votes { margin: 0; }
+      #hud-center .lobby h1 { margin: 0; font-size: 1.15em; }
+      .lobby .cards { margin: 0.15em 0 0.25em; }
+      .lobby .card { padding: 0.25em; }
+      .lobby .card img, .lobby .card .random { aspect-ratio: 16 / 7; }
+      .lobby .card .cname { margin-top: 0.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .lobby .card .votes { margin-top: 0; }
+      .lobby > .list { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 1.2em; }
+      .lobby > .list li { padding: 0; }
+      #hud-center .lobby .hint { margin-top: 0.2em; font-size: 0.9em; }
     }
   </style>
 </head>

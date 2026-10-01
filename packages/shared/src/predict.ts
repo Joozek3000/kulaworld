@@ -79,7 +79,7 @@ export interface ServerPlayer {
 }
 
 /** The local player's predicted state at one tick: its motion plus the input state the sim keeps. */
-type Snap = ServerPlayer & Pick<PlayerState, 'fwdHeld' | 'jumpHeld' | 'fwdLatch' | 'pulse' | 'pulseAge'>;
+type Snap = ServerPlayer & Pick<PlayerState, 'fwdHeld' | 'jumpHeld' | 'fwdLatch' | 'pulse' | 'pulseAge' | 'pulseNext'>;
 
 const clonePose = (p: Pose): Pose => ({ cell: { ...p.cell }, up: p.up, fwd: p.fwd });
 const samePose = (a: Pose, b: Pose) => a.up === b.up && a.fwd === b.fwd && cellKey(a.cell) === cellKey(b.cell);
@@ -89,7 +89,7 @@ function snap(p: PlayerState): Snap {
     action: p.action, pose: clonePose(p.pose), to: clonePose(p.action === Action.Idle ? p.pose : p.to),
     startTick: p.startTick, endTick: p.endTick, turnFromFwd: p.turnFromFwd, turnStartTick: p.turnStartTick,
     bounce: p.bounce, protectedUntil: p.protectedUntil, fireCount: p.fireCount, effects: p.effects,
-    fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge,
+    fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge, pulseNext: p.pulseNext,
   };
 }
 
@@ -163,7 +163,7 @@ export class Predictor {
   get tick(): number { return this.world.tick; }
 
   /** Resets the local player to the server's state at `tick`; the input state comes from `input` (default: none). */
-  reset(tick: number, s: ServerPlayer, input?: Pick<Snap, 'fwdHeld' | 'jumpHeld' | 'fwdLatch' | 'pulse' | 'pulseAge'>): void {
+  reset(tick: number, s: ServerPlayer, input?: Pick<Snap, 'fwdHeld' | 'jumpHeld' | 'fwdLatch' | 'pulse' | 'pulseAge' | 'pulseNext'>): void {
     const p = this.local;
     this.world.tick = tick;
     applyServer(p, s);
@@ -172,6 +172,7 @@ export class Predictor {
     p.fwdLatch = input?.fwdLatch ?? false;
     p.pulse = input?.pulse ?? null;
     p.pulseAge = input?.pulseAge ?? 0;
+    p.pulseNext = input?.pulseNext ?? null;
     this.hist.clear();
     this.hist.set(tick, snap(p));
     this.deferredTicks.clear();
@@ -240,9 +241,9 @@ export class Predictor {
     const deciding = p.action === Action.Idle || grace || (p.action !== Action.Dead && p.endTick === t);
     if (deciding && this.world.players.length > 1 && this.towardOthers(p, p.action === Action.Idle || grace ? p.pose : p.to)) {
       // Don't predict a push or a move into another player: hold still and let the server decide.
-      const keep = { fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge };
+      const keep = { fwdHeld: p.fwdHeld, jumpHeld: p.jumpHeld, fwdLatch: p.fwdLatch, pulse: p.pulse, pulseAge: p.pulseAge, pulseNext: p.pulseNext };
       p.fwdHeld = p.jumpHeld = p.fwdLatch = false;
-      p.pulse = null;
+      p.pulse = p.pulseNext = null;
       step(this.world);
       Object.assign(p, keep);
       this.deferrals++;
@@ -335,16 +336,19 @@ export class Predictor {
     const target = this.world.tick;
     // Held flags as of ts come from the log (the server may have applied inputs later than stamped). The buffered
     // pulse and latch aren't synced: if the server decided at ts (Idle, or an action starting then) they were spent,
-    // otherwise they come from our own history.
+    // otherwise they come from our own history. A queued second turn (19c) moved up when the first was spent: ours,
+    // unless our history decided at ts too (then it already did).
     const last = this.log.filter((e) => e.tick <= ts).pop();
     const deferred = [...this.deferredTicks].some((t) => t <= ts);
     const decided = server.action === Action.Idle || server.startTick === ts;
+    const mineDecided = !!mine && (mine.action === Action.Idle || mine.startTick === ts);
     this.reset(ts, server, {
       fwdHeld: last?.input.fwdHeld ?? mine?.fwdHeld ?? false,
       jumpHeld: last?.input.jumpHeld ?? mine?.jumpHeld ?? false,
       fwdLatch: decided ? false : mine?.fwdLatch ?? false,
-      pulse: decided ? null : mine?.pulse ?? null,
+      pulse: decided ? (mineDecided ? null : mine?.pulseNext ?? null) : mine?.pulse ?? null,
       pulseAge: decided ? 0 : mine?.pulseAge ?? 0,
+      pulseNext: decided ? null : mine?.pulseNext ?? null,
     });
     if (target <= ts) return 'reset'; // the server is at or ahead of our prediction: nothing to replay
     this.advanceTo(target);
