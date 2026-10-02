@@ -11,3 +11,6 @@ Thumbs.db
 
 # flyctl (downloaded locally, phase 19)
 .fly/
+
+# cloudflared (downloaded locally, remote test tunnel)
+.cloudflared/

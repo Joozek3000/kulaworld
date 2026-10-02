@@ -106,3 +106,13 @@ npm run start:prod    # the server on :2567, serving the client: open http://loc
 ```
 
 `$env:PORT=2568; npm run start:prod` picks another port. `MAX_ROOMS` (default 20) caps rooms; see `.env.example`.
+
+## Remote test via Cloudflare quick tunnel
+
+A free, throwaway HTTPS link to the production server on this machine, with no account and no deploy. Good for a quick play test with a friend. The link lasts only while both processes run, and you get a new random URL every time.
+
+1. Download `cloudflared-windows-amd64.exe` from https://github.com/cloudflare/cloudflared/releases/latest to `.cloudflared/cloudflared.exe` (git-ignored). Check it against the SHA256 in the release notes: `(Get-FileHash .cloudflared\cloudflared.exe).Hash`.
+2. Build and start the server: `npm run build`, then `npm run start:prod` (on :2567).
+3. In a second terminal: `.cloudflared\cloudflared.exe tunnel --url http://localhost:2567`. It prints `https://<random-words>.trycloudflare.com`. Share that link. The client and the WebSockets both go through it.
+
+Quick tunnels have no uptime guarantee and Cloudflare can rate-limit them, so use Fly for anything longer-lived. Anyone who has the link can play while the tunnel runs. Stop both processes (Ctrl+C) when you're done.
